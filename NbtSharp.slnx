@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="NbtSharp/NbtSharp.csproj" />
+  <Project Path="NbtSharp.Tests/NbtSharp.Tests.csproj" />
+</Solution>
