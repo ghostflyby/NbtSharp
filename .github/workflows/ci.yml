@@ -46,4 +46,17 @@ jobs:
         run: dotnet format NbtSharp.slnx --verify-no-changes --no-restore
 
       - name: Test
-        run: dotnet test NbtSharp.slnx --no-build --configuration Release
+        # MTP mode: the xunit v3 test assembly is a self-executing
+        # Microsoft.Testing.Platform app, so the VSTest-era --logger option no
+        # longer exists. --report-trx (provided by
+        # Microsoft.Testing.Extensions.TrxReport, referenced by the test
+        # project) writes the .trx into TestResults.
+        run: dotnet test NbtSharp.slnx --no-build --configuration Release --report-trx --results-directory TestResults
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: test-results-${{ matrix.os }}
+          path: TestResults
+          if-no-files-found: ignore
