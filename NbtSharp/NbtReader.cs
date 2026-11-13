@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Buffers.Binary;
+using System.IO.Pipelines;
 using System.Runtime.InteropServices;
 using System.Text;
 using Myitian.Text;
@@ -7,9 +8,15 @@ using Myitian.Text;
 namespace NbtSharp;
 
 /// <summary>
-/// Reads Java Edition NBT as a forward-only sequence of tokens over a span or a sequence of bytes.
+/// Reads Java Edition NBT as a forward-only sequence of tokens over a span or a pipe reader.
 /// </summary>
 /// <remarks>
+/// <para>
+/// A <see cref="PipeReader"/> supplies the document incrementally: the reader advances the pipe as
+/// it consumes bytes and blocks for more data only when the current buffer is exhausted. A
+/// <see cref="ReadOnlySequence{T}"/> is exposed through a pipe reader as well, while the span
+/// constructor is a contiguous in-memory fast path.
+/// </para>
 /// <para>
 /// The reader mirrors the NBT wire structure. A compound member produces a value or container-start
 /// token whose <see cref="Name"/> is the member name; list elements have no name. <c>TAG_End</c> is
@@ -31,16 +38,22 @@ public ref struct NbtReader
     private static readonly ModifiedUTF8Encoding StringEncoding = new(throwOnInvalidBytes: true);
 
     private readonly ReadOnlySpan<byte> _span;
-    private readonly bool _isSequence;
+    private readonly PipeReader? _pipe;
     private readonly NbtRootFormat _rootFormat;
     private readonly int _maxDepth;
     private readonly int _maxCollectionLength;
+    private readonly long _maxDocumentBytes;
     private SequenceReader<byte> _sequence;
+    private ReadOnlySequence<byte> _buffer;
     private List<ContainerState>? _containers;
     private long[]? _valuesReadAtDepth;
+    private long _consumedBeforeBuffer;
     private int _offset;
     private long _tokenStart;
     private long _valueStart;
+    private bool _pipeInitialized;
+    private bool _pipeCompleted;
+    private bool _ownsPipe;
     private bool _rootRead;
     private bool _rootComplete;
     private bool _valuePending;
@@ -68,13 +81,77 @@ public ref struct NbtReader
         _rootFormat = options.RootFormat;
         _maxDepth = options.MaxDepth > 0 ? options.MaxDepth : DefaultMaxDepth;
         _maxCollectionLength = options.MaxCollectionLength > 0 ? options.MaxCollectionLength : DefaultMaxCollectionLength;
+        _maxDocumentBytes = options.MaxDocumentBytes;
     }
 
-    /// <summary>Initializes a reader over a possibly segmented sequence of NBT bytes.</summary>
+    /// <summary>
+    /// Initializes a reader over a possibly segmented sequence of NBT bytes. The sequence is exposed
+    /// through a <see cref="PipeReader"/> whose lifetime this instance owns.
+    /// </summary>
     /// <param name="data">The complete NBT document.</param>
     /// <param name="options">The reader options, or the defaults.</param>
     /// <exception cref="NbtException">The document exceeds <see cref="NbtReaderOptions.MaxDocumentBytes"/>.</exception>
     public NbtReader(ReadOnlySequence<byte> data, NbtReaderOptions options = default)
+        : this(CreateSequencePipe(data, options), options)
+    {
+        _ownsPipe = true;
+    }
+
+    /// <summary>Initializes a reader that pulls NBT bytes from <paramref name="pipe"/>.</summary>
+    /// <param name="pipe">The pipe reader that supplies the document. The caller owns it.</param>
+    /// <param name="options">The reader options, or the defaults.</param>
+    /// <remarks>
+    /// Reads are incremental. The reader marks consumed data with
+    /// <see cref="PipeReader.AdvanceTo(SequencePosition, SequencePosition)"/> and blocks on
+    /// <see cref="PipeReader.ReadAsync(CancellationToken)"/> when the current buffer is exhausted.
+    /// </remarks>
+    public NbtReader(PipeReader pipe, NbtReaderOptions options = default)
+    {
+        ArgumentNullException.ThrowIfNull(pipe);
+        ValidateOptions(options);
+        this = default;
+        _pipe = pipe;
+        _rootFormat = options.RootFormat;
+        _maxDepth = options.MaxDepth > 0 ? options.MaxDepth : DefaultMaxDepth;
+        _maxCollectionLength = options.MaxCollectionLength > 0 ? options.MaxCollectionLength : DefaultMaxCollectionLength;
+        _maxDocumentBytes = options.MaxDocumentBytes;
+    }
+
+    /// <summary>
+    /// Marks consumed data as processed and completes the pipe reader created by this instance, if
+    /// any.
+    /// </summary>
+    /// <remarks>
+    /// Disposing a reader over a caller-supplied pipe advances that pipe without completing it, so
+    /// the pipe can be reused. The span constructor has no pipe to advance.
+    /// </remarks>
+    public void Dispose()
+    {
+        ReleasePipe();
+        if (!_ownsPipe)
+        {
+            return;
+        }
+
+        _ownsPipe = false;
+        _pipe?.Complete();
+    }
+
+    private void ReleasePipe()
+    {
+        if (_pipe is null || !_pipeInitialized)
+        {
+            return;
+        }
+
+        _consumedBeforeBuffer += _sequence.Consumed;
+        _pipe.AdvanceTo(_sequence.Position, _buffer.End);
+        _sequence = default;
+        _buffer = default;
+        _pipeInitialized = false;
+    }
+
+    private static PipeReader CreateSequencePipe(ReadOnlySequence<byte> data, NbtReaderOptions options)
     {
         ValidateOptions(options);
         if (options.MaxDocumentBytes > 0 && data.Length > options.MaxDocumentBytes)
@@ -82,12 +159,7 @@ public ref struct NbtReader
             throw new NbtException($"The NBT document is larger than the configured limit of {options.MaxDocumentBytes} bytes.");
         }
 
-        this = default;
-        _sequence = new SequenceReader<byte>(data);
-        _isSequence = true;
-        _rootFormat = options.RootFormat;
-        _maxDepth = options.MaxDepth > 0 ? options.MaxDepth : DefaultMaxDepth;
-        _maxCollectionLength = options.MaxCollectionLength > 0 ? options.MaxCollectionLength : DefaultMaxCollectionLength;
+        return PipeReader.Create(data);
     }
 
     /// <summary>Gets the type of the most recently produced token.</summary>
@@ -100,7 +172,8 @@ public ref struct NbtReader
     public readonly string? Name => _name;
 
     /// <summary>Gets the number of bytes consumed from the start of the document.</summary>
-    public readonly long BytesConsumed => _isSequence ? _sequence.Consumed : _offset;
+    public readonly long BytesConsumed =>
+        _pipe is null ? _offset : _consumedBeforeBuffer + _sequence.Consumed;
 
     /// <summary>Gets the number of containers currently open, including the container of the current token.</summary>
     public readonly int CurrentDepth => _containers?.Count ?? 0;
@@ -119,8 +192,6 @@ public ref struct NbtReader
         _valuesReadAtDepth is not null && depth >= 0 && depth < _valuesReadAtDepth.Length
             ? _valuesReadAtDepth[depth]
             : 0;
-
-    private readonly long Remaining => _isSequence ? _sequence.Remaining : _span.Length - _offset;
 
     private ref ContainerState Top => ref CollectionsMarshal.AsSpan(_containers!)[^1];
 
@@ -279,7 +350,6 @@ public ref struct NbtReader
         }
 
         var length = ReadArrayLength();
-        EnsureRemaining(length, "a byte array");
         return ReadBytes(length);
     }
 
@@ -292,7 +362,7 @@ public ref struct NbtReader
         }
 
         var length = ReadArrayLength();
-        EnsureRemaining((long)length * sizeof(int), "an integer array");
+        EnsureDocumentSize((long)length * sizeof(int));
         var values = new int[length];
         for (var i = 0; i < values.Length; i++)
         {
@@ -311,7 +381,7 @@ public ref struct NbtReader
         }
 
         var length = ReadArrayLength();
-        EnsureRemaining((long)length * sizeof(long), "a long array");
+        EnsureDocumentSize((long)length * sizeof(long));
         var values = new long[length];
         for (var i = 0; i < values.Length; i++)
         {
@@ -475,6 +545,11 @@ public ref struct NbtReader
 
     private void EnsureListElementsFit(NbtTagType elementType, int count, long position)
     {
+        if (_pipe is not null)
+        {
+            return;
+        }
+
         var minimumSize = elementType switch
         {
             NbtTagType.Byte => 1,
@@ -493,7 +568,7 @@ public ref struct NbtReader
         }
 
         var required = (long)count * minimumSize;
-        if (required > Remaining)
+        if (required > _span.Length - _offset)
         {
             throw new NbtException(
                 $"The NBT list declares {count} elements but the remaining data is too short.")
@@ -717,20 +792,30 @@ public ref struct NbtReader
     {
         var position = BytesConsumed;
         var length = ReadUInt16();
-        EnsureRemaining(length, "a string");
         if (length == 0)
         {
             return string.Empty;
         }
 
-        if (_isSequence && _sequence.UnreadSpan.Length < length)
+        if (_pipe is null)
         {
-            var buffer = new byte[length];
-            ReadExactly(buffer);
-            return DecodeString(buffer, position);
+            if (length > _span.Length - _offset)
+            {
+                throw new NbtException("Unexpected end of NBT data while reading a string.")
+                {
+                    BytePosition = position,
+                };
+            }
+
+            var span = _span.Slice(_offset, length);
+            var result = DecodeString(span, position);
+            _offset += length;
+            return result;
         }
 
-        if (_isSequence)
+        EnsurePipeInitialized();
+        EnsureDocumentSize(length);
+        if (_sequence.UnreadSpan.Length >= length)
         {
             var bytes = _sequence.UnreadSpan[..length];
             var value = DecodeString(bytes, position);
@@ -738,10 +823,9 @@ public ref struct NbtReader
             return value;
         }
 
-        var span = _span.Slice(_offset, length);
-        var result = DecodeString(span, position);
-        _offset += length;
-        return result;
+        var buffer = new byte[length];
+        ReadExactly(buffer);
+        return DecodeString(buffer, position);
     }
 
     private static string DecodeString(ReadOnlySpan<byte> bytes, long position)
@@ -778,6 +862,7 @@ public ref struct NbtReader
             return [];
         }
 
+        EnsureDocumentSize(count);
         var bytes = new byte[count];
         ReadExactly(bytes);
         return bytes;
@@ -790,9 +875,9 @@ public ref struct NbtReader
             return;
         }
 
-        if (_isSequence)
+        if (_pipe is null)
         {
-            if (!_sequence.TryCopyTo(destination))
+            if (destination.Length > _span.Length - _offset)
             {
                 throw new NbtException("Unexpected end of NBT data.")
                 {
@@ -800,20 +885,41 @@ public ref struct NbtReader
                 };
             }
 
-            _sequence.Advance(destination.Length);
+            _span.Slice(_offset, destination.Length).CopyTo(destination);
+            _offset += destination.Length;
             return;
         }
 
-        if (destination.Length > _span.Length - _offset)
+        EnsurePipeInitialized();
+        EnsureDocumentSize(destination.Length);
+        var offset = 0;
+        while (offset < destination.Length)
         {
-            throw new NbtException("Unexpected end of NBT data.")
+            if (_sequence.Remaining == 0)
             {
-                BytePosition = BytesConsumed,
-            };
-        }
+                if (!TryRefill())
+                {
+                    throw new NbtException("Unexpected end of NBT data.")
+                    {
+                        BytePosition = BytesConsumed,
+                    };
+                }
 
-        _span.Slice(_offset, destination.Length).CopyTo(destination);
-        _offset += destination.Length;
+                continue;
+            }
+
+            var count = (int)Math.Min(_sequence.Remaining, destination.Length - offset);
+            if (!_sequence.TryCopyTo(destination.Slice(offset, count)))
+            {
+                throw new NbtException("Unexpected end of NBT data.")
+                {
+                    BytePosition = BytesConsumed,
+                };
+            }
+
+            _sequence.Advance(count);
+            offset += count;
+        }
     }
 
     private void SkipBytes(long count)
@@ -826,59 +932,123 @@ public ref struct NbtReader
             };
         }
 
-        if (count > Remaining)
+        if (count == 0)
         {
-            throw new NbtException("Unexpected end of NBT data.")
-            {
-                BytePosition = BytesConsumed,
-            };
+            return;
         }
 
-        if (_isSequence)
+        if (_pipe is null)
         {
-            _sequence.Advance(count);
-        }
-        else
-        {
+            if (count > _span.Length - _offset)
+            {
+                throw new NbtException("Unexpected end of NBT data.")
+                {
+                    BytePosition = BytesConsumed,
+                };
+            }
+
             _offset += (int)count;
-        }
-    }
-
-    private void EnsureRemaining(long count, string what)
-    {
-        if (count < 0)
-        {
-            throw new NbtException($"Invalid NBT length {count}.")
-            {
-                BytePosition = BytesConsumed,
-            };
+            return;
         }
 
-        if (count > Remaining)
+        EnsurePipeInitialized();
+        EnsureDocumentSize(count);
+        while (count > 0)
         {
-            throw new NbtException($"Unexpected end of NBT data while reading {what}.")
+            if (_sequence.Remaining == 0)
             {
-                BytePosition = BytesConsumed,
-            };
+                if (!TryRefill())
+                {
+                    throw new NbtException("Unexpected end of NBT data.")
+                    {
+                        BytePosition = BytesConsumed,
+                    };
+                }
+
+                continue;
+            }
+
+            var take = Math.Min(count, _sequence.Remaining);
+            _sequence.Advance(take);
+            count -= take;
         }
     }
 
     private bool TryReadByte(out byte value)
     {
-        if (_isSequence)
+        if (_pipe is null)
         {
-            return _sequence.TryRead(out value);
+            if (_offset < _span.Length)
+            {
+                value = _span[_offset];
+                _offset++;
+                return true;
+            }
+
+            value = 0;
+            return false;
         }
 
-        if (_offset < _span.Length)
+        EnsurePipeInitialized();
+        while (_sequence.Remaining == 0)
         {
-            value = _span[_offset];
-            _offset++;
-            return true;
+            if (!TryRefill())
+            {
+                value = 0;
+                return false;
+            }
         }
 
-        value = 0;
-        return false;
+        EnsureDocumentSize(1);
+        return _sequence.TryRead(out value);
+    }
+
+    private void EnsurePipeInitialized()
+    {
+        if (_pipe is null || _pipeInitialized)
+        {
+            return;
+        }
+
+        _pipeInitialized = true;
+        FillFromPipe();
+    }
+
+    private void FillFromPipe()
+    {
+        if (!_pipe!.TryRead(out var result))
+        {
+            result = _pipe.ReadAsync().AsTask().GetAwaiter().GetResult();
+        }
+
+        _buffer = result.Buffer;
+        _sequence = new SequenceReader<byte>(result.Buffer);
+        _pipeCompleted = result.IsCompleted;
+    }
+
+    private bool TryRefill()
+    {
+        if (_pipeCompleted)
+        {
+            return false;
+        }
+
+        _consumedBeforeBuffer += _sequence.Consumed;
+        _pipe!.AdvanceTo(_sequence.Position, _buffer.End);
+        FillFromPipe();
+        return _sequence.Remaining > 0 || !_pipeCompleted;
+    }
+
+    private void EnsureDocumentSize(long count)
+    {
+        if (_maxDocumentBytes > 0 && count > _maxDocumentBytes - BytesConsumed)
+        {
+            throw new NbtException(
+                $"The NBT document exceeds the configured limit of {_maxDocumentBytes} bytes.")
+            {
+                BytePosition = BytesConsumed,
+            };
+        }
     }
 
     private struct ContainerState(bool isList, NbtTagType elementType, int remaining)

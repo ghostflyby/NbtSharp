@@ -237,3 +237,8 @@ NbtSharp.NbtValue.Value.get -> object?
 NbtSharp.NbtWriter
 NbtSharp.NbtWriter.WriteEndCompound() -> void
 NbtSharp.NbtWriter.WriteEndList() -> void
+NbtSharp.NbtReader.Dispose() -> void
+NbtSharp.NbtReader.NbtReader(System.IO.Pipelines.PipeReader! pipe, NbtSharp.NbtReaderOptions options = default(NbtSharp.NbtReaderOptions)) -> void
+static NbtSharp.NbtSerializer.Deserialize(System.IO.Pipelines.PipeReader! reader, NbtSharp.NbtSerializerOptions? options = null) -> NbtSharp.NbtRoot
+static NbtSharp.NbtSerializer.Deserialize<T>(System.IO.Pipelines.PipeReader! reader, NbtSharp.NbtSerializerOptions? options = null) -> T
+static NbtSharp.NbtSerializer.Deserialize<T>(System.IO.Pipelines.PipeReader! reader, out string? rootName, NbtSharp.NbtSerializerOptions? options = null) -> T

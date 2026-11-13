@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Diagnostics.CodeAnalysis;
+using System.IO.Pipelines;
 using NbtSharp.IO;
 
 namespace NbtSharp;
@@ -15,8 +16,10 @@ namespace NbtSharp;
 /// <see cref="INbtTypeInfoResolver"/> such as <see cref="NbtReflectionTypeInfoResolver"/>.
 /// </para>
 /// <para>
-/// The Stream overloads are synchronous convenience adapters. Deserialization reads the remaining
-/// stream into memory; use the span or sequence overloads when the document boundary matters.
+/// Deserialization from a <see cref="Stream"/> or a <see cref="ReadOnlySequence{T}"/> is backed by
+/// <see cref="PipeReader"/>, so the document is consumed incrementally and the stream does not need
+/// to be seekable. The span overload is a contiguous in-memory fast path. Trailing bytes after the
+/// root value are ignored; a stream-backed pipe may read some of them into its buffer.
 /// </para>
 /// <para>
 /// A generic call whose declared type is <see cref="NbtRoot"/> writes only the contained value and
@@ -148,7 +151,14 @@ public static class NbtSerializer
     {
         options ??= new NbtSerializerOptions();
         var reader = new NbtReader(data, options.CreateReaderOptions());
-        return DeserializeCore<T>(ref reader, options, out rootName);
+        try
+        {
+            return DeserializeCore<T>(ref reader, options, out rootName);
+        }
+        finally
+        {
+            reader.Dispose();
+        }
     }
 
     /// <summary>
@@ -158,7 +168,11 @@ public static class NbtSerializer
     /// <param name="stream">The stream that supplies the document.</param>
     /// <param name="options">The serializer options, or the defaults.</param>
     /// <returns>The decoded value.</returns>
-    /// <remarks>This overload reads the stream to its end and buffers the document in memory.</remarks>
+    /// <remarks>
+    /// This overload reads the stream incrementally through a <see cref="PipeReader"/>. The stream
+    /// does not need to be seekable. Bytes after the root value are ignored, but may already have
+    /// been read from the stream.
+    /// </remarks>
     public static T Deserialize<T>(Stream stream, NbtSerializerOptions? options = null) =>
         Deserialize<T>(stream, out _, options);
 
@@ -171,7 +185,11 @@ public static class NbtSerializer
     /// <param name="rootName">The root name, or <see langword="null"/> for an unnamed root.</param>
     /// <param name="options">The serializer options, or the defaults.</param>
     /// <returns>The decoded value.</returns>
-    /// <remarks>This overload reads the stream to its end and buffers the document in memory.</remarks>
+    /// <remarks>
+    /// This overload reads the stream incrementally through a <see cref="PipeReader"/>. The stream
+    /// does not need to be seekable. Bytes after the root value are ignored, but may already have
+    /// been read from the stream.
+    /// </remarks>
     public static T Deserialize<T>(
         Stream stream,
         out string? rootName,
@@ -179,14 +197,60 @@ public static class NbtSerializer
     {
         ArgumentNullException.ThrowIfNull(stream);
         options ??= new NbtSerializerOptions();
-        var (buffer, length) = ReadStream(stream, options.MaxDocumentBytes);
+        var pipe = PipeReader.Create(
+            stream,
+            new StreamPipeReaderOptions(leaveOpen: true));
         try
         {
-            return Deserialize<T>(buffer.AsSpan(0, length), out rootName, options);
+            return Deserialize<T>(pipe, out rootName, options);
         }
         finally
         {
-            ArrayPool<byte>.Shared.Return(buffer);
+            pipe.Complete();
+        }
+    }
+
+    /// <summary>Deserializes a complete NBT document from a pipe reader.</summary>
+    /// <typeparam name="T">The declared value type.</typeparam>
+    /// <param name="reader">The pipe reader that supplies the document.</param>
+    /// <param name="options">The serializer options, or the defaults.</param>
+    /// <returns>The decoded value.</returns>
+    /// <remarks>
+    /// The caller owns <paramref name="reader"/>; this method does not complete it. The reader
+    /// advances the pipe as bytes are consumed, leaving the bytes after the root available to the
+    /// next call.
+    /// </remarks>
+    public static T Deserialize<T>(PipeReader reader, NbtSerializerOptions? options = null) =>
+        Deserialize<T>(reader, out _, options);
+
+    /// <summary>
+    /// Deserializes a complete NBT document from a pipe reader and returns the root name.
+    /// </summary>
+    /// <typeparam name="T">The declared value type.</typeparam>
+    /// <param name="reader">The pipe reader that supplies the document.</param>
+    /// <param name="rootName">The root name, or <see langword="null"/> for an unnamed root.</param>
+    /// <param name="options">The serializer options, or the defaults.</param>
+    /// <returns>The decoded value.</returns>
+    /// <remarks>
+    /// The caller owns <paramref name="reader"/>; this method does not complete it. The reader
+    /// advances the pipe as bytes are consumed, leaving the bytes after the root available to the
+    /// next call.
+    /// </remarks>
+    public static T Deserialize<T>(
+        PipeReader reader,
+        out string? rootName,
+        NbtSerializerOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(reader);
+        options ??= new NbtSerializerOptions();
+        var nbtReader = new NbtReader(reader, options.CreateReaderOptions());
+        try
+        {
+            return DeserializeCore<T>(ref nbtReader, options, out rootName);
+        }
+        finally
+        {
+            nbtReader.Dispose();
         }
     }
 
@@ -317,9 +381,24 @@ public static class NbtSerializer
     /// <param name="stream">The stream that supplies the document.</param>
     /// <param name="options">The serializer options, or the defaults.</param>
     /// <returns>The parsed document.</returns>
+    /// <remarks>
+    /// The stream is consumed incrementally through a <see cref="PipeReader"/> and does not need to
+    /// be seekable.
+    /// </remarks>
     public static NbtRoot Deserialize(Stream stream, NbtSerializerOptions? options = null)
     {
         var value = Deserialize<NbtValue>(stream, out var rootName, options);
+        return new NbtRoot(rootName, value);
+    }
+
+    /// <summary>Reads a complete DOM document from a pipe reader.</summary>
+    /// <param name="reader">The pipe reader that supplies the document.</param>
+    /// <param name="options">The serializer options, or the defaults.</param>
+    /// <returns>The parsed document.</returns>
+    /// <remarks>The caller owns <paramref name="reader"/>; this method does not complete it.</remarks>
+    public static NbtRoot Deserialize(PipeReader reader, NbtSerializerOptions? options = null)
+    {
+        var value = Deserialize<NbtValue>(reader, out var rootName, options);
         return new NbtRoot(rootName, value);
     }
 
@@ -605,91 +684,6 @@ public static class NbtSerializer
         else if (!exception.Path.StartsWith('$'))
         {
             exception.Path = "$" + exception.Path;
-        }
-    }
-
-    private static (byte[] Buffer, int Length) ReadStream(Stream stream, long maxBytes)
-    {
-        var initialCapacity = 16 * 1024;
-        if (stream.CanSeek)
-        {
-            try
-            {
-                var remaining = stream.Length - stream.Position;
-                if (remaining > 0)
-                {
-                    initialCapacity = (int)Math.Min(remaining, 1024 * 1024);
-                }
-            }
-            catch (NotSupportedException)
-            {
-                // Some seekable streams do not expose Length or Position.
-            }
-        }
-
-        if (maxBytes is > 0 and < int.MaxValue)
-        {
-            initialCapacity = (int)Math.Min(initialCapacity, maxBytes + 1);
-        }
-
-        initialCapacity = Math.Max(initialCapacity, 1);
-        var buffer = ArrayPool<byte>.Shared.Rent(initialCapacity);
-        var length = 0;
-        try
-        {
-            while (true)
-            {
-                if (length == buffer.Length)
-                {
-                    var newCapacity = buffer.Length <= int.MaxValue / 2 ? buffer.Length * 2 : int.MaxValue;
-                    if (maxBytes is > 0 and < int.MaxValue && newCapacity > maxBytes + 1)
-                    {
-                        newCapacity = (int)(maxBytes + 1);
-                    }
-
-                    if (newCapacity <= buffer.Length)
-                    {
-                        throw new NbtException("The NBT document is too large to buffer in memory.");
-                    }
-
-                    var newBuffer = ArrayPool<byte>.Shared.Rent(newCapacity);
-                    buffer.AsSpan(0, length).CopyTo(newBuffer);
-                    ArrayPool<byte>.Shared.Return(buffer);
-                    buffer = newBuffer;
-                }
-
-                var toRead = buffer.Length - length;
-                if (maxBytes > 0)
-                {
-                    var remainingLimit = maxBytes - length;
-                    if (remainingLimit < toRead)
-                    {
-                        toRead = remainingLimit <= 0 ? 1 : (int)remainingLimit + 1;
-                    }
-                }
-
-                var read = stream.Read(buffer.AsSpan(length, toRead));
-                if (read == 0)
-                {
-                    return (buffer, length);
-                }
-
-                if (read < 0 || read > toRead)
-                {
-                    throw new IOException("The stream returned an invalid byte count.");
-                }
-
-                length += read;
-                if (maxBytes > 0 && length > maxBytes)
-                {
-                    throw new NbtException($"The NBT document exceeds the configured limit of {maxBytes} bytes.");
-                }
-            }
-        }
-        catch
-        {
-            ArrayPool<byte>.Shared.Return(buffer);
-            throw;
         }
     }
 }
