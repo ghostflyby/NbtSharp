@@ -7,9 +7,10 @@ namespace NbtSharp;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Every case is a standard <see cref="List{T}"/> over one of the legal NBT element types, so the
-/// generic parameter constrains the elements to be homogeneous while the union's closed case set
-/// constrains which element types are legal. Recursion is expressed as <c>List&lt;NbtList&gt;</c>.
+/// The twelve element cases are standard <see cref="List{T}"/> values over one of the legal NBT
+/// element types, so the generic parameter constrains the elements to be homogeneous while the
+/// union's closed case set constrains which element types are legal. The thirteenth case is the
+/// <see cref="NbtEndList"/> marker. Recursion is expressed as <c>List&lt;NbtList&gt;</c>.
 /// </para>
 /// <para>
 /// This is a hand-written union: a private field holds one of the case lists, and

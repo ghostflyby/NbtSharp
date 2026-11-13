@@ -7,7 +7,9 @@ namespace NbtSharp;
 /// <remarks>
 /// The marker is a singleton. A <see cref="NbtList"/> whose storage is empty returns
 /// <see cref="Instance"/> from its <see cref="NbtList.Value"/> property and matches the
-/// <see cref="NbtEndList"/> case in patterns.
+/// <see cref="NbtEndList"/> case in patterns. A <see cref="NbtValue"/> that wraps a list exposes the
+/// boxed <see cref="NbtList"/>, so match <c>NbtValue is NbtList list</c> before testing
+/// <c>list is NbtEndList</c>.
 /// </remarks>
 public sealed class NbtEndList
 {

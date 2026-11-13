@@ -75,6 +75,23 @@ public sealed class NbtValueTests
         Assert.Throws<NbtException>(() => value.TagType);
     }
 
+    [Fact]
+    public void DefaultListValueHasTheListTagType()
+    {
+        NbtValue value = default(NbtList);
+
+        Assert.Equal(NbtTagType.List, value.TagType);
+    }
+
+    [Fact]
+    public void EndMarkerIsOnlyVisibleAfterUnwrappingTheList()
+    {
+        NbtValue value = default(NbtList);
+
+        Assert.False(value.Value is NbtEndList);
+        Assert.True(value is NbtList list && list is NbtEndList);
+    }
+
     private static string Describe(NbtValue value) => value switch
     {
         int => "int",
