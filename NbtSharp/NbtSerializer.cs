@@ -11,7 +11,7 @@ namespace NbtSharp;
 /// </para>
 /// <para>
 /// A compound with no members and a list are both encoded with the type information the format
-/// requires; an empty list keeps its element type, and the <see cref="NbtEmptyList"/> case encodes as
+/// requires; an empty list keeps its element type, and a default <see cref="NbtList"/> encodes as
 /// <c>TAG_List&lt;TAG_End&gt;</c> with length zero.
 /// </para>
 /// </remarks>
@@ -113,7 +113,7 @@ public static class NbtSerializer
         {
             case NbtTagType.End:
                 reader.Read();
-                return new NbtList(new NbtEmptyList());
+                return default;
             case NbtTagType.Byte:
             {
                 var list = new List<sbyte>();

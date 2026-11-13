@@ -15,19 +15,27 @@ public union NbtValue(
     sbyte[], string, NbtList, NbtCompound, int[], long[]
 );
 
-public union NbtList(
-    List<sbyte>, List<short>, List<int>, List<long>, List<float>, List<double>,
-    List<sbyte[]>, List<string>, List<NbtList>, List<NbtCompound>,
-    List<int[]>, List<long[]>, NbtEmptyList
-);
+[Union]
+public readonly struct NbtList
+{
+    public NbtList(List<int> value) { }    // one constructor per element type
+    public NbtList(NbtEndList value) { }   // TAG_List<TAG_End> marker
+    public object Value { get; }           // never null
+    public bool HasValue { get; }          // always true
+    public NbtTagType ElementType { get; }
+    public int Count { get; }
+}
 
 public sealed class NbtCompound : Dictionary<string, NbtValue>;
 ```
 
 Scalars use the CLR type whose width matches the NBT type, so tag identity is preserved by the type
-system. List cases are standard `List<T>` values, which keeps elements homogeneous while the closed
-union case set restricts them to legal NBT element types. `NbtEmptyList` represents
-`TAG_List<TAG_End>`, which is distinct from an empty list of a known element type.
+system. `NbtList` is a hand-written union: its cases are standard `List<T>` values, which keeps
+elements homogeneous while the closed case set restricts them to legal NBT element types. A
+default-initialized `NbtList` stores no list and represents `TAG_List<TAG_End>`; its `Value` returns
+the shared `NbtEndList.Instance` marker, so `default(NbtList) is NbtEndList` is true and
+`default(NbtList) is null` is false. An empty list of a known element type still encodes as that type
+with length zero, so the two empty-list encodings stay distinct.
 
 ## Usage
 
