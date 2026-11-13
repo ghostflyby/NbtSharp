@@ -15,13 +15,6 @@ public sealed class NbtSerializerOptions
     private readonly NbtConverterCollection _converters;
     private readonly Dictionary<Type, NbtConverter> _cache = [];
     private readonly Lock _cacheLock = new();
-    private INbtTypeInfoResolver? _typeInfoResolver;
-    private NbtRootFormat _rootFormat = NbtRootFormat.Named;
-    private NbtNullValueHandling _nullValueHandling = NbtNullValueHandling.Omit;
-    private bool _rejectDuplicateCompoundNames;
-    private int _maxDepth = 512;
-    private int _maxCollectionLength = 16 * 1024 * 1024;
-    private long _maxDocumentBytes;
 
     /// <summary>Initializes the options with the default limits.</summary>
     public NbtSerializerOptions()
@@ -35,10 +28,10 @@ public sealed class NbtSerializerOptions
     /// <summary>Gets or sets the resolver that supplies type information for CLR types.</summary>
     public INbtTypeInfoResolver? TypeInfoResolver
     {
-        get => _typeInfoResolver;
+        get;
         set
         {
-            _typeInfoResolver = value;
+            field = value;
             Invalidate();
         }
     }
@@ -46,7 +39,7 @@ public sealed class NbtSerializerOptions
     /// <summary>Gets or sets whether the root tag carries a name. The default is named.</summary>
     public NbtRootFormat RootFormat
     {
-        get => _rootFormat;
+        get;
         set
         {
             if (value is not NbtRootFormat.Named and not NbtRootFormat.Unnamed)
@@ -54,14 +47,14 @@ public sealed class NbtSerializerOptions
                 throw new ArgumentOutOfRangeException(nameof(value));
             }
 
-            _rootFormat = value;
+            field = value;
         }
-    }
+    } = NbtRootFormat.Named;
 
     /// <summary>Gets or sets how null compound members are handled. The default is to omit them.</summary>
     public NbtNullValueHandling NullValueHandling
     {
-        get => _nullValueHandling;
+        get;
         set
         {
             if (value is not NbtNullValueHandling.Omit and not NbtNullValueHandling.Throw)
@@ -69,9 +62,9 @@ public sealed class NbtSerializerOptions
                 throw new ArgumentOutOfRangeException(nameof(value));
             }
 
-            _nullValueHandling = value;
+            field = value;
         }
-    }
+    } = NbtNullValueHandling.Omit;
 
     /// <summary>
     /// Gets or sets whether duplicate compound member names are rejected while reading. The default
@@ -79,40 +72,40 @@ public sealed class NbtSerializerOptions
     /// </summary>
     public bool RejectDuplicateCompoundNames
     {
-        get => _rejectDuplicateCompoundNames;
-        set => _rejectDuplicateCompoundNames = value;
+        get;
+        set => field = value;
     }
 
     /// <summary>Gets or sets the maximum nesting depth. The default is 512.</summary>
     public int MaxDepth
     {
-        get => _maxDepth;
+        get;
         set
         {
             ArgumentOutOfRangeException.ThrowIfNegative(value);
-            _maxDepth = value;
+            field = value;
         }
-    }
+    } = 512;
 
     /// <summary>Gets or sets the maximum number of elements in a list or array.</summary>
     public int MaxCollectionLength
     {
-        get => _maxCollectionLength;
+        get;
         set
         {
             ArgumentOutOfRangeException.ThrowIfNegative(value);
-            _maxCollectionLength = value;
+            field = value;
         }
-    }
+    } = 16 * 1024 * 1024;
 
     /// <summary>Gets or sets the maximum document size in bytes. 0 means unlimited.</summary>
     public long MaxDocumentBytes
     {
-        get => _maxDocumentBytes;
+        get;
         set
         {
             ArgumentOutOfRangeException.ThrowIfNegative(value);
-            _maxDocumentBytes = value;
+            field = value;
         }
     }
 
