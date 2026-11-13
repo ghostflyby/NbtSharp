@@ -37,9 +37,8 @@ encodes as `TAG_List<TAG_Int>` with length zero.
 
 The serialization layer is split like `System.Text.Json`:
 
-- `NbtReader` and `NbtWriter` are `ref struct` token APIs. The reader consumes a span or a
-  `PipeReader`; a `ReadOnlySequence<byte>` is exposed through a pipe reader. The writer targets an
-  `IBufferWriter<byte>` or a `PipeWriter`.
+- `NbtReader` and `NbtWriter` are `ref struct` token APIs. The reader accepts a span, a sequence,
+  or a pipe reader; the writer targets a buffer writer or a pipe writer.
 - `NbtSerializer` provides generic `Serialize<T>` / `Deserialize<T>` entry points plus DOM
   convenience overloads.
 - `NbtConverter<T>` converts one CLR type. A converter may choose a different NBT tag type for
@@ -91,12 +90,6 @@ public parameterless constructor is preferred; otherwise a constructor whose par
 the members is used. Unknown members are skipped and missing members keep their defaults.
 
 ## Streaming
-
-The reader pulls data from a `PipeReader` incrementally, and the writer pushes data into a
-`PipeWriter`, so a document does not need to be buffered in memory.
-`NbtSerializer.Deserialize(Stream)` and `Deserialize(ReadOnlySequence<byte>)` create the appropriate
-pipe reader, and `Serialize(Stream)` creates a pipe writer; a stream does not need to be seekable.
-The span overload remains a contiguous in-memory fast path.
 
 The reader produces value and container tokens. Compound members carry a name; list elements do not:
 
@@ -222,14 +215,12 @@ The generic serializer can resolve reflection and construct closed generic conve
 its entry points are annotated with `RequiresUnreferencedCode` and `RequiresDynamicCode`. The
 reflection resolver is opt-in. A source generator for fully AOT-safe type information is planned.
 
-The `Stream` overloads are synchronous adapters over `PipeWriter` and `PipeReader`.
-`Serialize(Stream)` writes through a pipe writer and flushes when the document is complete.
-`Deserialize(Stream)` consumes the stream incrementally, so it works with non-seekable streams and
-does not buffer the document as a whole. `Deserialize(PipeReader)` is available when the caller owns
-the pipe; consecutive calls can read consecutive documents because each call advances the pipe. A
-stream adapter creates its own pipe, so it reads ahead and is intended for one document. Trailing
-bytes after the root value are ignored, although the pipe may already have read them from the
-stream. The writer does not roll back partial output if a converter throws.
+The `Stream` overloads are synchronous. `Serialize(Stream)` flushes the document when serialization
+completes and leaves the stream open; `Deserialize(Stream)` reads the stream incrementally, so
+non-seekable streams are supported. A stream is treated as one document: trailing bytes after the
+root value are ignored, and the stream may have been read ahead. To read consecutive documents from
+one stream, use `Deserialize(PipeReader)` with a caller-owned pipe reader. The writer does not roll
+back partial output if a converter throws.
 
 ## Build and test
 
