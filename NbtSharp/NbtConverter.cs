@@ -18,4 +18,14 @@ public abstract class NbtConverter
     internal virtual void WriteValue(ref NbtWriter writer, object? value, Type typeToConvert, NbtSerializerOptions options) =>
         throw new NotSupportedException(
             $"The converter {GetType()} must derive from NbtConverter<T> to write values.");
+
+    internal virtual bool TryGetTagType(
+        object? value,
+        Type typeToConvert,
+        NbtSerializerOptions options,
+        out NbtTagType tagType)
+    {
+        tagType = default;
+        return false;
+    }
 }

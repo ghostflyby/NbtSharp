@@ -58,6 +58,20 @@ public sealed class NbtErrorPathTests
     }
 
     [Fact]
+    public void MemberPayloadTagMismatchCarriesTheMemberPath()
+    {
+        var options = ReflectionOptions();
+        options.Converters.Add(new IntAsStringConverter());
+
+        var exception = Assert.Throws<NbtException>(() =>
+            NbtSerializer.Serialize(new SimpleDto { X = 1 }, "root", options));
+
+        Assert.Equal("$.X", exception.Path);
+        Assert.Equal(NbtTagType.Int, exception.ExpectedTagType);
+        Assert.Equal(NbtTagType.String, exception.ActualTagType);
+    }
+
+    [Fact]
     public void ListTypeMismatchCarriesTheElementIndex()
     {
         var options = new NbtSerializerOptions();
@@ -77,12 +91,9 @@ public sealed class NbtErrorPathTests
     {
         var buffer = new ArrayBufferWriter<byte>();
         var writer = new NbtWriter(buffer);
-        writer.WritePropertyName("root");
-        writer.WriteStartCompound();
-        writer.WritePropertyName("Name");
-        writer.WriteString("first");
-        writer.WritePropertyName("Name");
-        writer.WriteString("second");
+        writer.WriteStartCompound("root");
+        writer.WriteString("Name", "first");
+        writer.WriteString("Name", "second");
         writer.WriteEndCompound();
         writer.Complete();
 
@@ -129,6 +140,12 @@ public sealed class NbtErrorPathTests
 
         public override void Write(ref NbtWriter writer, int value, NbtSerializerOptions options) =>
             writer.WriteInt32(value);
+
+        public override bool TryGetTagType(int value, NbtSerializerOptions options, out NbtTagType tagType)
+        {
+            tagType = NbtTagType.Int;
+            return true;
+        }
     }
 
     private sealed class IntAsStringConverter : NbtConverter<int>

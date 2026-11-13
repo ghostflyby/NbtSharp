@@ -143,12 +143,9 @@ public sealed class NbtObjectMappingTests
     {
         var buffer = new ArrayBufferWriter<byte>();
         var writer = new NbtWriter(buffer);
-        writer.WritePropertyName("root");
-        writer.WriteStartCompound();
-        writer.WritePropertyName("X");
-        writer.WriteInt32(1);
-        writer.WritePropertyName("X");
-        writer.WriteInt32(2);
+        writer.WriteStartCompound("root");
+        writer.WriteInt32("X", 1);
+        writer.WriteInt32("X", 2);
         writer.WriteEndCompound();
         writer.Complete();
 

@@ -69,13 +69,12 @@ internal sealed class NbtDictionaryConverter<TDictionary, TValue> : NbtConverter
         writer.WriteStartCompound();
         foreach (var pair in value)
         {
-            writer.WritePropertyName(pair.Key);
-            NbtSerializer.SerializeValueInternal(
+            NbtSerializer.SerializeMemberInternal(
                 ref writer,
+                pair.Key,
                 pair.Value,
                 typeof(TValue),
-                options,
-                "." + pair.Key);
+                options);
         }
 
         writer.WriteEndCompound();

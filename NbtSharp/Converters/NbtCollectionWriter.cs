@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Diagnostics.CodeAnalysis;
 
 namespace NbtSharp.Converters;
@@ -39,44 +38,15 @@ internal static class NbtCollectionWriter
         }
 
         var converter = options.GetConverter(typeof(TElement));
-        if (converter is NbtConverter<TElement> typed && typed.TryGetTagType(first, options, out var elementType))
+        if (!converter.TryGetTagType(first, typeof(TElement), options, out var elementType))
         {
-            writer.WriteStartList(elementType, count);
-            NbtSerializer.SerializeValueInternal(ref writer, first, typeof(TElement), options, "[0]");
-            var written = 1;
-            while (enumerator.MoveNext())
-            {
-                NbtSerializer.SerializeValueInternal(
-                    ref writer,
-                    enumerator.Current,
-                    typeof(TElement),
-                    options,
-                    $"[{written}]");
-                written++;
-            }
-
-            if (written != count)
-            {
-                throw new NbtException($"The collection reported {count} elements but produced {written}.")
-                {
-                    BytePosition = writer.BytesWritten,
-                };
-            }
-
-            writer.WriteEndList();
-            return;
+            throw new NotSupportedException(
+                $"The converter for {typeof(TElement)} must implement TryGetTagType to write a non-empty list.");
         }
 
-        var buffer = new ArrayBufferWriter<byte>();
-        var probe = new NbtWriter(buffer, options.CreateWriterOptions(), payloadOnly: true);
-        NbtSerializer.SerializeValueInternal(ref probe, first, typeof(TElement), options, "[0]");
-        probe.Complete();
-
-        var probedType = probe.RootTagType;
-        writer.WriteStartList(probedType, count);
-        writer.WriteBufferedListElement(probedType, buffer.WrittenSpan);
-
-        var total = 1;
+        writer.WriteStartList(elementType, count);
+        NbtSerializer.SerializeValueInternal(ref writer, first, typeof(TElement), options, "[0]", headerWritten: false);
+        var written = 1;
         while (enumerator.MoveNext())
         {
             NbtSerializer.SerializeValueInternal(
@@ -84,13 +54,14 @@ internal static class NbtCollectionWriter
                 enumerator.Current,
                 typeof(TElement),
                 options,
-                $"[{total}]");
-            total++;
+                $"[{written}]",
+                headerWritten: false);
+            written++;
         }
 
-        if (total != count)
+        if (written != count)
         {
-            throw new NbtException($"The collection reported {count} elements but produced {total}.")
+            throw new NbtException($"The collection reported {count} elements but produced {written}.")
             {
                 BytePosition = writer.BytesWritten,
             };

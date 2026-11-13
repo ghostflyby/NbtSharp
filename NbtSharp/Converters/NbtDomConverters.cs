@@ -165,13 +165,12 @@ internal static class NbtDomConverters
             writer.WriteStartCompound();
             foreach (var pair in value)
             {
-                writer.WritePropertyName(pair.Key);
-                NbtSerializer.SerializeValueInternal(
+                NbtSerializer.SerializeMemberInternal(
                     ref writer,
+                    pair.Key,
                     pair.Value,
                     typeof(NbtValue),
-                    options,
-                    "." + pair.Key);
+                    options);
             }
 
             writer.WriteEndCompound();
@@ -303,7 +302,8 @@ internal static class NbtDomConverters
                     elements[i],
                     typeof(TElement),
                     options,
-                    $"[{i}]");
+                    $"[{i}]",
+                    headerWritten: false);
             }
         }
     }

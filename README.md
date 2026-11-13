@@ -42,7 +42,8 @@ The serialization layer is split like `System.Text.Json`:
 - `NbtSerializer` provides generic `Serialize<T>` / `Deserialize<T>` entry points plus DOM
   convenience overloads.
 - `NbtConverter<T>` converts one CLR type. A converter may choose a different NBT tag type for
-  different values; `TryGetTagType` optionally predicts that type for list headers.
+  different values; `TryGetTagType` predicts that type before a named member, root, or non-empty
+  list header is written.
 - `NbtConverterFactory` creates converters for generic type families.
 - `NbtTypeInfo<T>` and `INbtTypeInfoResolver` describe a CLR type. The built-in
   `NbtReflectionTypeInfoResolver` maps ordinary classes and structs to compounds.
@@ -105,19 +106,15 @@ while (reader.Read())
 }
 ```
 
-The writer defers compound-member headers. `WritePropertyName` stores the name, and the next value
-or container-start call writes the tag type, name, and payload together:
+Named writes are atomic and follow the NBT wire order `Type → Name → Payload`:
 
 ```csharp
 var buffer = new ArrayBufferWriter<byte>();
 var writer = new NbtWriter(buffer);
 
-writer.WritePropertyName("Player");
-writer.WriteStartCompound();
-writer.WritePropertyName("Health");
-writer.WriteInt32(20);
-writer.WritePropertyName("Tags");
-writer.WriteStartList(NbtTagType.String, 2);
+writer.WriteStartCompound("Player");
+writer.WriteInt32("Health", 20);
+writer.WriteStartList("Tags", NbtTagType.String, 2);
 writer.WriteString("a");
 writer.WriteString("b");
 writer.WriteEndList();
@@ -126,6 +123,11 @@ writer.Complete();
 
 byte[] bytes = buffer.WrittenSpan.ToArray();
 ```
+
+Anonymous writes—`WriteInt32(20)`, `WriteString("a")`, `WriteStartCompound()`—are used for list
+elements and for converter payloads whose member or root header was already written. A compound
+converter opens its payload with `WriteStartCompound()` and writes members with named methods or
+`NbtSerializer.SerializeMember`, which handles dynamic member types.
 
 A list header carries its element type and count before the elements. The writer verifies that every
 element has the declared type and that exactly the declared number of elements were written.
@@ -170,9 +172,11 @@ public sealed class CompactInt32Converter : NbtConverter<int>
 ```
 
 Add converters to `options.Converters`. Custom converters are checked before built-in converters.
-Within a list, all elements must still share one actual tag type. If a converter cannot predict its
-tag type, the first element is encoded into a temporary buffer to observe the real type; subsequent
-elements are validated against it.
+`TryGetTagType` is required for named compound members, root values, and the first element of a
+non-empty list, because the tag type must be known before the header is written. If it returns
+`false`, those operations throw `NotSupportedException`; implement the prediction to use the
+converter in those positions. Within a list, all elements must still share one actual tag type, and
+the writer validates every element against the predicted header type.
 
 The generic writer encodes an empty collection as `TAG_List<TAG_End>`, which any target collection
 accepts. An empty list with a concrete element type is checked against the requested element type
@@ -186,7 +190,7 @@ the list is empty.
 - `Converters`, `TypeInfoResolver`, and `RootFormat` (named or unnamed root).
 - `NullValueHandling`: omit a null compound member (default) or throw. Null roots and null list
   elements always throw because NBT has no null tag.
-- `RejectDuplicateCompoundNames`: keep the last duplicate (default) or throw.
+- `RejectDuplicateCompoundNames`: while reading, keep the last duplicate (default) or throw.
 - `MaxDepth`, `MaxCollectionLength`, and `MaxDocumentBytes` safety limits. A value of 0 selects the
   library default; `MaxDocumentBytes` 0 means unlimited.
 

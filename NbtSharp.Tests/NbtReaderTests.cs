@@ -147,9 +147,8 @@ public sealed class NbtReaderTests
     {
         var buffer = new ArrayBufferWriter<byte>();
         var writer = new NbtWriter(buffer, new NbtWriterOptions { RootFormat = NbtRootFormat.Unnamed });
-        writer.WriteStartCompound();
-        writer.WritePropertyName("Value");
-        writer.WriteInt32(7);
+        writer.WriteStartCompound("ignored");
+        writer.WriteInt32("Value", 7);
         writer.WriteEndCompound();
         writer.Complete();
 
@@ -265,14 +264,10 @@ public sealed class NbtReaderTests
     {
         var buffer = new ArrayBufferWriter<byte>();
         var writer = new NbtWriter(buffer);
-        writer.WritePropertyName("root");
-        writer.WriteStartCompound();
-        writer.WritePropertyName("Health");
-        writer.WriteInt32(20);
-        writer.WritePropertyName("Name");
-        writer.WriteString("Steve");
-        writer.WritePropertyName("Position");
-        writer.WriteStartList(NbtTagType.Double, 3);
+        writer.WriteStartCompound("root");
+        writer.WriteInt32("Health", 20);
+        writer.WriteString("Name", "Steve");
+        writer.WriteStartList("Position", NbtTagType.Double, 3);
         writer.WriteDouble(1.0);
         writer.WriteDouble(64.0);
         writer.WriteDouble(2.0);

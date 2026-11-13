@@ -10,9 +10,10 @@ namespace NbtSharp;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Compound member names are deferred: <see cref="WritePropertyName"/> stores the name, and the next
-/// value or container-start call writes the tag type, name, and payload together. This lets a
-/// converter choose the tag type from the value, including inside a list.
+/// Named writes are atomic: <see cref="WriteInt32(string, int)"/>,
+/// <see cref="WriteStartCompound(string)"/>, and the other named methods write the tag type, name,
+/// and payload together, matching the NBT wire order. Anonymous writes are used for list elements
+/// and for value payloads whose header was already written by the serializer.
 /// </para>
 /// <para>
 /// A list header must be written with its element type and count before any element. The writer
@@ -31,15 +32,13 @@ public ref struct NbtWriter
     private readonly int _maxCollectionLength;
     private readonly long _maxDocumentBytes;
     private List<ContainerState>? _containers;
-    private string? _pendingName;
     private bool _rootWritten;
     private bool _rootComplete;
     private bool _completed;
-    private bool _payloadOnly;
+    private bool _payloadExpected;
+    private NbtTagType _expectedTagType;
     private long _bytesWritten;
-    private long _valuesWritten;
     private long[]? _valuesAtDepth;
-    private NbtTagType _rootTagType;
 
     /// <summary>Initializes a writer over <paramref name="destination"/>.</summary>
     /// <param name="destination">The buffer writer that receives the NBT bytes.</param>
@@ -57,26 +56,16 @@ public ref struct NbtWriter
         _maxDocumentBytes = options.MaxDocumentBytes;
     }
 
-    internal NbtWriter(IBufferWriter<byte> destination, NbtWriterOptions options, bool payloadOnly)
-        : this(destination, options)
-    {
-        _payloadOnly = payloadOnly;
-    }
-
     /// <summary>Gets the number of bytes written so far.</summary>
     public readonly long BytesWritten => _bytesWritten;
 
     /// <summary>Gets the number of containers currently open.</summary>
     public readonly int CurrentDepth => _containers?.Count ?? 0;
 
-    internal readonly long ValuesWritten => _valuesWritten;
-
     internal readonly long ValuesWrittenAtDepth(int depth) =>
         _valuesAtDepth is not null && depth >= 0 && depth < _valuesAtDepth.Length ? _valuesAtDepth[depth] : 0;
 
-    internal readonly NbtTagType RootTagType => _rootTagType;
-
-    internal readonly bool HasPendingName => _pendingName is not null;
+    internal readonly bool IsPayloadExpected => _payloadExpected;
 
     internal readonly bool IsInList => _containers is { Count: > 0 } && _containers[^1].IsList;
 
@@ -84,128 +73,85 @@ public ref struct NbtWriter
 
     private ref ContainerState Top => ref CollectionsMarshal.AsSpan(_containers!)[^1];
 
-    /// <summary>Stores the name of the next compound member or the root tag.</summary>
-    /// <param name="name">The tag name; may be empty.</param>
-    /// <exception cref="InvalidOperationException">A name is already pending or names are not allowed here.</exception>
-    public void WritePropertyName(string name)
+    /// <summary>Writes a named signed 8-bit integer.</summary>
+    public void WriteSByte(string name, sbyte value)
     {
-        ArgumentNullException.ThrowIfNull(name);
-        EnsureNotCompleted();
-        ValidateStringLength(name.AsSpan());
-
-        if (_pendingName is not null)
-        {
-            throw new InvalidOperationException("A property name is already pending.");
-        }
-
-        if (_containers is null || _containers.Count == 0)
-        {
-            if (_rootWritten || _rootComplete)
-            {
-                throw new InvalidOperationException("The root value has already been written.");
-            }
-
-            if (_payloadOnly)
-            {
-                throw new InvalidOperationException("A probe writer does not accept a root name.");
-            }
-
-            if (_rootFormat == NbtRootFormat.Unnamed)
-            {
-                throw new InvalidOperationException("The root format is unnamed; a property name is not allowed.");
-            }
-
-            _pendingName = name;
-            return;
-        }
-
-        if (Top.IsList)
-        {
-            throw new InvalidOperationException("List elements do not have names.");
-        }
-
-        _pendingName = name;
-    }
-
-    /// <summary>Writes a signed 8-bit integer.</summary>
-    public void WriteSByte(sbyte value)
-    {
-        WriteValueHeader(NbtTagType.Byte);
+        WriteNamedHeader(NbtTagType.Byte, name);
         WriteByte((byte)value);
         FinishScalar();
     }
 
-    /// <summary>Writes a signed 16-bit integer.</summary>
-    public void WriteInt16(short value)
+    /// <summary>Writes a named signed 16-bit integer.</summary>
+    public void WriteInt16(string name, short value)
     {
-        WriteValueHeader(NbtTagType.Short);
+        WriteNamedHeader(NbtTagType.Short, name);
         WriteInt16Payload(value);
         FinishScalar();
     }
 
-    /// <summary>Writes a signed 32-bit integer.</summary>
-    public void WriteInt32(int value)
+    /// <summary>Writes a named signed 32-bit integer.</summary>
+    public void WriteInt32(string name, int value)
     {
-        WriteValueHeader(NbtTagType.Int);
+        WriteNamedHeader(NbtTagType.Int, name);
         WriteInt32Payload(value);
         FinishScalar();
     }
 
-    /// <summary>Writes a signed 64-bit integer.</summary>
-    public void WriteInt64(long value)
+    /// <summary>Writes a named signed 64-bit integer.</summary>
+    public void WriteInt64(string name, long value)
     {
-        WriteValueHeader(NbtTagType.Long);
+        WriteNamedHeader(NbtTagType.Long, name);
         WriteInt64Payload(value);
         FinishScalar();
     }
 
-    /// <summary>Writes a 32-bit IEEE 754 number.</summary>
-    public void WriteSingle(float value)
+    /// <summary>Writes a named 32-bit IEEE 754 number.</summary>
+    public void WriteSingle(string name, float value)
     {
-        WriteValueHeader(NbtTagType.Float);
+        WriteNamedHeader(NbtTagType.Float, name);
         WriteSinglePayload(value);
         FinishScalar();
     }
 
-    /// <summary>Writes a 64-bit IEEE 754 number.</summary>
-    public void WriteDouble(double value)
+    /// <summary>Writes a named 64-bit IEEE 754 number.</summary>
+    public void WriteDouble(string name, double value)
     {
-        WriteValueHeader(NbtTagType.Double);
+        WriteNamedHeader(NbtTagType.Double, name);
         WriteDoublePayload(value);
         FinishScalar();
     }
 
-    /// <summary>Writes a string from a span of characters.</summary>
-    public void WriteString(ReadOnlySpan<char> value)
+    /// <summary>Writes a named string from a span of characters.</summary>
+    public void WriteString(string name, ReadOnlySpan<char> value)
     {
         ValidateStringLength(value);
-        WriteValueHeader(NbtTagType.String);
+        WriteNamedHeader(NbtTagType.String, name);
         WriteStringPayload(value);
         FinishScalar();
     }
 
-    /// <summary>Writes a string.</summary>
-    public void WriteString(string value)
+    /// <summary>Writes a named string.</summary>
+    public void WriteString(string name, string value)
     {
         ArgumentNullException.ThrowIfNull(value);
-        WriteString(value.AsSpan());
+        WriteString(name, value.AsSpan());
     }
 
-    /// <summary>Writes a byte array.</summary>
-    public void WriteByteArray(ReadOnlySpan<byte> values)
+    /// <summary>Writes a named byte array.</summary>
+    public void WriteByteArray(string name, ReadOnlySpan<byte> values)
     {
         ValidateCollectionLength(values.Length);
-        WriteValueHeader(NbtTagType.ByteArray);
+        WriteNamedHeader(NbtTagType.ByteArray, name);
         WriteInt32Payload(values.Length);
         WriteBytes(values);
         FinishScalar();
     }
 
-    /// <summary>Writes an integer array.</summary>
-    public void WriteInt32Array(ReadOnlySpan<int> values)
+    /// <summary>Writes a named integer array.</summary>
+    public void WriteInt32Array(string name, ReadOnlySpan<int> values)
     {
         ValidateCollectionLength(values.Length);
-        WriteValueHeader(NbtTagType.IntArray);
+        WriteNamedHeader(NbtTagType.IntArray, name);
         WriteInt32Payload(values.Length);
         foreach (var value in values)
         {
@@ -215,11 +161,11 @@ public ref struct NbtWriter
         FinishScalar();
     }
 
-    /// <summary>Writes a long array.</summary>
-    public void WriteInt64Array(ReadOnlySpan<long> values)
+    /// <summary>Writes a named long array.</summary>
+    public void WriteInt64Array(string name, ReadOnlySpan<long> values)
     {
         ValidateCollectionLength(values.Length);
-        WriteValueHeader(NbtTagType.LongArray);
+        WriteNamedHeader(NbtTagType.LongArray, name);
         WriteInt32Payload(values.Length);
         foreach (var value in values)
         {
@@ -229,26 +175,161 @@ public ref struct NbtWriter
         FinishScalar();
     }
 
-    /// <summary>Writes the start of a compound.</summary>
+    /// <summary>Writes the start of a named compound.</summary>
+    public void WriteStartCompound(string name)
+    {
+        EnsureCanEnterContainer();
+        WriteNamedHeader(NbtTagType.Compound, name);
+        PushContainer(isList: false, NbtTagType.End, remaining: 0);
+    }
+
+    /// <summary>Writes the start of a named list.</summary>
+    public void WriteStartList(string name, NbtTagType elementType, int count)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(count);
+        ValidateListHeader(elementType, count);
+        EnsureCanEnterContainer();
+        WriteNamedHeader(NbtTagType.List, name);
+        WriteByte((byte)elementType);
+        WriteInt32Payload(count);
+        PushContainer(isList: true, elementType, count);
+    }
+
+    /// <summary>Writes an anonymous signed 8-bit integer.</summary>
+    /// <remarks>Valid for a list element or a value payload whose header was already written.</remarks>
+    public void WriteSByte(sbyte value)
+    {
+        WriteAnonymousHeader(NbtTagType.Byte);
+        WriteByte((byte)value);
+        FinishScalar();
+    }
+
+    /// <summary>Writes an anonymous signed 16-bit integer.</summary>
+    public void WriteInt16(short value)
+    {
+        WriteAnonymousHeader(NbtTagType.Short);
+        WriteInt16Payload(value);
+        FinishScalar();
+    }
+
+    /// <summary>Writes an anonymous signed 32-bit integer.</summary>
+    public void WriteInt32(int value)
+    {
+        WriteAnonymousHeader(NbtTagType.Int);
+        WriteInt32Payload(value);
+        FinishScalar();
+    }
+
+    /// <summary>Writes an anonymous signed 64-bit integer.</summary>
+    public void WriteInt64(long value)
+    {
+        WriteAnonymousHeader(NbtTagType.Long);
+        WriteInt64Payload(value);
+        FinishScalar();
+    }
+
+    /// <summary>Writes an anonymous 32-bit IEEE 754 number.</summary>
+    public void WriteSingle(float value)
+    {
+        WriteAnonymousHeader(NbtTagType.Float);
+        WriteSinglePayload(value);
+        FinishScalar();
+    }
+
+    /// <summary>Writes an anonymous 64-bit IEEE 754 number.</summary>
+    public void WriteDouble(double value)
+    {
+        WriteAnonymousHeader(NbtTagType.Double);
+        WriteDoublePayload(value);
+        FinishScalar();
+    }
+
+    /// <summary>Writes an anonymous string from a span of characters.</summary>
+    public void WriteString(ReadOnlySpan<char> value)
+    {
+        ValidateStringLength(value);
+        WriteAnonymousHeader(NbtTagType.String);
+        WriteStringPayload(value);
+        FinishScalar();
+    }
+
+    /// <summary>Writes an anonymous string.</summary>
+    public void WriteString(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        WriteString(value.AsSpan());
+    }
+
+    /// <summary>Writes an anonymous byte array.</summary>
+    public void WriteByteArray(ReadOnlySpan<byte> values)
+    {
+        ValidateCollectionLength(values.Length);
+        WriteAnonymousHeader(NbtTagType.ByteArray);
+        WriteInt32Payload(values.Length);
+        WriteBytes(values);
+        FinishScalar();
+    }
+
+    /// <summary>Writes an anonymous integer array.</summary>
+    public void WriteInt32Array(ReadOnlySpan<int> values)
+    {
+        ValidateCollectionLength(values.Length);
+        WriteAnonymousHeader(NbtTagType.IntArray);
+        WriteInt32Payload(values.Length);
+        foreach (var value in values)
+        {
+            WriteInt32Payload(value);
+        }
+
+        FinishScalar();
+    }
+
+    /// <summary>Writes an anonymous long array.</summary>
+    public void WriteInt64Array(ReadOnlySpan<long> values)
+    {
+        ValidateCollectionLength(values.Length);
+        WriteAnonymousHeader(NbtTagType.LongArray);
+        WriteInt32Payload(values.Length);
+        foreach (var value in values)
+        {
+            WriteInt64Payload(value);
+        }
+
+        FinishScalar();
+    }
+
+    /// <summary>Writes the start of an anonymous compound.</summary>
     public void WriteStartCompound()
     {
         EnsureCanEnterContainer();
-        WriteValueHeader(NbtTagType.Compound);
+        WriteAnonymousHeader(NbtTagType.Compound);
         PushContainer(isList: false, NbtTagType.End, remaining: 0);
+    }
+
+    /// <summary>Writes the start of an anonymous list.</summary>
+    public void WriteStartList(NbtTagType elementType, int count)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(count);
+        ValidateListHeader(elementType, count);
+        EnsureCanEnterContainer();
+        WriteAnonymousHeader(NbtTagType.List);
+        WriteByte((byte)elementType);
+        WriteInt32Payload(count);
+        PushContainer(isList: true, elementType, count);
     }
 
     /// <summary>Writes the end of the current compound.</summary>
     public void WriteEndCompound()
     {
         EnsureNotCompleted();
+        if (_payloadExpected)
+        {
+            throw new InvalidOperationException("A value payload is expected but no value was written.");
+        }
+
         if (_containers is null || _containers.Count == 0 || _containers[^1].IsList)
         {
             throw new InvalidOperationException("There is no open compound to close.");
-        }
-
-        if (_pendingName is not null)
-        {
-            throw new InvalidOperationException("A compound member name is pending but no value was written.");
         }
 
         WriteByte((byte)NbtTagType.End);
@@ -256,32 +337,18 @@ public ref struct NbtWriter
         FinishRootIfClosed();
     }
 
-    /// <summary>Writes the start of a list.</summary>
-    /// <param name="elementType">The tag type shared by all elements.</param>
-    /// <param name="count">The number of elements that will be written.</param>
-    public void WriteStartList(NbtTagType elementType, int count)
-    {
-        ArgumentOutOfRangeException.ThrowIfNegative(count);
-        ValidateListHeader(elementType, count);
-        EnsureCanEnterContainer();
-        WriteValueHeader(NbtTagType.List);
-        WriteByte((byte)elementType);
-        WriteInt32Payload(count);
-        PushContainer(isList: true, elementType, count);
-    }
-
     /// <summary>Writes the end of the current list.</summary>
     public void WriteEndList()
     {
         EnsureNotCompleted();
+        if (_payloadExpected)
+        {
+            throw new InvalidOperationException("A value payload is expected but no value was written.");
+        }
+
         if (_containers is null || _containers.Count == 0 || !_containers[^1].IsList)
         {
             throw new InvalidOperationException("There is no open list to close.");
-        }
-
-        if (_pendingName is not null)
-        {
-            throw new InvalidOperationException("A property name was written inside a list.");
         }
 
         if (_containers[^1].Remaining != 0)
@@ -307,46 +374,154 @@ public ref struct NbtWriter
             throw new InvalidOperationException("No root value was written.");
         }
 
+        if (_payloadExpected)
+        {
+            throw new InvalidOperationException("A value payload is expected but no value was written.");
+        }
+
         if (!_rootComplete || (_containers is not null && _containers.Count > 0))
         {
             throw new InvalidOperationException("The root value is not complete; close all open containers first.");
         }
 
-        if (_pendingName is not null)
-        {
-            throw new InvalidOperationException("A property name is pending but no value was written.");
-        }
-
         _completed = true;
     }
 
-    internal void SkipPendingPropertyName()
+    internal void WriteRootHeader(NbtTagType tagType, string rootName)
     {
         EnsureNotCompleted();
-        if (_pendingName is null)
+        if (_payloadExpected)
         {
-            throw new InvalidOperationException("There is no pending property name.");
+            throw new InvalidOperationException("A value payload is already expected.");
+        }
+
+        if (_rootWritten || _rootComplete)
+        {
+            throw new InvalidOperationException("The root value has already been written.");
+        }
+
+        ArgumentNullException.ThrowIfNull(rootName);
+        ValidateStringLength(rootName.AsSpan());
+        WriteByte((byte)tagType);
+        if (_rootFormat == NbtRootFormat.Named)
+        {
+            WriteStringPayload(rootName.AsSpan());
+        }
+
+        _rootWritten = true;
+        IncrementValuesAtDepth(0);
+        _payloadExpected = true;
+        _expectedTagType = tagType;
+    }
+
+    internal void WriteMemberHeader(NbtTagType tagType, string name)
+    {
+        EnsureNotCompleted();
+        if (_payloadExpected)
+        {
+            throw new InvalidOperationException("A value payload is already expected.");
+        }
+
+        if (_rootComplete)
+        {
+            throw new InvalidOperationException("The root value is already complete.");
         }
 
         if (_containers is null || _containers.Count == 0)
         {
-            throw new InvalidOperationException("The root value cannot be omitted.");
+            throw new InvalidOperationException("Root values use WriteRootHeader or a named write method.");
         }
 
-        if (_containers[^1].IsList)
+        if (Top.IsList)
         {
-            throw new InvalidOperationException("List elements cannot be omitted.");
+            throw new InvalidOperationException("List elements use anonymous writes.");
         }
 
-        _pendingName = null;
+        ArgumentNullException.ThrowIfNull(name);
+        ValidateStringLength(name.AsSpan());
+        WriteByte((byte)tagType);
+        WriteStringPayload(name.AsSpan());
+        IncrementValuesAtDepth(_containers.Count);
+        _payloadExpected = true;
+        _expectedTagType = tagType;
     }
 
-    internal void WriteBufferedListElement(NbtTagType tagType, ReadOnlySpan<byte> payload)
+    private void WriteNamedHeader(NbtTagType tagType, string name)
     {
         EnsureNotCompleted();
-        if (_containers is null || _containers.Count == 0 || !_containers[^1].IsList)
+        if (_payloadExpected)
         {
-            throw new InvalidOperationException("There is no open list to write an element into.");
+            throw new InvalidOperationException("A value payload is already expected.");
+        }
+
+        if (_rootComplete)
+        {
+            throw new InvalidOperationException("The root value is already complete.");
+        }
+
+        ArgumentNullException.ThrowIfNull(name);
+        ValidateStringLength(name.AsSpan());
+
+        if (_containers is null || _containers.Count == 0)
+        {
+            if (_rootWritten)
+            {
+                throw new InvalidOperationException("The root value has already been written.");
+            }
+
+            WriteByte((byte)tagType);
+            if (_rootFormat == NbtRootFormat.Named)
+            {
+                WriteStringPayload(name.AsSpan());
+            }
+
+            _rootWritten = true;
+            IncrementValuesAtDepth(0);
+            return;
+        }
+
+        if (Top.IsList)
+        {
+            throw new InvalidOperationException("List elements use the anonymous write methods.");
+        }
+
+        WriteByte((byte)tagType);
+        WriteStringPayload(name.AsSpan());
+        IncrementValuesAtDepth(_containers.Count);
+    }
+
+    private void WriteAnonymousHeader(NbtTagType tagType)
+    {
+        EnsureNotCompleted();
+        if (_payloadExpected)
+        {
+            if (tagType != _expectedTagType)
+            {
+                throw new NbtException($"The member header declared {_expectedTagType} but {tagType} was written.")
+                {
+                    BytePosition = _bytesWritten,
+                    ExpectedTagType = _expectedTagType,
+                    ActualTagType = tagType,
+                };
+            }
+
+            _payloadExpected = false;
+            return;
+        }
+
+        if (_rootComplete)
+        {
+            throw new InvalidOperationException("The root value is already complete.");
+        }
+
+        if (_containers is null || _containers.Count == 0)
+        {
+            throw new InvalidOperationException("Anonymous values require a list or a pending member/root payload.");
+        }
+
+        if (!Top.IsList)
+        {
+            throw new InvalidOperationException("Compound members require a name; use a named write method or SerializeMember.");
         }
 
         ref var top = ref Top;
@@ -369,9 +544,7 @@ public ref struct NbtWriter
         }
 
         top.Remaining--;
-        _valuesWritten++;
         IncrementValuesAtDepth(_containers.Count);
-        WriteBytes(payload);
     }
 
     private static void ValidateOptions(NbtWriterOptions options)
@@ -458,101 +631,6 @@ public ref struct NbtWriter
         }
     }
 
-    private void WriteValueHeader(NbtTagType tagType)
-    {
-        EnsureNotCompleted();
-        if (_rootComplete)
-        {
-            throw new InvalidOperationException("The root value is already complete.");
-        }
-
-        if (_containers is null || _containers.Count == 0)
-        {
-            if (_rootWritten)
-            {
-                throw new InvalidOperationException("The root value has already been written.");
-            }
-
-            if (_payloadOnly)
-            {
-                _pendingName = null;
-                _rootTagType = tagType;
-                _rootWritten = true;
-                _valuesWritten++;
-                IncrementValuesAtDepth(0);
-                return;
-            }
-
-            if (_rootFormat == NbtRootFormat.Named)
-            {
-                if (_pendingName is null)
-                {
-                    throw new InvalidOperationException("A named root requires a property name.");
-                }
-            }
-            else if (_pendingName is not null)
-            {
-                throw new InvalidOperationException("An unnamed root cannot carry a property name.");
-            }
-
-            WriteByte((byte)tagType);
-            if (_rootFormat == NbtRootFormat.Named)
-            {
-                WriteStringPayload(_pendingName!.AsSpan());
-            }
-
-            _pendingName = null;
-            _rootTagType = tagType;
-            _rootWritten = true;
-            _valuesWritten++;
-            IncrementValuesAtDepth(0);
-            return;
-        }
-
-        if (Top.IsList)
-        {
-            if (_pendingName is not null)
-            {
-                throw new InvalidOperationException("List elements do not have names.");
-            }
-
-            ref var top = ref Top;
-            if (top.ElementType != tagType)
-            {
-                throw new NbtException($"The list declares elements of type {top.ElementType} but {tagType} was written.")
-                {
-                    BytePosition = _bytesWritten,
-                    ExpectedTagType = top.ElementType,
-                    ActualTagType = tagType,
-                };
-            }
-
-            if (top.Remaining == 0)
-            {
-                throw new NbtException("The list header declared no more elements.")
-                {
-                    BytePosition = _bytesWritten,
-                };
-            }
-
-            top.Remaining--;
-            _valuesWritten++;
-            IncrementValuesAtDepth(_containers.Count);
-            return;
-        }
-
-        if (_pendingName is null)
-        {
-            throw new InvalidOperationException("A compound member name is required.");
-        }
-
-        WriteByte((byte)tagType);
-        WriteStringPayload(_pendingName.AsSpan());
-        _pendingName = null;
-        _valuesWritten++;
-        IncrementValuesAtDepth(_containers.Count);
-    }
-
     private void IncrementValuesAtDepth(int depth)
     {
         if (_valuesAtDepth is null)
@@ -571,7 +649,10 @@ public ref struct NbtWriter
     {
         if (_containers is null || _containers.Count == 0)
         {
-            _rootComplete = true;
+            if (_rootWritten)
+            {
+                _rootComplete = true;
+            }
         }
     }
 
@@ -586,7 +667,6 @@ public ref struct NbtWriter
     private void PushContainer(bool isList, NbtTagType elementType, int remaining)
     {
         _containers ??= [];
-
         _containers.Add(new ContainerState(isList, elementType, remaining));
     }
 

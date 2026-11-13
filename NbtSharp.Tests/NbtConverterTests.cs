@@ -161,18 +161,28 @@ public sealed class NbtConverterTests
     }
 
     [Fact]
-    public void UnpredictedDynamicTagsUseTheProbeBuffer()
+    public void UnpredictedDynamicTagsAreRejected()
     {
         var options = new NbtSerializerOptions();
         options.Converters.Add(new CompactIntWithoutPredictionConverter());
 
-        var data = NbtSerializer.Serialize(new List<int> { 1, 2, 3 }, "root", options);
-        var root = NbtSerializer.Deserialize(data);
-        Assert.Equal(NbtTagType.Byte, ((NbtList)root.Value.Value!).ElementType);
-        Assert.Equal(new[] { 1, 2, 3 }, NbtSerializer.Deserialize<List<int>>(data, options));
+        Assert.Throws<NotSupportedException>(() =>
+            NbtSerializer.Serialize(new List<int> { 1, 2, 3 }, "root", options));
+        Assert.Throws<NotSupportedException>(() =>
+            NbtSerializer.Serialize(1, "root", options));
+    }
 
-        Assert.Throws<NbtException>(() =>
-            NbtSerializer.Serialize(new List<int> { 1, 300 }, "root", options));
+    [Fact]
+    public void MembersRequireTagTypePrediction()
+    {
+        var options = new NbtSerializerOptions
+        {
+            TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
+        };
+        options.Converters.Add(new CompactIntWithoutPredictionConverter());
+
+        Assert.Throws<NotSupportedException>(() =>
+            NbtSerializer.Serialize(new IntHolder { Value = 1 }, "root", options));
     }
 
     [Fact]
@@ -383,6 +393,11 @@ public sealed class NbtConverterTests
         }
     }
 
+    private sealed class IntHolder
+    {
+        public int Value { get; set; }
+    }
+
     private sealed class Envelope
     {
         public int Value { get; set; }
@@ -422,8 +437,7 @@ public sealed class NbtConverterTests
         public override void Write(ref NbtWriter writer, Envelope value, NbtSerializerOptions options)
         {
             writer.WriteStartCompound();
-            writer.WritePropertyName("Value");
-            NbtSerializer.SerializeValue(ref writer, value.Value, options);
+            NbtSerializer.SerializeMember(ref writer, "Value", value.Value, options);
             writer.WriteEndCompound();
         }
 
@@ -478,10 +492,8 @@ public sealed class NbtConverterTests
         public override void Write(ref NbtWriter writer, Point value, NbtSerializerOptions options)
         {
             writer.WriteStartCompound();
-            writer.WritePropertyName("X");
-            writer.WriteInt32(value.X);
-            writer.WritePropertyName("Y");
-            writer.WriteInt32(value.Y);
+            writer.WriteInt32("X", value.X);
+            writer.WriteInt32("Y", value.Y);
             writer.WriteEndCompound();
         }
 

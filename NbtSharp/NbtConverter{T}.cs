@@ -5,9 +5,9 @@ namespace NbtSharp;
 /// </summary>
 /// <typeparam name="T">The CLR type handled by the converter.</typeparam>
 /// <remarks>
-/// A converter writes exactly one complete NBT value. It does not write the member name; the caller
-/// writes the name with <see cref="NbtWriter.WritePropertyName"/> before delegating the value.
-/// Different values of the same CLR type may produce different NBT tag types.
+/// A converter writes exactly one anonymous NBT value payload. Named members and root values are
+/// written by the serializer, which asks the converter for a tag type prediction before writing the
+/// header. Different values of the same CLR type may produce different NBT tag types.
 /// </remarks>
 public abstract class NbtConverter<T> : NbtConverter
 {
@@ -27,10 +27,14 @@ public abstract class NbtConverter<T> : NbtConverter
     public abstract void Write(ref NbtWriter writer, T value, NbtSerializerOptions options);
 
     /// <summary>
-    /// Tries to predict the NBT tag type that <see cref="Write"/> will produce for
-    /// <paramref name="value"/>. Returning <see langword="false"/> means the type is unknown, not
-    /// that the value cannot be serialized.
+    /// Predicts the NBT tag type that <see cref="Write"/> will produce for <paramref name="value"/>.
     /// </summary>
+    /// <remarks>
+    /// A named member, a root value, and the first element of a non-empty list need this
+    /// prediction before their header can be written. Returning <see langword="false"/> makes
+    /// those operations throw <see cref="NotSupportedException"/>; implement this method to use
+    /// the converter in those positions.
+    /// </remarks>
     /// <param name="value">The value that will be written.</param>
     /// <param name="options">The serializer options.</param>
     /// <param name="tagType">The predicted tag type when the method returns <see langword="true"/>.</param>
@@ -59,5 +63,20 @@ public abstract class NbtConverter<T> : NbtConverter
         }
 
         Write(ref writer, (T)value!, options);
+    }
+
+    internal sealed override bool TryGetTagType(
+        object? value,
+        Type typeToConvert,
+        NbtSerializerOptions options,
+        out NbtTagType tagType)
+    {
+        if (typeToConvert != typeof(T))
+        {
+            tagType = default;
+            return false;
+        }
+
+        return TryGetTagType((T)value!, options, out tagType);
     }
 }

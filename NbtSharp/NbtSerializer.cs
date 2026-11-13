@@ -65,19 +65,14 @@ public static class NbtSerializer
         var writer = new NbtWriter(destination, options.CreateWriterOptions());
         try
         {
-            if (options.RootFormat == NbtRootFormat.Named)
-            {
-                writer.WritePropertyName(rootName);
-            }
-
             if (typeof(T) == typeof(NbtRoot))
             {
                 var root = (NbtRoot)(object)value!;
-                SerializeValueInternal(ref writer, root.Value, typeof(NbtValue), options, pathSegment: null);
+                SerializeRootValue(ref writer, root.Value, typeof(NbtValue), rootName, options);
             }
             else
             {
-                SerializeValueInternal(ref writer, value, typeof(T), options, pathSegment: null);
+                SerializeRootValue(ref writer, value, typeof(T), rootName, options);
             }
 
             writer.Complete();
@@ -188,15 +183,41 @@ public static class NbtSerializer
         return Deserialize<T>(data.AsSpan(), out rootName, options);
     }
 
-    /// <summary>Writes one value using <paramref name="writer"/>.</summary>
+    /// <summary>Writes one unnamed value using <paramref name="writer"/>.</summary>
     /// <typeparam name="T">The declared value type.</typeparam>
     /// <param name="writer">The writer that receives the value.</param>
     /// <param name="value">The value to write.</param>
     /// <param name="options">The serializer options.</param>
+    /// <remarks>
+    /// This overload is for list elements and for converter payloads whose member or root header
+    /// was already written. Compound members use <see cref="SerializeMember{T}"/>.
+    /// </remarks>
     public static void SerializeValue<T>(ref NbtWriter writer, T value, NbtSerializerOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        SerializeValueInternal(ref writer, value, typeof(T), options, pathSegment: null);
+        SerializeValueInternal(ref writer, value, typeof(T), options, pathSegment: null, headerWritten: false);
+    }
+
+    /// <summary>Writes one named compound member using <paramref name="writer"/>.</summary>
+    /// <typeparam name="T">The declared value type.</typeparam>
+    /// <param name="writer">The writer that receives the member.</param>
+    /// <param name="name">The member name.</param>
+    /// <param name="value">The value to write.</param>
+    /// <param name="options">The serializer options.</param>
+    /// <remarks>
+    /// The converter must predict the member's tag type with
+    /// <see cref="NbtConverter{T}.TryGetTagType(T, NbtSerializerOptions, out NbtTagType)"/> before
+    /// the header can be written.
+    /// </remarks>
+    public static void SerializeMember<T>(
+        ref NbtWriter writer,
+        string name,
+        T value,
+        NbtSerializerOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        ArgumentNullException.ThrowIfNull(options);
+        SerializeMemberInternal(ref writer, name, value, typeof(T), options);
     }
 
     /// <summary>Reads one value using <paramref name="reader"/>.</summary>
@@ -344,45 +365,83 @@ public static class NbtSerializer
         }
     }
 
+    internal static void SerializeMemberInternal(
+        ref NbtWriter writer,
+        string name,
+        object? value,
+        Type type,
+        NbtSerializerOptions options)
+    {
+        if (writer.IsPayloadExpected)
+        {
+            throw new InvalidOperationException("A value payload is already expected.");
+        }
+
+        try
+        {
+            if (value is null)
+            {
+                HandleNullMember(ref writer, options);
+                return;
+            }
+
+            var converter = options.GetConverter(type);
+            if (!converter.TryGetTagType(value, type, options, out var tagType))
+            {
+                throw new NotSupportedException(
+                    $"The converter for {type} must implement TryGetTagType to write a named member.");
+            }
+
+            writer.WriteMemberHeader(tagType, name);
+        }
+        catch (NbtException ex)
+        {
+            PrependPath(ex, "." + name);
+            throw;
+        }
+
+        SerializeValueInternal(ref writer, value, type, options, "." + name, headerWritten: true);
+    }
+
     internal static void SerializeValueInternal(
         ref NbtWriter writer,
         object? value,
         Type type,
         NbtSerializerOptions options,
-        string? pathSegment)
+        string? pathSegment,
+        bool headerWritten)
     {
         try
         {
             if (value is null)
             {
-                HandleNull(ref writer, options);
+                HandleNullValue(ref writer);
                 return;
             }
 
             var converter = options.GetConverter(type);
             var beforeDepth = writer.CurrentDepth;
             var beforeValuesAtDepth = writer.ValuesWrittenAtDepth(beforeDepth);
+            var payloadWasPrepared = headerWritten || writer.IsPayloadExpected;
             converter.WriteValue(ref writer, value, type, options);
 
-            if (writer.ValuesWrittenAtDepth(beforeDepth) != beforeValuesAtDepth + 1)
+            if (payloadWasPrepared)
+            {
+                if (writer.IsPayloadExpected ||
+                    writer.CurrentDepth != beforeDepth ||
+                    writer.ValuesWrittenAtDepth(beforeDepth) != beforeValuesAtDepth)
+                {
+                    throw new NbtException(
+                        $"The converter for {type} did not complete the prepared value.")
+                    {
+                        BytePosition = writer.BytesWritten,
+                    };
+                }
+            }
+            else if (writer.CurrentDepth != beforeDepth ||
+                     writer.ValuesWrittenAtDepth(beforeDepth) != beforeValuesAtDepth + 1)
             {
                 throw new NbtException($"The converter for {type} must write exactly one value.")
-                {
-                    BytePosition = writer.BytesWritten,
-                };
-            }
-
-            if (writer.CurrentDepth != beforeDepth)
-            {
-                throw new NbtException($"The converter for {type} left a container open.")
-                {
-                    BytePosition = writer.BytesWritten,
-                };
-            }
-
-            if (writer.HasPendingName)
-            {
-                throw new NbtException($"The converter for {type} left a member name pending.")
                 {
                     BytePosition = writer.BytesWritten,
                 };
@@ -393,6 +452,29 @@ public static class NbtSerializer
             PrependPath(ex, pathSegment);
             throw;
         }
+    }
+
+    private static void SerializeRootValue(
+        ref NbtWriter writer,
+        object? value,
+        Type type,
+        string rootName,
+        NbtSerializerOptions options)
+    {
+        if (value is null)
+        {
+            throw new NbtException("The root value cannot be null.");
+        }
+
+        var converter = options.GetConverter(type);
+        if (!converter.TryGetTagType(value, type, options, out var tagType))
+        {
+            throw new NotSupportedException(
+                $"The converter for {type} must implement TryGetTagType to write a root value.");
+        }
+
+        writer.WriteRootHeader(tagType, rootName);
+        SerializeValueInternal(ref writer, value, type, options, pathSegment: null, headerWritten: true);
     }
 
     internal static void PrependPath(NbtException exception, string? segment)
@@ -456,32 +538,11 @@ public static class NbtSerializer
         }
     }
 
-    private static void HandleNull(ref NbtWriter writer, NbtSerializerOptions options)
+    private static void HandleNullMember(ref NbtWriter writer, NbtSerializerOptions options)
     {
-        if (writer.IsInList)
-        {
-            throw new NbtException("A list element cannot be null.")
-            {
-                BytePosition = writer.BytesWritten,
-            };
-        }
-
-        if (writer.CurrentDepth == 0)
-        {
-            throw new NbtException("The root value cannot be null.")
-            {
-                BytePosition = writer.BytesWritten,
-            };
-        }
-
         if (!writer.IsInCompound)
         {
-            throw new InvalidOperationException("A null value can only appear as a compound member.");
-        }
-
-        if (!writer.HasPendingName)
-        {
-            throw new InvalidOperationException("A compound member name is required.");
+            throw new InvalidOperationException("SerializeMember requires an open compound.");
         }
 
         if (options.NullValueHandling == NbtNullValueHandling.Throw)
@@ -491,8 +552,28 @@ public static class NbtSerializer
                 BytePosition = writer.BytesWritten,
             };
         }
+    }
 
-        writer.SkipPendingPropertyName();
+    private static void HandleNullValue(ref NbtWriter writer)
+    {
+        if (writer.IsPayloadExpected)
+        {
+            throw new NbtException("A null value cannot complete a prepared member or root payload.")
+            {
+                BytePosition = writer.BytesWritten,
+            };
+        }
+
+        if (writer.IsInList)
+        {
+            throw new NbtException("A list element cannot be null.")
+            {
+                BytePosition = writer.BytesWritten,
+            };
+        }
+
+        throw new InvalidOperationException(
+            "Anonymous values cannot be null; use SerializeMember for a compound member.");
     }
 
     private static void ValidateRoot(NbtRoot root, NbtSerializerOptions options)

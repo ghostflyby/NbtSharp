@@ -40,6 +40,16 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
 
     public override bool CanConvert(Type typeToConvert) => typeToConvert == _type;
 
+    internal override bool TryGetTagType(
+        object? value,
+        Type typeToConvert,
+        NbtSerializerOptions options,
+        out NbtTagType tagType)
+    {
+        tagType = NbtTagType.Compound;
+        return true;
+    }
+
     internal override object ReadValue(ref NbtReader reader, Type typeToConvert, NbtSerializerOptions options)
     {
         if (reader.TokenType != NbtTokenType.StartCompound)
@@ -110,13 +120,12 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
         writer.WriteStartCompound();
         foreach (var member in _members)
         {
-            writer.WritePropertyName(member.Name);
-            NbtSerializer.SerializeValueInternal(
+            NbtSerializer.SerializeMemberInternal(
                 ref writer,
+                member.Name,
                 member.GetValue(value),
                 member.Type,
-                options,
-                "." + member.Name);
+                options);
         }
 
         writer.WriteEndCompound();
