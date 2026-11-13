@@ -138,10 +138,24 @@ public sealed class NbtWriterTests
     {
         using var stream = new MemoryStream();
         var writer = new NbtWriter(stream);
-        var name = new string('a', NbtSharp.IO.JavaModifiedUtf8.MaxByteCount + 1);
+        var name = new string('a', ushort.MaxValue + 1);
 
         Assert.Throws<NbtException>(() => writer.WriteStartCompound(name));
         Assert.Equal(0, stream.Length);
+    }
+
+    [Fact]
+    public void OverlongStringValueThrowsWithoutPartialWrite()
+    {
+        using var stream = new MemoryStream();
+        var writer = new NbtWriter(stream);
+        writer.WriteStartCompound("root");
+        long headerLength = stream.Length;
+        var value = new string('中', 21846); // 65538 bytes
+
+        Assert.Throws<NbtException>(() => writer.WriteString("v", value));
+        Assert.Equal(headerLength, stream.Length);
+        Assert.Throws<NbtException>(() => writer.Dispose());
     }
 
     [Fact]

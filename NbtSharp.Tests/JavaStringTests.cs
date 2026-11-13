@@ -1,5 +1,3 @@
-using NbtSharp.IO;
-
 namespace NbtSharp.Tests;
 
 public sealed class JavaStringTests
@@ -69,14 +67,73 @@ public sealed class JavaStringTests
     }
 
     [Theory]
-    [InlineData(new byte[] { 0x00 })]
     [InlineData(new byte[] { 0xC1 })]
     [InlineData(new byte[] { 0xC0, 0x41 })]
     [InlineData(new byte[] { 0xE0, 0x80 })]
+    [InlineData(new byte[] { 0xED, 0xA0 })]
+    [InlineData(new byte[] { 0xF0, 0x9F })]
     [InlineData(new byte[] { 0xF0, 0x80, 0x80, 0x80 })]
-    public void RejectsMalformedModifiedUtf8(byte[] bytes)
+    [InlineData(new byte[] { 0xF4, 0x90, 0x80, 0x80 })]
+    [InlineData(new byte[] { 0xF5, 0x80, 0x80, 0x80 })]
+    [InlineData(new byte[] { 0xF8, 0x88, 0x80, 0x80, 0x80 })]
+    [InlineData(new byte[] { 0xFE })]
+    [InlineData(new byte[] { 0xFF })]
+    [InlineData(new byte[] { 0xF0, 0x9F, 0x98, 0x80 })]
+    public void RejectsMalformedModifiedUtf8(byte[] payload)
     {
-        Assert.Throws<NbtException>(() => JavaModifiedUtf8.Decode(bytes));
+        using var stream = new MemoryStream(BuildRootString(payload));
+
+        Assert.Throws<NbtException>(() => NbtSerializer.Deserialize(stream));
+    }
+
+    [Fact]
+    public void AcceptsRawNullLikeJavaReadUtf()
+    {
+        using var stream = new MemoryStream(BuildRootString([0x00]));
+
+        Assert.True(NbtSerializer.Deserialize(stream).Value is string zero && zero == "\0");
+    }
+
+    [Theory]
+    [InlineData(new byte[] { 0xED, 0xA0, 0x80 }, 0xD800)]
+    [InlineData(new byte[] { 0xED, 0xB0, 0x80 }, 0xDC00)]
+    public void DecodesLoneSurrogatesLikeJavaReadUtf(byte[] payload, int expectedCodeUnit)
+    {
+        using var stream = new MemoryStream(BuildRootString(payload));
+        var expected = ((char)expectedCodeUnit).ToString();
+
+        Assert.True(NbtSerializer.Deserialize(stream).Value is string text && text == expected);
+    }
+
+    [Fact]
+    public void EncodesLoneSurrogateAsThreeBytes()
+    {
+        var value = ((char)0xD800).ToString();
+        var root = SerializeString(value);
+        var payload = StringPayload(root);
+
+        Assert.Equal(new byte[] { 0xED, 0xA0, 0x80 }, payload);
+        Assert.Equal(value, RoundTrip(value));
+    }
+
+    [Fact]
+    public void RoundTripsMultibyteStringsAtLengthPrefixBoundaries()
+    {
+        Assert.Equal(new string('\0', 32767), RoundTrip(new string('\0', 32767))); // 65534 bytes
+        Assert.Equal(new string('中', 21845), RoundTrip(new string('中', 21845))); // 65535 bytes
+        var emoji = string.Concat(Enumerable.Repeat("\U0001F600", 10922)); // 65532 bytes
+        Assert.Equal(emoji, RoundTrip(emoji));
+    }
+
+    private static byte[] BuildRootString(byte[] payload)
+    {
+        var bytes = new List<byte>
+        {
+            (byte)NbtTagType.String, 0x00, 0x01, (byte)'v',
+            (byte)(payload.Length >> 8), (byte)payload.Length,
+        };
+        bytes.AddRange(payload);
+        return bytes.ToArray();
     }
 
     private static byte[] StringPayload(NbtRoot root)

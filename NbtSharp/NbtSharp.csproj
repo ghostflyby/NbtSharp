@@ -27,6 +27,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="11.0.100" PrivateAssets="all"/>
     <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="5.6.0" PrivateAssets="all"/>
+    <PackageReference Include="Myitian.Text.ModifiedUTF8Encoding" Version="1.2.2"/>
   </ItemGroup>
 
   <ItemGroup>

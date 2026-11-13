@@ -1,3 +1,4 @@
+using Myitian.Text;
 using NbtSharp.IO;
 
 namespace NbtSharp;
@@ -229,6 +230,8 @@ public sealed class NbtWriter : IDisposable
     /// <summary>Writes a string element inside the current list.</summary>
     public void WriteElement(string value)
     {
+        ArgumentNullException.ThrowIfNull(value);
+        ValidateStringLength(value);
         BeginListElement(NbtTagType.String);
         _writer.WriteString(value);
     }
@@ -337,8 +340,8 @@ public sealed class NbtWriter : IDisposable
 
     private static void ValidateStringLength(string value)
     {
-        var byteCount = JavaModifiedUtf8.GetByteCount(value);
-        if (byteCount > JavaModifiedUtf8.MaxByteCount)
+        var byteCount = ModifiedUTF8Encoding.Instance.GetByteCount(value);
+        if (byteCount > ushort.MaxValue)
         {
             throw new NbtException($"The string is too long to encode: {byteCount} bytes.");
         }

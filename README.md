@@ -85,6 +85,12 @@ This milestone covers the DOM types, Java Edition encoding (big-endian, fixed-wi
 modified UTF-8 strings), the streaming reader and writer, and DOM serialization. Bedrock encodings
 and compression wrappers are not implemented yet.
 
+Strings are encoded and decoded through
+[Myitian.Text.ModifiedUTF8Encoding](https://github.com/Myitian/Modified-UTF8-Encoding). Decoding
+follows Java's `DataInputStream.readUTF`: sequences with a lead byte of 0xF0 or greater (standard
+UTF-8 four-byte forms) are rejected, while raw null bytes and overlong three-byte forms are
+accepted and normalized when the value is written again.
+
 Current decisions: compound members enumerate in dictionary insertion order (an implementation
 detail, not a contract); a duplicate name in binary data keeps the last occurrence; serializing an
 uninitialized `NbtValue` throws `NbtException`. `NbtValue` and `NbtList` are plain structs, so they
