@@ -37,9 +37,7 @@ public ref struct NbtWriter
     private bool _rootWritten;
     private bool _rootComplete;
     private bool _completed;
-    private bool _payloadExpected;
     private NbtTagType _expectedTagType;
-    private long _bytesWritten;
     private long[]? _valuesAtDepth;
 
     /// <summary>Initializes a writer over <paramref name="destination"/>.</summary>
@@ -59,7 +57,7 @@ public ref struct NbtWriter
     }
 
     /// <summary>Gets the number of bytes written so far.</summary>
-    public readonly long BytesWritten => _bytesWritten;
+    public long BytesWritten { get; private set; }
 
     /// <summary>Gets the number of containers currently open.</summary>
     public readonly int CurrentDepth => _containers?.Count ?? 0;
@@ -67,7 +65,7 @@ public ref struct NbtWriter
     internal readonly long ValuesWrittenAtDepth(int depth) =>
         _valuesAtDepth is not null && depth >= 0 && depth < _valuesAtDepth.Length ? _valuesAtDepth[depth] : 0;
 
-    internal readonly bool IsPayloadExpected => _payloadExpected;
+    internal bool IsPayloadExpected { get; private set; }
 
     internal readonly bool IsInList => _containers is { Count: > 0 } && _containers[^1].IsList;
 
@@ -324,7 +322,7 @@ public ref struct NbtWriter
     public void WriteEndCompound()
     {
         EnsureNotCompleted();
-        if (_payloadExpected)
+        if (IsPayloadExpected)
         {
             throw new InvalidOperationException("A value payload is expected but no value was written.");
         }
@@ -343,7 +341,7 @@ public ref struct NbtWriter
     public void WriteEndList()
     {
         EnsureNotCompleted();
-        if (_payloadExpected)
+        if (IsPayloadExpected)
         {
             throw new InvalidOperationException("A value payload is expected but no value was written.");
         }
@@ -357,7 +355,7 @@ public ref struct NbtWriter
         {
             throw new NbtException($"{_containers[^1].Remaining} list elements promised by the header were not written.")
             {
-                BytePosition = _bytesWritten,
+                BytePosition = BytesWritten,
             };
         }
 
@@ -376,7 +374,7 @@ public ref struct NbtWriter
             throw new InvalidOperationException("No root value was written.");
         }
 
-        if (_payloadExpected)
+        if (IsPayloadExpected)
         {
             throw new InvalidOperationException("A value payload is expected but no value was written.");
         }
@@ -392,7 +390,7 @@ public ref struct NbtWriter
     internal void WriteRootHeader(NbtTagType tagType, string rootName)
     {
         EnsureNotCompleted();
-        if (_payloadExpected)
+        if (IsPayloadExpected)
         {
             throw new InvalidOperationException("A value payload is already expected.");
         }
@@ -412,14 +410,14 @@ public ref struct NbtWriter
 
         _rootWritten = true;
         IncrementValuesAtDepth(0);
-        _payloadExpected = true;
+        IsPayloadExpected = true;
         _expectedTagType = tagType;
     }
 
     internal void WriteMemberHeader(NbtTagType tagType, string name)
     {
         EnsureNotCompleted();
-        if (_payloadExpected)
+        if (IsPayloadExpected)
         {
             throw new InvalidOperationException("A value payload is already expected.");
         }
@@ -444,14 +442,14 @@ public ref struct NbtWriter
         WriteByte((byte)tagType);
         WriteStringPayload(name.AsSpan());
         IncrementValuesAtDepth(_containers.Count);
-        _payloadExpected = true;
+        IsPayloadExpected = true;
         _expectedTagType = tagType;
     }
 
     private void WriteNamedHeader(NbtTagType tagType, string name)
     {
         EnsureNotCompleted();
-        if (_payloadExpected)
+        if (IsPayloadExpected)
         {
             throw new InvalidOperationException("A value payload is already expected.");
         }
@@ -495,19 +493,19 @@ public ref struct NbtWriter
     private void WriteAnonymousHeader(NbtTagType tagType)
     {
         EnsureNotCompleted();
-        if (_payloadExpected)
+        if (IsPayloadExpected)
         {
             if (tagType != _expectedTagType)
             {
                 throw new NbtException($"The member header declared {_expectedTagType} but {tagType} was written.")
                 {
-                    BytePosition = _bytesWritten,
+                    BytePosition = BytesWritten,
                     ExpectedTagType = _expectedTagType,
                     ActualTagType = tagType,
                 };
             }
 
-            _payloadExpected = false;
+            IsPayloadExpected = false;
             return;
         }
 
@@ -531,7 +529,7 @@ public ref struct NbtWriter
         {
             throw new NbtException($"The list declares elements of type {top.ElementType} but {tagType} was written.")
             {
-                BytePosition = _bytesWritten,
+                BytePosition = BytesWritten,
                 ExpectedTagType = top.ElementType,
                 ActualTagType = tagType,
             };
@@ -541,7 +539,7 @@ public ref struct NbtWriter
         {
             throw new NbtException("The list header declared no more elements.")
             {
-                BytePosition = _bytesWritten,
+                BytePosition = BytesWritten,
             };
         }
 
@@ -568,7 +566,7 @@ public ref struct NbtWriter
         {
             throw new NbtException($"The string is too long to encode: {byteCount} bytes.")
             {
-                BytePosition = _bytesWritten,
+                BytePosition = BytesWritten,
             };
         }
     }
@@ -580,7 +578,7 @@ public ref struct NbtWriter
             throw new NbtException(
                 $"The collection length {count} exceeds the configured limit of {_maxCollectionLength}.")
             {
-                BytePosition = _bytesWritten,
+                BytePosition = BytesWritten,
             };
         }
     }
@@ -591,7 +589,7 @@ public ref struct NbtWriter
         {
             throw new NbtException($"Unknown NBT list element type {(byte)elementType}.")
             {
-                BytePosition = _bytesWritten,
+                BytePosition = BytesWritten,
             };
         }
 
@@ -599,7 +597,7 @@ public ref struct NbtWriter
         {
             throw new NbtException("A list of TAG_End must have length zero.")
             {
-                BytePosition = _bytesWritten,
+                BytePosition = BytesWritten,
                 ExpectedTagType = NbtTagType.End,
                 ActualTagType = elementType,
             };
@@ -628,7 +626,7 @@ public ref struct NbtWriter
         {
             throw new NbtException($"The NBT nesting depth exceeds the limit of {_maxDepth}.")
             {
-                BytePosition = _bytesWritten,
+                BytePosition = BytesWritten,
             };
         }
     }
@@ -730,7 +728,7 @@ public ref struct NbtWriter
         {
             throw new NbtException($"The string is too long to encode: {byteCount} bytes.")
             {
-                BytePosition = _bytesWritten,
+                BytePosition = BytesWritten,
             };
         }
 
@@ -746,7 +744,7 @@ public ref struct NbtWriter
         {
             throw new NbtException($"The string encoder wrote {written} bytes but {byteCount} were expected.")
             {
-                BytePosition = _bytesWritten,
+                BytePosition = BytesWritten,
             };
         }
 
@@ -775,16 +773,16 @@ public ref struct NbtWriter
     private void Advance(int count)
     {
         _destination.Advance(count);
-        _bytesWritten += count;
+        BytesWritten += count;
     }
 
     private void EnsureDocumentSize(int count)
     {
-        if (_maxDocumentBytes > 0 && _bytesWritten + count > _maxDocumentBytes)
+        if (_maxDocumentBytes > 0 && BytesWritten + count > _maxDocumentBytes)
         {
             throw new NbtException($"The NBT document exceeds the configured limit of {_maxDocumentBytes} bytes.")
             {
-                BytePosition = _bytesWritten,
+                BytePosition = BytesWritten,
             };
         }
     }

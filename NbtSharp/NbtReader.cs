@@ -49,7 +49,6 @@ public ref struct NbtReader
     private List<ContainerState>? _containers;
     private long[]? _valuesReadAtDepth;
     private long _currentSegmentOffset;
-    private long _consumed;
     private long _tokenStart;
     private long _valueStart;
     private bool _pipeInitialized;
@@ -58,13 +57,6 @@ public ref struct NbtReader
     private bool _ownsPipe;
     private bool _rootRead;
     private bool _rootComplete;
-    private bool _valuePending;
-    private bool _containerPending;
-    private NbtTokenType _tokenType;
-    private NbtTagType _tagType;
-    private string? _name;
-    private NbtTagType _listElementType;
-    private int _listLength;
 
     /// <summary>Initializes a reader over a contiguous span of NBT bytes.</summary>
     /// <param name="data">The complete NBT document.</param>
@@ -171,29 +163,29 @@ public ref struct NbtReader
     }
 
     /// <summary>Gets the type of the most recently produced token.</summary>
-    public readonly NbtTokenType TokenType => _tokenType;
+    public NbtTokenType TokenType { get; private set; }
 
     /// <summary>Gets the NBT tag type of the most recently produced token.</summary>
-    public readonly NbtTagType TagType => _tagType;
+    public NbtTagType TagType { get; private set; }
 
     /// <summary>Gets the name of the current compound member or root tag, if any.</summary>
-    public readonly string? Name => _name;
+    public string? Name { get; private set; }
 
     /// <summary>Gets the number of bytes consumed from the start of the document.</summary>
-    public readonly long BytesConsumed => _consumed;
+    public long BytesConsumed { get; private set; }
 
     /// <summary>Gets the number of containers currently open, including the container of the current token.</summary>
     public readonly int CurrentDepth => _containers?.Count ?? 0;
 
     /// <summary>Gets the element type declared by the most recently read list header.</summary>
-    public readonly NbtTagType ListElementType => _listElementType;
+    public NbtTagType ListElementType { get; private set; }
 
     /// <summary>Gets the element count declared by the most recently read list header.</summary>
-    public readonly int ListLength => _listLength;
+    public int ListLength { get; private set; }
 
-    internal readonly bool HasPendingValue => _valuePending;
+    internal bool HasPendingValue { get; private set; }
 
-    internal readonly bool HasPendingContainer => _containerPending;
+    internal bool HasPendingContainer { get; private set; }
 
     internal readonly long ValuesReadAtDepth(int depth) =>
         _valuesReadAtDepth is not null && depth >= 0 && depth < _valuesReadAtDepth.Length
@@ -210,12 +202,12 @@ public ref struct NbtReader
     {
         EnsureInitialized();
 
-        if (_valuePending)
+        if (HasPendingValue)
         {
             throw new InvalidOperationException("The current value has not been read. Call the matching getter or Skip first.");
         }
 
-        _containerPending = false;
+        HasPendingContainer = false;
 
         if (!_rootRead)
         {
@@ -271,21 +263,21 @@ public ref struct NbtReader
     {
         EnsureInitialized();
 
-        if (_valuePending)
+        if (HasPendingValue)
         {
-            var tagType = _tagType;
+            var tagType = TagType;
             SkipValue(tagType);
-            _valuePending = false;
+            HasPendingValue = false;
             FinishRootIfClosed();
             return;
         }
 
-        if (!_containerPending)
+        if (!HasPendingContainer)
         {
             throw new InvalidOperationException("The reader is not positioned on a value or container.");
         }
 
-        _containerPending = false;
+        HasPendingContainer = false;
         var skippedList = Top.IsList;
         var targetDepth = _containers!.Count - 1;
         while (_containers.Count > targetDepth)
@@ -455,17 +447,17 @@ public ref struct NbtReader
             case NbtTagType.Compound:
                 PushContainer(isList: false, NbtTagType.End, remaining: 0);
                 SetToken(NbtTokenType.StartCompound, tagType, name);
-                _containerPending = true;
+                HasPendingContainer = true;
                 break;
             case NbtTagType.List:
                 SetToken(NbtTokenType.StartList, tagType, name);
                 ReadListHeader();
-                _containerPending = true;
+                HasPendingContainer = true;
                 break;
             default:
                 _valueStart = BytesConsumed;
                 SetToken(NbtTokenType.Value, tagType, name);
-                _valuePending = true;
+                HasPendingValue = true;
                 break;
         }
     }
@@ -484,17 +476,17 @@ public ref struct NbtReader
             case NbtTagType.Compound:
                 PushContainer(isList: false, NbtTagType.End, remaining: 0);
                 SetToken(NbtTokenType.StartCompound, elementType, null);
-                _containerPending = true;
+                HasPendingContainer = true;
                 break;
             case NbtTagType.List:
                 SetToken(NbtTokenType.StartList, elementType, null);
                 ReadListHeader();
-                _containerPending = true;
+                HasPendingContainer = true;
                 break;
             default:
                 _valueStart = BytesConsumed;
                 SetToken(NbtTokenType.Value, elementType, null);
-                _valuePending = true;
+                HasPendingValue = true;
                 break;
         }
     }
@@ -545,8 +537,8 @@ public ref struct NbtReader
 
         EnsureListElementsFit(elementType, count, position);
 
-        _listElementType = elementType;
-        _listLength = count;
+        ListElementType = elementType;
+        ListLength = count;
         EnterContainer(isList: true, elementType, count);
     }
 
@@ -615,9 +607,9 @@ public ref struct NbtReader
 
     private void SetToken(NbtTokenType tokenType, NbtTagType tagType, string? name)
     {
-        _tokenType = tokenType;
-        _tagType = tagType;
-        _name = name;
+        TokenType = tokenType;
+        TagType = tagType;
+        Name = name;
     }
 
     private NbtTagType ReadTagType()
@@ -644,34 +636,34 @@ public ref struct NbtReader
 
     private bool Expect(NbtTagType expected)
     {
-        if (!_valuePending)
+        if (!HasPendingValue)
         {
-            if (_tokenType is NbtTokenType.StartCompound or NbtTokenType.StartList)
+            if (TokenType is NbtTokenType.StartCompound or NbtTokenType.StartList)
             {
                 throw new NbtException(
-                    $"Expected a {expected} value but the current token is {_tokenType} ({_tagType}).")
+                    $"Expected a {expected} value but the current token is {TokenType} ({TagType}).")
                 {
                     BytePosition = _tokenStart,
                     ExpectedTagType = expected,
-                    ActualTagType = _tagType,
+                    ActualTagType = TagType,
                 };
             }
 
             throw new InvalidOperationException("The reader is not positioned on a value.");
         }
 
-        if (_tagType != expected)
+        if (TagType != expected)
         {
             throw new NbtException(
-                $"Expected a {expected} value but the current token is {_tokenType} ({_tagType}).")
+                $"Expected a {expected} value but the current token is {TokenType} ({TagType}).")
             {
                 BytePosition = _valueStart,
                 ExpectedTagType = expected,
-                ActualTagType = _tagType,
+                ActualTagType = TagType,
             };
         }
 
-        _valuePending = false;
+        HasPendingValue = false;
         if (_containers is null || _containers.Count == 0)
         {
             _rootComplete = true;
@@ -811,7 +803,7 @@ public ref struct NbtReader
             var value = DecodeString(bytes, position);
             _span = _span[length..];
             _currentSegmentOffset += length;
-            _consumed += length;
+            BytesConsumed += length;
             return value;
         }
 
@@ -883,7 +875,7 @@ public ref struct NbtReader
             _span[..take].CopyTo(destination[offset..]);
             _span = _span[take..];
             _currentSegmentOffset += take;
-            _consumed += take;
+            BytesConsumed += take;
             offset += take;
         }
     }
@@ -917,7 +909,7 @@ public ref struct NbtReader
             var take = Math.Min(count, _span.Length);
             _span = _span[(int)take..];
             _currentSegmentOffset += take;
-            _consumed += take;
+            BytesConsumed += take;
             count -= take;
         }
     }
@@ -934,7 +926,7 @@ public ref struct NbtReader
         value = _span[0];
         _span = _span[1..];
         _currentSegmentOffset++;
-        _consumed++;
+        BytesConsumed++;
         return true;
     }
 
