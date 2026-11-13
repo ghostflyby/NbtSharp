@@ -3,8 +3,8 @@ NbtSharp.NbtCompound
 NbtSharp.NbtCompound.NbtCompound() -> void
 NbtSharp.NbtCompound.NbtCompound(int capacity) -> void
 NbtSharp.NbtCompound.NbtCompound(System.Collections.Generic.IEnumerable<System.Collections.Generic.KeyValuePair<string!, NbtSharp.NbtValue>>! collection) -> void
-NbtSharp.NbtEmptyList
-NbtSharp.NbtEmptyList.NbtEmptyList() -> void
+NbtSharp.NbtEndList
+static NbtSharp.NbtEndList.Instance.get -> NbtSharp.NbtEndList!
 NbtSharp.NbtException
 NbtSharp.NbtException.NbtException() -> void
 NbtSharp.NbtException.NbtException(string! message) -> void
@@ -12,6 +12,8 @@ NbtSharp.NbtException.NbtException(string! message, System.Exception! innerExcep
 NbtSharp.NbtList
 NbtSharp.NbtList.Count.get -> int
 NbtSharp.NbtList.ElementType.get -> NbtSharp.NbtTagType
+NbtSharp.NbtList.HasValue.get -> bool
+NbtSharp.NbtList.NbtList(NbtSharp.NbtEndList! value) -> void
 NbtSharp.NbtList.NbtList(System.Collections.Generic.List<sbyte>! value) -> void
 NbtSharp.NbtList.NbtList(System.Collections.Generic.List<short>! value) -> void
 NbtSharp.NbtList.NbtList(System.Collections.Generic.List<int>! value) -> void
@@ -24,9 +26,8 @@ NbtSharp.NbtList.NbtList(System.Collections.Generic.List<NbtSharp.NbtList>! valu
 NbtSharp.NbtList.NbtList(System.Collections.Generic.List<NbtSharp.NbtCompound!>! value) -> void
 NbtSharp.NbtList.NbtList(System.Collections.Generic.List<int[]!>! value) -> void
 NbtSharp.NbtList.NbtList(System.Collections.Generic.List<long[]!>! value) -> void
-NbtSharp.NbtList.NbtList(NbtSharp.NbtEmptyList value) -> void
 NbtSharp.NbtList.NbtList() -> void
-NbtSharp.NbtList.Value.get -> object?
+NbtSharp.NbtList.Value.get -> object!
 NbtSharp.NbtReader
 NbtSharp.NbtReader.Depth.get -> int
 NbtSharp.NbtReader.Dispose() -> void

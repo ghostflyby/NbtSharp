@@ -98,11 +98,12 @@ public sealed class NbtSerializerTests
     [Fact]
     public void EmptyListOfEndRoundTrips()
     {
-        var root = new NbtRoot("root", new NbtCompound { ["Empty"] = new NbtList(new NbtEmptyList()) });
+        var root = new NbtRoot("root", new NbtCompound { ["Empty"] = default(NbtList) });
 
         var actual = (NbtCompound)RoundTrip(root).Value.Value!;
         var list = actual["Empty"] is NbtList value ? value : default;
 
+        Assert.Same(NbtEndList.Instance, list.Value);
         Assert.Equal(0, list.Count);
         Assert.Equal(NbtTagType.End, list.ElementType);
     }

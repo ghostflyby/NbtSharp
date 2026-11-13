@@ -30,12 +30,42 @@ public sealed class NbtListTests
     }
 
     [Fact]
-    public void EmptyListOfEndIsDistinct()
+    public void DefaultListRepresentsListOfEnd()
     {
-        NbtList empty = new NbtEmptyList();
+        NbtList empty = default;
 
+        Assert.Same(NbtEndList.Instance, empty.Value);
         Assert.Equal(0, empty.Count);
         Assert.Equal(NbtTagType.End, empty.ElementType);
+        Assert.True(empty is NbtEndList);
+    }
+
+    [Fact]
+    public void EndMarkerConstructorCanonicalizesToDefault()
+    {
+        Assert.Equal(default(NbtList), new NbtList(NbtEndList.Instance));
+    }
+
+    [Fact]
+    public void ExhaustiveSwitchHandlesDefault()
+    {
+        Assert.Equal("end", Describe(default));
+        Assert.Equal("int", Describe(new List<int>()));
+        Assert.Equal("string", Describe(new List<string>()));
+    }
+
+    [Fact]
+    public void EveryListHasAValue()
+    {
+        NbtList empty = default;
+        NbtList ints = new List<int>();
+
+        Assert.True(empty.HasValue);
+        Assert.True(ints.HasValue);
+        Assert.False(empty is null);
+        Assert.False(ints is null);
+        Assert.True(empty is NbtEndList);
+        Assert.False(ints is NbtEndList);
     }
 
     [Fact]
@@ -63,11 +93,25 @@ public sealed class NbtListTests
     }
 
     [Fact]
-    public void UninitializedListHasNoElementType()
+    public void ConstructingWithANullListIsRejected()
     {
-        NbtList list = default;
-
-        Assert.Throws<NbtException>(() => list.ElementType);
-        Assert.Throws<NbtException>(() => list.Count);
+        Assert.Throws<ArgumentNullException>(() => new NbtList((List<int>)null!));
     }
+
+    private static string Describe(NbtList list) => list switch
+    {
+        NbtEndList => "end",
+        List<sbyte> => "byte",
+        List<short> => "short",
+        List<int> => "int",
+        List<long> => "long",
+        List<float> => "float",
+        List<double> => "double",
+        List<sbyte[]> => "byteArray",
+        List<string> => "string",
+        List<NbtList> => "list",
+        List<NbtCompound> => "compound",
+        List<int[]> => "intArray",
+        List<long[]> => "longArray",
+    };
 }
