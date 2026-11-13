@@ -1,12 +1,14 @@
 using System.Buffers;
 using System.Buffers.Binary;
+using System.IO.Pipelines;
 using System.Runtime.InteropServices;
 using Myitian.Text;
 
 namespace NbtSharp;
 
 /// <summary>
-/// Writes Java Edition NBT as a forward-only sequence of tokens to an <see cref="IBufferWriter{T}"/>.
+/// Writes Java Edition NBT as a forward-only sequence of tokens to an
+/// <see cref="IBufferWriter{T}"/> or a <see cref="PipeWriter"/>.
 /// </summary>
 /// <remarks>
 /// <para>

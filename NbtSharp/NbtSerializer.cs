@@ -1,7 +1,6 @@
 using System.Buffers;
 using System.Diagnostics.CodeAnalysis;
 using System.IO.Pipelines;
-using NbtSharp.IO;
 
 namespace NbtSharp;
 
@@ -17,9 +16,10 @@ namespace NbtSharp;
 /// </para>
 /// <para>
 /// Deserialization from a <see cref="Stream"/> or a <see cref="ReadOnlySequence{T}"/> is backed by
-/// <see cref="PipeReader"/>, so the document is consumed incrementally and the stream does not need
-/// to be seekable. The span overload is a contiguous in-memory fast path. Trailing bytes after the
-/// root value are ignored; a stream-backed pipe may read some of them into its buffer.
+/// <see cref="PipeReader"/>, and serialization into a <see cref="Stream"/> is backed by
+/// <see cref="PipeWriter"/>. Documents are consumed and produced incrementally, so a stream does
+/// not need to be seekable. The span overload is a contiguous in-memory fast path. Trailing bytes
+/// after the root value are ignored; a stream-backed pipe may read some of them into its buffer.
 /// </para>
 /// <para>
 /// A generic call whose declared type is <see cref="NbtRoot"/> writes only the contained value and
@@ -93,6 +93,10 @@ public static class NbtSerializer
     /// <param name="value">The value to serialize.</param>
     /// <param name="rootName">The root tag name. Empty is valid.</param>
     /// <param name="options">The serializer options, or the defaults.</param>
+    /// <remarks>
+    /// The document is written through a <see cref="PipeWriter"/> over the stream and flushed when
+    /// the document is complete. The stream stays open.
+    /// </remarks>
     public static void Serialize<T>(
         Stream destination,
         T value,
@@ -101,9 +105,20 @@ public static class NbtSerializer
     {
         ArgumentNullException.ThrowIfNull(destination);
 
-        var bufferWriter = new NbtStreamBufferWriter(destination);
-        Serialize(bufferWriter, value, rootName, options);
-        bufferWriter.Flush();
+        var pipeWriter = PipeWriter.Create(
+            destination,
+            new StreamPipeWriterOptions(leaveOpen: true));
+        try
+        {
+            Serialize(pipeWriter, value, rootName, options);
+        }
+        catch (Exception ex)
+        {
+            pipeWriter.Complete(ex);
+            throw;
+        }
+
+        pipeWriter.Complete();
     }
 
     /// <summary>Deserializes a complete NBT document from a span.</summary>

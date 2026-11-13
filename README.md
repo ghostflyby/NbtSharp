@@ -6,7 +6,7 @@ An NBT (Named Binary Tag) library for .NET with a `System.Text.Json`-style seria
 - Java Edition encoding: big-endian fixed-width numbers and Java modified UTF-8 strings.
 - Union-based DOM: `NbtValue` is a C# 15 union, while `NbtList` is a hand-written `[Union]` struct.
 - Converter-based serialization over `ReadOnlySpan<byte>`, `ReadOnlySequence<byte>`,
-  `PipeReader`, and `IBufferWriter<byte>`.
+  `PipeReader`/`PipeWriter`, and `IBufferWriter<byte>`.
 
 ## Design
 
@@ -39,7 +39,7 @@ The serialization layer is split like `System.Text.Json`:
 
 - `NbtReader` and `NbtWriter` are `ref struct` token APIs. The reader consumes a span or a
   `PipeReader`; a `ReadOnlySequence<byte>` is exposed through a pipe reader. The writer targets an
-  `IBufferWriter<byte>`.
+  `IBufferWriter<byte>` or a `PipeWriter`.
 - `NbtSerializer` provides generic `Serialize<T>` / `Deserialize<T>` entry points plus DOM
   convenience overloads.
 - `NbtConverter<T>` converts one CLR type. A converter may choose a different NBT tag type for
@@ -92,10 +92,11 @@ the members is used. Unknown members are skipped and missing members keep their 
 
 ## Streaming
 
-The reader pulls data from a `PipeReader` incrementally, so a document does not need to be buffered
-in memory. `NbtSerializer.Deserialize(Stream)` and `Deserialize(ReadOnlySequence<byte>)` create the
-appropriate pipe reader; a stream does not need to be seekable. The span overload remains a
-contiguous in-memory fast path.
+The reader pulls data from a `PipeReader` incrementally, and the writer pushes data into a
+`PipeWriter`, so a document does not need to be buffered in memory.
+`NbtSerializer.Deserialize(Stream)` and `Deserialize(ReadOnlySequence<byte>)` create the appropriate
+pipe reader, and `Serialize(Stream)` creates a pipe writer; a stream does not need to be seekable.
+The span overload remains a contiguous in-memory fast path.
 
 The reader produces value and container tokens. Compound members carry a name; list elements do not:
 
@@ -221,13 +222,14 @@ The generic serializer can resolve reflection and construct closed generic conve
 its entry points are annotated with `RequiresUnreferencedCode` and `RequiresDynamicCode`. The
 reflection resolver is opt-in. A source generator for fully AOT-safe type information is planned.
 
-The `Stream` overloads are synchronous adapters over `PipeReader`. `Deserialize(Stream)` consumes
-the stream incrementally, so it works with non-seekable streams and does not buffer the document as
-a whole. `Deserialize(PipeReader)` is available when the caller owns the pipe; consecutive calls can
-read consecutive documents because each call advances the pipe. A stream adapter creates its own
-pipe, so it reads ahead and is intended for one document. Trailing bytes after the root value are
-ignored, although the pipe may already have read them from the stream. The writer does not roll back
-partial output if a converter throws.
+The `Stream` overloads are synchronous adapters over `PipeWriter` and `PipeReader`.
+`Serialize(Stream)` writes through a pipe writer and flushes when the document is complete.
+`Deserialize(Stream)` consumes the stream incrementally, so it works with non-seekable streams and
+does not buffer the document as a whole. `Deserialize(PipeReader)` is available when the caller owns
+the pipe; consecutive calls can read consecutive documents because each call advances the pipe. A
+stream adapter creates its own pipe, so it reads ahead and is intended for one document. Trailing
+bytes after the root value are ignored, although the pipe may already have read them from the
+stream. The writer does not roll back partial output if a converter throws.
 
 ## Build and test
 
