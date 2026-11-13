@@ -37,22 +37,24 @@ public ref struct NbtReader
 
     private static readonly ModifiedUTF8Encoding StringEncoding = new(throwOnInvalidBytes: true);
 
-    private readonly ReadOnlySpan<byte> _span;
+    private ReadOnlySpan<byte> _span;
     private readonly PipeReader? _pipe;
     private readonly NbtRootFormat _rootFormat;
     private readonly int _maxDepth;
     private readonly int _maxCollectionLength;
     private readonly long _maxDocumentBytes;
-    private SequenceReader<byte> _sequence;
     private ReadOnlySequence<byte> _buffer;
+    private SequencePosition _nextSegmentPosition;
+    private SequencePosition _currentSegmentStart;
     private List<ContainerState>? _containers;
     private long[]? _valuesReadAtDepth;
-    private long _consumedBeforeBuffer;
-    private int _offset;
+    private long _currentSegmentOffset;
+    private long _consumed;
     private long _tokenStart;
     private long _valueStart;
     private bool _pipeInitialized;
     private bool _pipeCompleted;
+    private bool _readResultPending;
     private bool _ownsPipe;
     private bool _rootRead;
     private bool _rootComplete;
@@ -144,10 +146,16 @@ public ref struct NbtReader
             return;
         }
 
-        _consumedBeforeBuffer += _sequence.Consumed;
-        _pipe.AdvanceTo(_sequence.Position, _buffer.End);
-        _sequence = default;
+        if (_readResultPending)
+        {
+            AdvancePipe();
+        }
+
         _buffer = default;
+        _nextSegmentPosition = default;
+        _currentSegmentStart = default;
+        _span = default;
+        _currentSegmentOffset = 0;
         _pipeInitialized = false;
     }
 
@@ -172,8 +180,7 @@ public ref struct NbtReader
     public readonly string? Name => _name;
 
     /// <summary>Gets the number of bytes consumed from the start of the document.</summary>
-    public readonly long BytesConsumed =>
-        _pipe is null ? _offset : _consumedBeforeBuffer + _sequence.Consumed;
+    public readonly long BytesConsumed => _consumed;
 
     /// <summary>Gets the number of containers currently open, including the container of the current token.</summary>
     public readonly int CurrentDepth => _containers?.Count ?? 0;
@@ -568,7 +575,7 @@ public ref struct NbtReader
         }
 
         var required = (long)count * minimumSize;
-        if (required > _span.Length - _offset)
+        if (required > _span.Length)
         {
             throw new NbtException(
                 $"The NBT list declares {count} elements but the remaining data is too short.")
@@ -797,29 +804,14 @@ public ref struct NbtReader
             return string.Empty;
         }
 
-        if (_pipe is null)
-        {
-            if (length > _span.Length - _offset)
-            {
-                throw new NbtException("Unexpected end of NBT data while reading a string.")
-                {
-                    BytePosition = position,
-                };
-            }
-
-            var span = _span.Slice(_offset, length);
-            var result = DecodeString(span, position);
-            _offset += length;
-            return result;
-        }
-
-        EnsurePipeInitialized();
         EnsureDocumentSize(length);
-        if (_sequence.UnreadSpan.Length >= length)
+        if (_span.Length >= length)
         {
-            var bytes = _sequence.UnreadSpan[..length];
+            var bytes = _span[..length];
             var value = DecodeString(bytes, position);
-            _sequence.Advance(length);
+            _span = _span[length..];
+            _currentSegmentOffset += length;
+            _consumed += length;
             return value;
         }
 
@@ -875,41 +867,11 @@ public ref struct NbtReader
             return;
         }
 
-        if (_pipe is null)
-        {
-            if (destination.Length > _span.Length - _offset)
-            {
-                throw new NbtException("Unexpected end of NBT data.")
-                {
-                    BytePosition = BytesConsumed,
-                };
-            }
-
-            _span.Slice(_offset, destination.Length).CopyTo(destination);
-            _offset += destination.Length;
-            return;
-        }
-
-        EnsurePipeInitialized();
         EnsureDocumentSize(destination.Length);
         var offset = 0;
         while (offset < destination.Length)
         {
-            if (_sequence.Remaining == 0)
-            {
-                if (!TryRefill())
-                {
-                    throw new NbtException("Unexpected end of NBT data.")
-                    {
-                        BytePosition = BytesConsumed,
-                    };
-                }
-
-                continue;
-            }
-
-            var count = (int)Math.Min(_sequence.Remaining, destination.Length - offset);
-            if (!_sequence.TryCopyTo(destination.Slice(offset, count)))
+            if (!EnsureData())
             {
                 throw new NbtException("Unexpected end of NBT data.")
                 {
@@ -917,8 +879,12 @@ public ref struct NbtReader
                 };
             }
 
-            _sequence.Advance(count);
-            offset += count;
+            var take = Math.Min(_span.Length, destination.Length - offset);
+            _span[..take].CopyTo(destination[offset..]);
+            _span = _span[take..];
+            _currentSegmentOffset += take;
+            _consumed += take;
+            offset += take;
         }
     }
 
@@ -937,9 +903,10 @@ public ref struct NbtReader
             return;
         }
 
-        if (_pipe is null)
+        EnsureDocumentSize(count);
+        while (count > 0)
         {
-            if (count > _span.Length - _offset)
+            if (!EnsureData())
             {
                 throw new NbtException("Unexpected end of NBT data.")
                 {
@@ -947,71 +914,80 @@ public ref struct NbtReader
                 };
             }
 
-            _offset += (int)count;
-            return;
-        }
-
-        EnsurePipeInitialized();
-        EnsureDocumentSize(count);
-        while (count > 0)
-        {
-            if (_sequence.Remaining == 0)
-            {
-                if (!TryRefill())
-                {
-                    throw new NbtException("Unexpected end of NBT data.")
-                    {
-                        BytePosition = BytesConsumed,
-                    };
-                }
-
-                continue;
-            }
-
-            var take = Math.Min(count, _sequence.Remaining);
-            _sequence.Advance(take);
+            var take = Math.Min(count, _span.Length);
+            _span = _span[(int)take..];
+            _currentSegmentOffset += take;
+            _consumed += take;
             count -= take;
         }
     }
 
     private bool TryReadByte(out byte value)
     {
-        if (_pipe is null)
+        if (!EnsureData())
         {
-            if (_offset < _span.Length)
-            {
-                value = _span[_offset];
-                _offset++;
-                return true;
-            }
-
             value = 0;
             return false;
         }
 
-        EnsurePipeInitialized();
-        while (_sequence.Remaining == 0)
-        {
-            if (!TryRefill())
-            {
-                value = 0;
-                return false;
-            }
-        }
-
         EnsureDocumentSize(1);
-        return _sequence.TryRead(out value);
+        value = _span[0];
+        _span = _span[1..];
+        _currentSegmentOffset++;
+        _consumed++;
+        return true;
     }
 
-    private void EnsurePipeInitialized()
+    private bool EnsureData() => !_span.IsEmpty || MoveNext();
+
+    private bool MoveNext()
     {
-        if (_pipe is null || _pipeInitialized)
+        if (_pipe is null)
         {
-            return;
+            return false;
         }
 
-        _pipeInitialized = true;
-        FillFromPipe();
+        if (!_pipeInitialized)
+        {
+            FillFromPipe();
+            _pipeInitialized = true;
+        }
+
+        while (true)
+        {
+            if (TryGetNextSegment())
+            {
+                return true;
+            }
+
+            if (_pipeCompleted)
+            {
+                return false;
+            }
+
+            AdvancePipe();
+            FillFromPipe();
+        }
+    }
+
+    private bool TryGetNextSegment()
+    {
+        while (true)
+        {
+            var start = _nextSegmentPosition;
+            if (!_buffer.TryGet(ref _nextSegmentPosition, out var memory, advance: true))
+            {
+                return false;
+            }
+
+            if (!memory.IsEmpty)
+            {
+                _currentSegmentStart = start;
+                _currentSegmentOffset = 0;
+                _span = memory.Span;
+                return true;
+            }
+        }
     }
 
     private void FillFromPipe()
@@ -1022,21 +998,19 @@ public ref struct NbtReader
         }
 
         _buffer = result.Buffer;
-        _sequence = new SequenceReader<byte>(result.Buffer);
+        _nextSegmentPosition = _buffer.Start;
         _pipeCompleted = result.IsCompleted;
+        _readResultPending = true;
+        _span = default;
     }
 
-    private bool TryRefill()
+    private void AdvancePipe()
     {
-        if (_pipeCompleted)
-        {
-            return false;
-        }
-
-        _consumedBeforeBuffer += _sequence.Consumed;
-        _pipe!.AdvanceTo(_sequence.Position, _buffer.End);
-        FillFromPipe();
-        return _sequence.Remaining > 0 || !_pipeCompleted;
+        var consumed = _buffer.IsEmpty
+            ? _buffer.End
+            : _buffer.GetPosition(_currentSegmentOffset, _currentSegmentStart);
+        _pipe!.AdvanceTo(consumed, _buffer.End);
+        _readResultPending = false;
     }
 
     private void EnsureDocumentSize(long count)

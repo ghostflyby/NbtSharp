@@ -58,6 +58,24 @@ public sealed class NbtSequenceTests
     }
 
     [Fact]
+    public void DeserializesAcrossEmptySegments()
+    {
+        var data = BuildDocument();
+        var first = new Segment(ReadOnlyMemory<byte>.Empty);
+        var second = first.Append(data.AsMemory(0, 5));
+        var third = second.Append(ReadOnlyMemory<byte>.Empty);
+        var fourth = third.Append(data.AsMemory(5));
+        var fifth = fourth.Append(ReadOnlyMemory<byte>.Empty);
+        var sequence = new ReadOnlySequence<byte>(first, 0, fifth, fifth.Memory.Length);
+
+        var actual = NbtSerializer.Deserialize(sequence);
+
+        Assert.Equal("root", actual.Name);
+        var compound = (NbtCompound)actual.Value.Value!;
+        Assert.Equal("a long string value that crosses segments", compound["Text"] is string text ? text : "");
+    }
+
+    [Fact]
     public void GenericDeserializationWorksOverSegments()
     {
         var data = NbtSerializer.Serialize(new List<int> { 1, 2, 3 }, "root");
