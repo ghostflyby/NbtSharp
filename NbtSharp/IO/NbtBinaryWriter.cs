@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using Myitian.Text;
 
 namespace NbtSharp.IO;
 
@@ -74,20 +75,18 @@ internal sealed class NbtBinaryWriter(Stream stream)
     /// <exception cref="NbtException">The encoded string exceeds 65535 bytes.</exception>
     public void WriteString(string value)
     {
-        var byteCount = JavaModifiedUtf8.GetByteCount(value);
-        if (byteCount > JavaModifiedUtf8.MaxByteCount)
+        var bytes = ModifiedUTF8Encoding.Instance.GetBytes(value);
+        if (bytes.Length > ushort.MaxValue)
         {
-            throw new NbtException($"The string is too long to encode: {byteCount} bytes.");
+            throw new NbtException($"The string is too long to encode: {bytes.Length} bytes.");
         }
 
-        WriteUInt16((ushort)byteCount);
-        if (byteCount == 0)
+        WriteUInt16((ushort)bytes.Length);
+        if (bytes.Length == 0)
         {
             return;
         }
 
-        var buffer = new byte[byteCount];
-        JavaModifiedUtf8.Encode(value, buffer);
-        WriteBytes(buffer);
+        WriteBytes(bytes);
     }
 }

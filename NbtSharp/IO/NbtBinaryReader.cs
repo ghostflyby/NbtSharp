@@ -1,4 +1,6 @@
 using System.Buffers.Binary;
+using System.Text;
+using Myitian.Text;
 
 namespace NbtSharp.IO;
 
@@ -11,6 +13,8 @@ namespace NbtSharp.IO;
 /// </remarks>
 internal sealed class NbtBinaryReader(Stream stream)
 {
+    private static readonly ModifiedUTF8Encoding StringEncoding = new(throwOnInvalidBytes: true);
+
     /// <summary>Reads exactly <paramref name="destination"/>.Length bytes.</summary>
     /// <param name="destination">The buffer to fill.</param>
     /// <exception cref="NbtException">The stream ends before the buffer is filled.</exception>
@@ -125,6 +129,13 @@ internal sealed class NbtBinaryReader(Stream stream)
     {
         int length = ReadUInt16();
         var bytes = ReadBytes(length);
-        return JavaModifiedUtf8.Decode(bytes);
+        try
+        {
+            return StringEncoding.GetString(bytes);
+        }
+        catch (DecoderFallbackException ex)
+        {
+            throw new NbtException("Invalid modified UTF-8 string.", ex);
+        }
     }
 }

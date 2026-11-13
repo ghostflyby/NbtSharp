@@ -1,5 +1,3 @@
-using NbtSharp.IO;
-
 namespace NbtSharp.Tests;
 
 public sealed class JavaStringTests
@@ -69,14 +67,37 @@ public sealed class JavaStringTests
     }
 
     [Theory]
-    [InlineData(new byte[] { 0x00 })]
     [InlineData(new byte[] { 0xC1 })]
     [InlineData(new byte[] { 0xC0, 0x41 })]
     [InlineData(new byte[] { 0xE0, 0x80 })]
-    [InlineData(new byte[] { 0xF0, 0x80, 0x80, 0x80 })]
-    public void RejectsMalformedModifiedUtf8(byte[] bytes)
+    [InlineData(new byte[] { 0xED, 0xA0 })]
+    [InlineData(new byte[] { 0xF0, 0x9F })]
+    public void RejectsMalformedModifiedUtf8(byte[] payload)
     {
-        Assert.Throws<NbtException>(() => JavaModifiedUtf8.Decode(bytes));
+        using var stream = new MemoryStream(BuildRootString(payload));
+
+        Assert.Throws<NbtException>(() => NbtSerializer.Deserialize(stream));
+    }
+
+    [Fact]
+    public void DecodesStandardUtf8AsALenientExtension()
+    {
+        using var emoji = new MemoryStream(BuildRootString([0xF0, 0x9F, 0x98, 0x80]));
+        using var nul = new MemoryStream(BuildRootString([0x00]));
+
+        Assert.True(NbtSerializer.Deserialize(emoji).Value is string text && text == "\U0001F600");
+        Assert.True(NbtSerializer.Deserialize(nul).Value is string zero && zero == "\0");
+    }
+
+    private static byte[] BuildRootString(byte[] payload)
+    {
+        var bytes = new List<byte>
+        {
+            (byte)NbtTagType.String, 0x00, 0x01, (byte)'v',
+            (byte)(payload.Length >> 8), (byte)payload.Length,
+        };
+        bytes.AddRange(payload);
+        return bytes.ToArray();
     }
 
     private static byte[] StringPayload(NbtRoot root)

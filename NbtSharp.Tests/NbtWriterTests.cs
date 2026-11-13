@@ -138,7 +138,7 @@ public sealed class NbtWriterTests
     {
         using var stream = new MemoryStream();
         var writer = new NbtWriter(stream);
-        var name = new string('a', NbtSharp.IO.JavaModifiedUtf8.MaxByteCount + 1);
+        var name = new string('a', ushort.MaxValue + 1);
 
         Assert.Throws<NbtException>(() => writer.WriteStartCompound(name));
         Assert.Equal(0, stream.Length);
