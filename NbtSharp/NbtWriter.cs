@@ -230,6 +230,8 @@ public sealed class NbtWriter : IDisposable
     /// <summary>Writes a string element inside the current list.</summary>
     public void WriteElement(string value)
     {
+        ArgumentNullException.ThrowIfNull(value);
+        ValidateStringLength(value);
         BeginListElement(NbtTagType.String);
         _writer.WriteString(value);
     }

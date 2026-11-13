@@ -13,7 +13,7 @@ namespace NbtSharp.IO;
 /// </remarks>
 internal sealed class NbtBinaryReader(Stream stream)
 {
-    private static readonly ModifiedUTF8Encoding StringEncoding = new(throwOnInvalidBytes: true);
+    private readonly ModifiedUTF8Encoding _stringEncoding = new(throwOnInvalidBytes: true);
 
     /// <summary>Reads exactly <paramref name="destination"/>.Length bytes.</summary>
     /// <param name="destination">The buffer to fill.</param>
@@ -125,13 +125,26 @@ internal sealed class NbtBinaryReader(Stream stream)
     }
 
     /// <summary>Reads a length-prefixed modified UTF-8 string.</summary>
+    /// <remarks>
+    /// Java's <c>DataInputStream.readUTF</c> rejects any lead byte of 0xF0 or greater, so standard
+    /// UTF-8 four-byte sequences are rejected here as well. Raw null bytes and overlong three-byte
+    /// forms are accepted, matching that reader.
+    /// </remarks>
     public string ReadString()
     {
         int length = ReadUInt16();
         var bytes = ReadBytes(length);
+        foreach (var value in bytes)
+        {
+            if (value >= 0xF0)
+            {
+                throw new NbtException("Invalid modified UTF-8 string: lead bytes of 0xF0 or greater are not allowed.");
+            }
+        }
+
         try
         {
-            return StringEncoding.GetString(bytes);
+            return _stringEncoding.GetString(bytes);
         }
         catch (DecoderFallbackException ex)
         {

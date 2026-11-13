@@ -75,12 +75,13 @@ internal sealed class NbtBinaryWriter(Stream stream)
     /// <exception cref="NbtException">The encoded string exceeds 65535 bytes.</exception>
     public void WriteString(string value)
     {
-        var bytes = ModifiedUTF8Encoding.Instance.GetBytes(value);
-        if (bytes.Length > ushort.MaxValue)
+        int byteCount = ModifiedUTF8Encoding.Instance.GetByteCount(value);
+        if (byteCount > ushort.MaxValue)
         {
-            throw new NbtException($"The string is too long to encode: {bytes.Length} bytes.");
+            throw new NbtException($"The string is too long to encode: {byteCount} bytes.");
         }
 
+        var bytes = ModifiedUTF8Encoding.Instance.GetBytes(value);
         WriteUInt16((ushort)bytes.Length);
         if (bytes.Length == 0)
         {

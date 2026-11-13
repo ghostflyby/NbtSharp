@@ -145,6 +145,20 @@ public sealed class NbtWriterTests
     }
 
     [Fact]
+    public void OverlongStringValueThrowsWithoutPartialWrite()
+    {
+        using var stream = new MemoryStream();
+        var writer = new NbtWriter(stream);
+        writer.WriteStartCompound("root");
+        long headerLength = stream.Length;
+        var value = new string('中', 21846); // 65538 bytes
+
+        Assert.Throws<NbtException>(() => writer.WriteString("v", value));
+        Assert.Equal(headerLength, stream.Length);
+        Assert.Throws<NbtException>(() => writer.Dispose());
+    }
+
+    [Fact]
     public void ArraysAreWrittenWithLengthPrefix()
     {
         using var stream = new MemoryStream();

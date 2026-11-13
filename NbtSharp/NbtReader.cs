@@ -192,6 +192,11 @@ public sealed class NbtReader : IDisposable
     public double GetDouble() => Expect(NbtTagType.Double) ? _reader.ReadDouble() : default;
 
     /// <summary>Reads the current value as a string.</summary>
+    /// <remarks>
+    /// Strings use Java modified UTF-8. Decoding follows <c>DataInputStream.readUTF</c>: lead bytes
+    /// of 0xF0 or greater are rejected, while raw null bytes and overlong three-byte forms are
+    /// accepted and normalized when the value is written again.
+    /// </remarks>
     public string GetString() => Expect(NbtTagType.String) ? _reader.ReadString() : string.Empty;
 
     /// <summary>Reads the current value as a byte array.</summary>
