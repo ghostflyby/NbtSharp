@@ -3,7 +3,8 @@
 An NBT (Named Binary Tag) library built on C# union types.
 
 - `net11.0`, Native AOT compatible (`IsAotCompatible`).
-- Uses C# 15 union declarations, which .NET 11 and its default language version support directly.
+- Uses C# 15 union types: `NbtValue` is a `union` declaration, while `NbtList` is a hand-written
+  `[Union]` struct.
 
 ## Design
 
@@ -30,12 +31,13 @@ public sealed class NbtCompound : Dictionary<string, NbtValue>;
 ```
 
 Scalars use the CLR type whose width matches the NBT type, so tag identity is preserved by the type
-system. `NbtList` is a hand-written union: its cases are standard `List<T>` values, which keeps
-elements homogeneous while the closed case set restricts them to legal NBT element types. A
-default-initialized `NbtList` stores no list and represents `TAG_List<TAG_End>`; its `Value` returns
-the shared `NbtEndList.Instance` marker, so `default(NbtList) is NbtEndList` is true and
-`default(NbtList) is null` is false. An empty list of a known element type still encodes as that type
-with length zero, so the two empty-list encodings stay distinct.
+system. `NbtList` is a hand-written union: its twelve element cases are standard `List<T>` values,
+and the thirteenth is the `NbtEndList` marker. A default-initialized `NbtList` stores no list and
+represents `TAG_List<TAG_End>`; its `Value` returns the shared `NbtEndList.Instance` marker, so
+`default(NbtList) is NbtEndList` is true and `default(NbtList) is null` is false. An empty list of a
+known element type still encodes as that type with length zero, so the two empty-list encodings stay
+distinct. Because `NbtValue` stores its case as a boxed object, test an End list through the list
+value (`nbtValue is NbtList list && list is NbtEndList`); `nbtValue.Value is NbtEndList` is false.
 
 ## Usage
 

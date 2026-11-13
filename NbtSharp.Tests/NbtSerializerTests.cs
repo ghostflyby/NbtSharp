@@ -101,11 +101,64 @@ public sealed class NbtSerializerTests
         var root = new NbtRoot("root", new NbtCompound { ["Empty"] = default(NbtList) });
 
         var actual = (NbtCompound)RoundTrip(root).Value.Value!;
-        var list = actual["Empty"] is NbtList value ? value : default;
+        Assert.True(actual["Empty"] is NbtList);
+        var list = (NbtList)actual["Empty"].Value!;
 
         Assert.Same(NbtEndList.Instance, list.Value);
         Assert.Equal(0, list.Count);
         Assert.Equal(NbtTagType.End, list.ElementType);
+    }
+
+    [Fact]
+    public void NestedListContainingEndListRoundTrips()
+    {
+        var root = new NbtRoot("root", new NbtCompound
+        {
+            ["Outer"] = new NbtList(new List<NbtList>
+            {
+                default,
+                new List<int> { 1 },
+            }),
+        });
+
+        var actual = (NbtCompound)RoundTrip(root).Value.Value!;
+        Assert.True(actual["Outer"] is NbtList);
+        var outer = (NbtList)actual["Outer"].Value!;
+        var elements = (List<NbtList>)outer.Value;
+
+        Assert.Equal(NbtTagType.List, outer.ElementType);
+        Assert.Equal(2, outer.Count);
+        Assert.Equal(NbtTagType.End, elements[0].ElementType);
+        Assert.Same(NbtEndList.Instance, elements[0].Value);
+        Assert.Equal(NbtTagType.Int, elements[1].ElementType);
+        Assert.Equal(new List<int> { 1 }, (List<int>)elements[1].Value);
+    }
+
+    [Fact]
+    public void EndListRootRoundTrips()
+    {
+        var actual = RoundTrip(new NbtRoot("root", default(NbtList)));
+
+        Assert.Equal("root", actual.Name);
+        Assert.True(actual.Value is NbtList);
+        var list = (NbtList)actual.Value.Value!;
+        Assert.Equal(NbtTagType.End, list.ElementType);
+        Assert.Equal(0, list.Count);
+        Assert.Same(NbtEndList.Instance, list.Value);
+    }
+
+    [Fact]
+    public void UnnamedEndListRootRoundTrips()
+    {
+        var options = new NbtSerializerOptions { RootFormat = NbtRootFormat.Unnamed };
+
+        var actual = RoundTrip(new NbtRoot(null, default(NbtList)), options);
+
+        Assert.Null(actual.Name);
+        Assert.True(actual.Value is NbtList);
+        var list = (NbtList)actual.Value.Value!;
+        Assert.Equal(NbtTagType.End, list.ElementType);
+        Assert.Same(NbtEndList.Instance, list.Value);
     }
 
     [Fact]

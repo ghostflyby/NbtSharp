@@ -98,6 +98,12 @@ public sealed class NbtListTests
         Assert.Throws<ArgumentNullException>(() => new NbtList((List<int>)null!));
     }
 
+    [Fact]
+    public void ConstructingWithANullEndMarkerIsRejected()
+    {
+        Assert.Throws<ArgumentNullException>(() => new NbtList((NbtEndList)null!));
+    }
+
     private static string Describe(NbtList list) => list switch
     {
         NbtEndList => "end",
