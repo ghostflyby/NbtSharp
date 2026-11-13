@@ -179,8 +179,15 @@ public static class NbtSerializer
     {
         ArgumentNullException.ThrowIfNull(stream);
         options ??= new NbtSerializerOptions();
-        var data = ReadStream(stream, options.MaxDocumentBytes);
-        return Deserialize<T>(data.AsSpan(), out rootName, options);
+        var (buffer, length) = ReadStream(stream, options.MaxDocumentBytes);
+        try
+        {
+            return Deserialize<T>(buffer.AsSpan(0, length), out rootName, options);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
     }
 
     /// <summary>Writes one unnamed value using <paramref name="writer"/>.</summary>
@@ -601,23 +608,88 @@ public static class NbtSerializer
         }
     }
 
-    private static byte[] ReadStream(Stream stream, long maxBytes)
+    private static (byte[] Buffer, int Length) ReadStream(Stream stream, long maxBytes)
     {
-        var buffer = new ArrayBufferWriter<byte>();
-        while (true)
+        var initialCapacity = 16 * 1024;
+        if (stream.CanSeek)
         {
-            var span = buffer.GetSpan(8192);
-            var read = stream.Read(span);
-            if (read == 0)
+            try
             {
-                return buffer.WrittenSpan.ToArray();
+                var remaining = stream.Length - stream.Position;
+                if (remaining > 0)
+                {
+                    initialCapacity = (int)Math.Min(remaining, 1024 * 1024);
+                }
             }
+            catch (NotSupportedException)
+            {
+                // Some seekable streams do not expose Length or Position.
+            }
+        }
 
-            buffer.Advance(read);
-            if (maxBytes > 0 && buffer.WrittenCount > maxBytes)
+        if (maxBytes is > 0 and < int.MaxValue)
+        {
+            initialCapacity = (int)Math.Min(initialCapacity, maxBytes + 1);
+        }
+
+        initialCapacity = Math.Max(initialCapacity, 1);
+        var buffer = ArrayPool<byte>.Shared.Rent(initialCapacity);
+        var length = 0;
+        try
+        {
+            while (true)
             {
-                throw new NbtException($"The NBT document exceeds the configured limit of {maxBytes} bytes.");
+                if (length == buffer.Length)
+                {
+                    var newCapacity = buffer.Length <= int.MaxValue / 2 ? buffer.Length * 2 : int.MaxValue;
+                    if (maxBytes is > 0 and < int.MaxValue && newCapacity > maxBytes + 1)
+                    {
+                        newCapacity = (int)(maxBytes + 1);
+                    }
+
+                    if (newCapacity <= buffer.Length)
+                    {
+                        throw new NbtException("The NBT document is too large to buffer in memory.");
+                    }
+
+                    var newBuffer = ArrayPool<byte>.Shared.Rent(newCapacity);
+                    buffer.AsSpan(0, length).CopyTo(newBuffer);
+                    ArrayPool<byte>.Shared.Return(buffer);
+                    buffer = newBuffer;
+                }
+
+                var toRead = buffer.Length - length;
+                if (maxBytes > 0)
+                {
+                    var remainingLimit = maxBytes - length;
+                    if (remainingLimit < toRead)
+                    {
+                        toRead = remainingLimit <= 0 ? 1 : (int)remainingLimit + 1;
+                    }
+                }
+
+                var read = stream.Read(buffer.AsSpan(length, toRead));
+                if (read == 0)
+                {
+                    return (buffer, length);
+                }
+
+                if (read < 0 || read > toRead)
+                {
+                    throw new IOException("The stream returned an invalid byte count.");
+                }
+
+                length += read;
+                if (maxBytes > 0 && length > maxBytes)
+                {
+                    throw new NbtException($"The NBT document exceeds the configured limit of {maxBytes} bytes.");
+                }
             }
+        }
+        catch
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+            throw;
         }
     }
 }
