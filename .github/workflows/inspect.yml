@@ -40,7 +40,7 @@ jobs:
       # Pinned: the rule set changes between releases and would flip the gate.
       # Warnings and errors only: code scanning turns every result into an alert.
       - name: Run InspectCode
-        run: dotnet tool exec --yes JetBrains.ReSharper.GlobalTools@2026.2.3.1 -- inspectcode NbtSharp.slnx --output=inspect.sarif --format=Sarif --severity=WARNING --swea --verbosity=WARN
+        run: dotnet tool exec --yes JetBrains.ReSharper.GlobalTools@2026.3.0 -- inspectcode NbtSharp.slnx --output=inspect.sarif --format=Sarif --severity=WARNING --swea --verbosity=WARN
 
       # InspectCode exits 0 regardless of findings; only error level fails.
       - name: Enforce the failure gate
