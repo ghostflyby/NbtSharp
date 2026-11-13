@@ -28,103 +28,103 @@ namespace NbtSharp;
 [Union]
 public readonly struct NbtList
 {
-    private readonly object? _value;
     /// <summary>Initializes a list that wraps a list of signed 8-bit integers.</summary>
     public NbtList(List<sbyte> value)
     {
         ArgumentNullException.ThrowIfNull(value);
-        _value = value;
+        Value = value;
     }
 
     /// <summary>Initializes a list that wraps a list of signed 16-bit integers.</summary>
     public NbtList(List<short> value)
     {
         ArgumentNullException.ThrowIfNull(value);
-        _value = value;
+        Value = value;
     }
 
     /// <summary>Initializes a list that wraps a list of signed 32-bit integers.</summary>
     public NbtList(List<int> value)
     {
         ArgumentNullException.ThrowIfNull(value);
-        _value = value;
+        Value = value;
     }
 
     /// <summary>Initializes a list that wraps a list of signed 64-bit integers.</summary>
     public NbtList(List<long> value)
     {
         ArgumentNullException.ThrowIfNull(value);
-        _value = value;
+        Value = value;
     }
 
     /// <summary>Initializes a list that wraps a list of 32-bit IEEE 754 values.</summary>
     public NbtList(List<float> value)
     {
         ArgumentNullException.ThrowIfNull(value);
-        _value = value;
+        Value = value;
     }
 
     /// <summary>Initializes a list that wraps a list of 64-bit IEEE 754 values.</summary>
     public NbtList(List<double> value)
     {
         ArgumentNullException.ThrowIfNull(value);
-        _value = value;
+        Value = value;
     }
 
     /// <summary>Initializes a list that wraps a list of byte arrays.</summary>
     public NbtList(List<sbyte[]> value)
     {
         ArgumentNullException.ThrowIfNull(value);
-        _value = value;
+        Value = value;
     }
 
     /// <summary>Initializes a list that wraps a list of strings.</summary>
     public NbtList(List<string> value)
     {
         ArgumentNullException.ThrowIfNull(value);
-        _value = value;
+        Value = value;
     }
 
     /// <summary>Initializes a list that wraps a list of nested lists.</summary>
     public NbtList(List<NbtList> value)
     {
         ArgumentNullException.ThrowIfNull(value);
-        _value = value;
+        Value = value;
     }
 
     /// <summary>Initializes a list that wraps a list of compounds.</summary>
     public NbtList(List<NbtCompound> value)
     {
         ArgumentNullException.ThrowIfNull(value);
-        _value = value;
+        Value = value;
     }
 
     /// <summary>Initializes a list that wraps a list of integer arrays.</summary>
     public NbtList(List<int[]> value)
     {
         ArgumentNullException.ThrowIfNull(value);
-        _value = value;
+        Value = value;
     }
 
     /// <summary>Initializes a list that wraps a list of long arrays.</summary>
     public NbtList(List<long[]> value)
     {
         ArgumentNullException.ThrowIfNull(value);
-        _value = value;
+        Value = value;
     }
 
     /// <summary>Initializes a list whose elements are the <see cref="NbtTagType.End"/> marker.</summary>
     public NbtList(NbtEndList value)
     {
         ArgumentNullException.ThrowIfNull(value);
-        _value = null;
+        _ = value;
+        Value = null;
     }
 
     /// <summary>
     /// Gets the wrapped list, or <see cref="NbtEndList.Instance"/> when this value represents
     /// <c>TAG_List&lt;TAG_End&gt;</c>. The property never returns <see langword="null"/>.
     /// </summary>
-    public object Value => _value ?? NbtEndList.Instance;
+    public object Value => field ?? NbtEndList.Instance;
 
     /// <summary>
     /// Gets a value indicating whether this list holds a value. Always <see langword="true"/>
