@@ -178,9 +178,6 @@ internal static class NbtCollectionReader
             }
 
             if (definition == typeof(List<>) ||
-                definition == typeof(IList<>) ||
-                definition == typeof(ICollection<>) ||
-                definition == typeof(IEnumerable<>) ||
                 definition == typeof(IReadOnlyList<>) ||
                 definition == typeof(IReadOnlyCollection<>))
             {

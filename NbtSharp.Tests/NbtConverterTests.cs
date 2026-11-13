@@ -105,10 +105,10 @@ public sealed class NbtConverterTests
     [Fact]
     public void GenericCollectionsAndDictionaryInterfacesRoundTrip()
     {
-        IList<int> list = new List<int> { 1, 2, 3 };
+        IReadOnlyList<int> list = new List<int> { 1, 2, 3 };
         Assert.Equal(new[] { 1, 2, 3 }, RoundTrip(list));
 
-        IEnumerable<string> sequence = new[] { "a", "b" };
+        IReadOnlyCollection<string> sequence = new[] { "a", "b" };
         Assert.Equal(new[] { "a", "b" }, RoundTrip(sequence));
 
         IDictionary<string, int> dictionary = new Dictionary<string, int> { ["A"] = 1, ["B"] = 2 };
@@ -118,12 +118,22 @@ public sealed class NbtConverterTests
     }
 
     [Fact]
-    public void LazyEnumerableMustBeMaterialized()
+    public void EnumerableInterfacesMustBeMaterialized()
     {
         var sequence = LazyValues();
 
         Assert.Throws<NotSupportedException>(() => NbtSerializer.Serialize(sequence, "root"));
         Assert.Equal(new[] { 1, 2, 3 }, RoundTrip(sequence.ToList()));
+    }
+
+    [Fact]
+    public void CollectionInterfacesWithoutSizeGuaranteeAreUnsupported()
+    {
+        IList<int> list = new List<int> { 1 };
+        IEnumerable<int> sequence = new[] { 1 };
+
+        Assert.Throws<NotSupportedException>(() => NbtSerializer.Serialize(list, "root"));
+        Assert.Throws<NotSupportedException>(() => NbtSerializer.Serialize(sequence, "root"));
     }
 
     [Fact]

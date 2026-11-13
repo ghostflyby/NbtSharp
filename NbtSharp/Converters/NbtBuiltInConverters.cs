@@ -70,13 +70,10 @@ internal static class NbtBuiltInConverters
         }
 
         if (definition == typeof(List<>) ||
-            definition == typeof(IList<>) ||
-            definition == typeof(ICollection<>) ||
-            definition == typeof(IEnumerable<>) ||
             definition == typeof(IReadOnlyList<>) ||
             definition == typeof(IReadOnlyCollection<>))
         {
-            converter = CreateGeneric(typeof(NbtEnumerableConverter<,>), type, arguments[0]);
+            converter = CreateGeneric(typeof(NbtReadOnlyCollectionConverter<,>), type, arguments[0]);
             return true;
         }
 
