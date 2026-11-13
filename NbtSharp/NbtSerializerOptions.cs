@@ -116,8 +116,6 @@ public sealed class NbtSerializerOptions
         }
     }
 
-    internal int EffectiveMaxCollectionLength => _maxCollectionLength > 0 ? _maxCollectionLength : 16 * 1024 * 1024;
-
     internal NbtReaderOptions CreateReaderOptions() => new()
     {
         RootFormat = RootFormat,

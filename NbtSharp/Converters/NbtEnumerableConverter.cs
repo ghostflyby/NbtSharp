@@ -17,26 +17,15 @@ internal sealed class NbtEnumerableConverter<TCollection, TElement> : NbtConvert
     {
         ArgumentNullException.ThrowIfNull(value);
 
-        var count = NbtCollectionWriter.TryGetCount(value);
-        if (count >= 0)
+        if (value is not IReadOnlyCollection<TElement> collection)
         {
-            NbtCollectionWriter.WriteList(ref writer, value, count, options);
-            return;
+            throw new NotSupportedException(
+                $"Writing {typeof(TCollection)} requires the runtime value to implement " +
+                $"IReadOnlyCollection<{typeof(TElement)}> so the list length is known. " +
+                "Materialize the sequence or provide a custom converter.");
         }
 
-        var buffered = new List<TElement>();
-        foreach (var item in value)
-        {
-            if (buffered.Count >= options.EffectiveMaxCollectionLength)
-            {
-                throw new NbtException(
-                    $"The collection exceeds the configured limit of {options.EffectiveMaxCollectionLength} elements.");
-            }
-
-            buffered.Add(item);
-        }
-
-        NbtCollectionWriter.WriteList(ref writer, buffered, buffered.Count, options);
+        NbtCollectionWriter.WriteList(ref writer, collection, options);
     }
 
     public override bool TryGetTagType(TCollection value, NbtSerializerOptions options, out NbtTagType tagType)

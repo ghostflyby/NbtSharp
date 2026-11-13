@@ -118,6 +118,15 @@ public sealed class NbtConverterTests
     }
 
     [Fact]
+    public void LazyEnumerableMustBeMaterialized()
+    {
+        var sequence = LazyValues();
+
+        Assert.Throws<NotSupportedException>(() => NbtSerializer.Serialize(sequence, "root"));
+        Assert.Equal(new[] { 1, 2, 3 }, RoundTrip(sequence.ToList()));
+    }
+
+    [Fact]
     public void CustomConverterOverridesBuiltInConverter()
     {
         var options = new NbtSerializerOptions();
@@ -281,6 +290,13 @@ public sealed class NbtConverterTests
         var value = new Dictionary<string, string?> { ["Missing"] = null };
 
         Assert.Throws<NbtException>(() => NbtSerializer.Serialize(value, "root", options));
+    }
+
+    private static IEnumerable<int> LazyValues()
+    {
+        yield return 1;
+        yield return 2;
+        yield return 3;
     }
 
     private static T RoundTrip<T>(T value, NbtSerializerOptions? options = null)

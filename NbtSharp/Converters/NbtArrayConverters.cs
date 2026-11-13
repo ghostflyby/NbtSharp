@@ -82,7 +82,7 @@ internal sealed class NbtArrayConverter<TElement> : NbtConverter<TElement[]>
         NbtCollectionReader.ReadList<TElement>(ref reader, options).ToArray();
 
     public override void Write(ref NbtWriter writer, TElement[] value, NbtSerializerOptions options) =>
-        NbtCollectionWriter.WriteList(ref writer, value, value.Length, options);
+        NbtCollectionWriter.WriteList(ref writer, value, options);
 
     public override bool TryGetTagType(TElement[] value, NbtSerializerOptions options, out NbtTagType tagType)
     {

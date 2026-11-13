@@ -6,18 +6,12 @@ namespace NbtSharp.Converters;
 [UnconditionalSuppressMessage("Aot", "IL3050", Justification = "Reached only through annotated serializer entry points.")]
 internal static class NbtCollectionWriter
 {
-    public static int TryGetCount<TElement>(IEnumerable<TElement> value)
+    public static void WriteList<TElement>(
+        ref NbtWriter writer,
+        IReadOnlyCollection<TElement> value,
+        NbtSerializerOptions options)
     {
-        return value switch
-        {
-            ICollection<TElement> collection => collection.Count,
-            IReadOnlyCollection<TElement> collection => collection.Count,
-            _ => -1,
-        };
-    }
-
-    public static void WriteList<TElement>(ref NbtWriter writer, IEnumerable<TElement> value, int count, NbtSerializerOptions options)
-    {
+        var count = value.Count;
         if (count == 0)
         {
             writer.WriteStartList(NbtTagType.End, 0);

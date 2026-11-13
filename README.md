@@ -178,6 +178,10 @@ non-empty list, because the tag type must be known before the header is written.
 converter in those positions. Within a list, all elements must still share one actual tag type, and
 the writer validates every element against the predicted header type.
 
+Automatic list writing requires the runtime value to implement `IReadOnlyCollection<T>` so the
+length is known before the list header is written. A lazy `IEnumerable<T>` is rejected; materialize
+it first or provide a custom converter that writes the list header and elements itself.
+
 The generic writer encodes an empty collection as `TAG_List<TAG_End>`, which any target collection
 accepts. An empty list with a concrete element type is checked against the requested element type
 for built-in converters; custom converters and object-mapped element types are not inferred when
