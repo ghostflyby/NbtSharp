@@ -1,14 +1,16 @@
 # NbtSharp
 
-An NBT (Named Binary Tag) library built on C# union types.
+An NBT (Named Binary Tag) library for .NET with a `System.Text.Json`-style serialization layer.
 
-- `net11.0`, Native AOT compatible (`IsAotCompatible`).
-- Uses C# 15 union types: `NbtValue` is a `union` declaration, while `NbtList` is a hand-written
-  `[Union]` struct.
+- `net11.0`; Native AOT analysis is enabled.
+- Java Edition encoding: big-endian fixed-width numbers and Java modified UTF-8 strings.
+- Union-based DOM: `NbtValue` is a C# 15 union, while `NbtList` is a hand-written `[Union]` struct.
+- Converter-based serialization over `ReadOnlySpan<byte>`, `ReadOnlySequence<byte>`, and
+  `IBufferWriter<byte>`.
 
 ## Design
 
-The DOM mirrors the NBT type system directly:
+The DOM mirrors the NBT type system directly and is unchanged by the serialization layer:
 
 ```csharp
 public union NbtValue(
@@ -22,7 +24,6 @@ public readonly struct NbtList
     public NbtList(List<int> value) { }    // one constructor per element type
     public NbtList(NbtEndList value) { }   // TAG_List<TAG_End> marker
     public object Value { get; }           // never null
-    public bool HasValue { get; }          // always true
     public NbtTagType ElementType { get; }
     public int Count { get; }
 }
@@ -31,15 +32,24 @@ public sealed class NbtCompound : Dictionary<string, NbtValue>;
 ```
 
 Scalars use the CLR type whose width matches the NBT type, so tag identity is preserved by the type
-system. `NbtList` is a hand-written union: its twelve element cases are standard `List<T>` values,
-and the thirteenth is the `NbtEndList` marker. A default-initialized `NbtList` stores no list and
-represents `TAG_List<TAG_End>`; its `Value` returns the shared `NbtEndList.Instance` marker, so
-`default(NbtList) is NbtEndList` is true and `default(NbtList) is null` is false. An empty list of a
-known element type still encodes as that type with length zero, so the two empty-list encodings stay
-distinct. Because `NbtValue` stores its case as a boxed object, test an End list through the list
-value (`nbtValue is NbtList list && list is NbtEndList`); `nbtValue.Value is NbtEndList` is false.
+system. A default-initialized `NbtList` represents `TAG_List<TAG_End>`; an empty `List<int>` still
+encodes as `TAG_List<TAG_Int>` with length zero.
+
+The serialization layer is split like `System.Text.Json`:
+
+- `NbtReader` and `NbtWriter` are `ref struct` token APIs. The reader consumes a span or a
+  `ReadOnlySequence<byte>`; the writer targets an `IBufferWriter<byte>`.
+- `NbtSerializer` provides generic `Serialize<T>` / `Deserialize<T>` entry points plus DOM
+  convenience overloads.
+- `NbtConverter<T>` converts one CLR type. A converter may choose a different NBT tag type for
+  different values; `TryGetTagType` optionally predicts that type for list headers.
+- `NbtConverterFactory` creates converters for generic type families.
+- `NbtTypeInfo<T>` and `INbtTypeInfoResolver` describe a CLR type. The built-in
+  `NbtReflectionTypeInfoResolver` maps ordinary classes and structs to compounds.
 
 ## Usage
+
+DOM serialization:
 
 ```csharp
 var player = new NbtCompound
@@ -50,35 +60,44 @@ var player = new NbtCompound
     ["Alive"] = (sbyte)1,
 };
 
-if (player["Health"] is int health)
-{
-    Console.WriteLine(health);
-}
+byte[] data = NbtSerializer.Serialize(new NbtRoot("Player", player));
+NbtRoot root = NbtSerializer.Deserialize(data);
 
-using var stream = File.Create("player.nbt");
-NbtSerializer.Serialize(stream, new NbtRoot("Player", player));
+// DOM root with explicit options:
+byte[] configured = NbtSerializer.SerializeDocument(
+    new NbtRoot("Player", player),
+    new NbtSerializerOptions());
 ```
 
-Union pattern matching unwraps the contained value, so `player["Health"] is int health` tests the
-value rather than the union wrapper. Different integer widths produce different tag types:
+Generic serialization uses the same facade:
 
 ```csharp
-NbtValue a = (short)20; // TAG_Short
-NbtValue b = 20;        // TAG_Int
-NbtValue c = 20L;       // TAG_Long
+var options = new NbtSerializerOptions
+{
+    TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
+};
+
+byte[] bytes = NbtSerializer.Serialize(playerDto, "Player", options);
+PlayerDto copy = NbtSerializer.Deserialize<PlayerDto>(bytes, options);
+
+int value = NbtSerializer.Deserialize<int>(data, out string? rootName);
 ```
+
+Reflection mapping uses public instance properties by default. `[NbtPropertyName("name")]` renames a
+member, `[NbtIgnore]` excludes it, and public fields are included only with `[NbtInclude]`. A
+public parameterless constructor is preferred; otherwise a constructor whose parameter names match
+the members is used. Unknown members are skipped and missing members keep their defaults.
 
 ## Streaming
 
-`NbtReader` and `NbtWriter` expose the same encoding as a forward-only token stream, which avoids
-building a DOM for large files:
+The reader produces value and container tokens. Compound members carry a name; list elements do not:
 
 ```csharp
-using var reader = new NbtReader(stream);
+var reader = new NbtReader(data);
 
 while (reader.Read())
 {
-    Console.WriteLine($"{reader.TokenType} {reader.Name} {reader.TagType}");
+    Console.WriteLine($"{reader.TokenType} {reader.Name} {reader.TagType} depth={reader.CurrentDepth}");
     if (reader.TokenType == NbtTokenType.Value)
     {
         reader.Skip();
@@ -86,25 +105,111 @@ while (reader.Read())
 }
 ```
 
-A list header carries its element type and count, so `WriteStartList` takes the count up front and
-the writer verifies that exactly that many elements follow.
+The writer defers compound-member headers. `WritePropertyName` stores the name, and the next value
+or container-start call writes the tag type, name, and payload together:
 
-## Scope
+```csharp
+var buffer = new ArrayBufferWriter<byte>();
+var writer = new NbtWriter(buffer);
 
-This milestone covers the DOM types, Java Edition encoding (big-endian, fixed-width numbers, Java
-modified UTF-8 strings), the streaming reader and writer, and DOM serialization. Bedrock encodings
-and compression wrappers are not implemented yet.
+writer.WritePropertyName("Player");
+writer.WriteStartCompound();
+writer.WritePropertyName("Health");
+writer.WriteInt32(20);
+writer.WritePropertyName("Tags");
+writer.WriteStartList(NbtTagType.String, 2);
+writer.WriteString("a");
+writer.WriteString("b");
+writer.WriteEndList();
+writer.WriteEndCompound();
+writer.Complete();
 
-Strings are encoded and decoded through
-[Myitian.Text.ModifiedUTF8Encoding](https://github.com/Myitian/Modified-UTF8-Encoding). Decoding
-follows Java's `DataInputStream.readUTF`: sequences with a lead byte of 0xF0 or greater (standard
-UTF-8 four-byte forms) are rejected, while raw null bytes and overlong three-byte forms are
-accepted and normalized when the value is written again.
+byte[] bytes = buffer.WrittenSpan.ToArray();
+```
 
-Current decisions: compound members enumerate in dictionary insertion order (an implementation
-detail, not a contract); a duplicate name in binary data keeps the last occurrence; serializing an
-uninitialized `NbtValue` throws `NbtException`. `NbtValue` and `NbtList` are plain structs, so they
-compare by reference for reference-typed contents; a value-equality API is not yet provided.
+A list header carries its element type and count before the elements. The writer verifies that every
+element has the declared type and that exactly the declared number of elements were written.
+`WriteString` accepts both `string` and `ReadOnlySpan<char>`; the span overload is the
+allocation-free path and is used by the built-in string converter.
+
+## Converters
+
+A converter writes exactly one complete value; it does not write the member name. Dynamic tag types
+are allowed:
+
+```csharp
+public sealed class CompactInt32Converter : NbtConverter<int>
+{
+    public override int Read(ref NbtReader reader, NbtSerializerOptions options) => reader.TagType switch
+    {
+        NbtTagType.Byte => reader.GetSByte(),
+        NbtTagType.Short => reader.GetInt16(),
+        _ => reader.GetInt32(),
+    };
+
+    public override void Write(ref NbtWriter writer, int value, NbtSerializerOptions options)
+    {
+        if (value is >= sbyte.MinValue and <= sbyte.MaxValue)
+            writer.WriteSByte((sbyte)value);
+        else if (value is >= short.MinValue and <= short.MaxValue)
+            writer.WriteInt16((short)value);
+        else
+            writer.WriteInt32(value);
+    }
+
+    public override bool TryGetTagType(int value, NbtSerializerOptions options, out NbtTagType tagType)
+    {
+        tagType = value is >= sbyte.MinValue and <= sbyte.MaxValue
+            ? NbtTagType.Byte
+            : value is >= short.MinValue and <= short.MaxValue
+                ? NbtTagType.Short
+                : NbtTagType.Int;
+        return true;
+    }
+}
+```
+
+Add converters to `options.Converters`. Custom converters are checked before built-in converters.
+Within a list, all elements must still share one actual tag type. If a converter cannot predict its
+tag type, the first element is encoded into a temporary buffer to observe the real type; subsequent
+elements are validated against it.
+
+The generic writer encodes an empty collection as `TAG_List<TAG_End>`, which any target collection
+accepts. An empty list with a concrete element type is checked against the requested element type
+for built-in converters; custom converters and object-mapped element types are not inferred when
+the list is empty.
+
+## Options, null, and errors
+
+`NbtSerializerOptions` controls:
+
+- `Converters`, `TypeInfoResolver`, and `RootFormat` (named or unnamed root).
+- `NullValueHandling`: omit a null compound member (default) or throw. Null roots and null list
+  elements always throw because NBT has no null tag.
+- `RejectDuplicateCompoundNames`: keep the last duplicate (default) or throw.
+- `MaxDepth`, `MaxCollectionLength`, and `MaxDocumentBytes` safety limits. A value of 0 selects the
+  library default; `MaxDocumentBytes` 0 means unlimited.
+
+`NbtException` reports `BytePosition`, a JSON-path-like `Path` such as `$.Items[0].Count`, and the
+expected/actual tag types. API misuse (reading a value twice, closing a container that is not open)
+throws `InvalidOperationException`. A CLR type without a converter or type information throws
+`NotSupportedException`.
+
+## Scope and AOT
+
+This package implements Java Edition encoding. Bedrock encodings and compression wrappers are not
+implemented. Strings are encoded through
+[Myitian.Text.ModifiedUTF8Encoding](https://github.com/Myitian/Modified-UTF8-Encoding); decoding
+follows Java's `DataInputStream.readUTF` and rejects lead bytes of 0xF0 or greater.
+
+The generic serializer can resolve reflection and construct closed generic converters at runtime, so
+its entry points are annotated with `RequiresUnreferencedCode` and `RequiresDynamicCode`. The
+reflection resolver is opt-in. A source generator for fully AOT-safe type information is planned.
+
+The `Stream` overloads are synchronous adapters. `Deserialize(Stream)` reads the remaining stream
+into memory; use the span or sequence overloads when the document boundary matters. Trailing bytes
+after the root value are ignored. The writer does not roll back partial output if a converter
+throws.
 
 ## Build and test
 
@@ -113,8 +218,7 @@ dotnet build NbtSharp.slnx
 dotnet test NbtSharp.slnx
 ```
 
-Requires the .NET 11 SDK (see `global.json`). Tests run on
-[xunit.v3](https://xunit.net/) driven natively by `dotnet test` through
+Requires the .NET 11 SDK (see `global.json`). Tests run on xunit.v3 through
 Microsoft.Testing.Platform.
 
 ## License

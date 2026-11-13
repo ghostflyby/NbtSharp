@@ -1,3 +1,6 @@
+using System.Buffers;
+using Xunit.Sdk;
+
 namespace NbtSharp.Tests;
 
 public sealed class NbtReaderTests
@@ -6,12 +9,12 @@ public sealed class NbtReaderTests
     public void ProducesTheExpectedTokenSequence()
     {
         var bytes = BuildSampleDocument();
-        using var stream = new MemoryStream(bytes);
-        using var reader = new NbtReader(stream);
+        var reader = new NbtReader(bytes);
 
         Assert.True(reader.Read());
         Assert.Equal(NbtTokenType.StartCompound, reader.TokenType);
         Assert.Equal("root", reader.Name);
+        Assert.Equal(1, reader.CurrentDepth);
 
         Assert.True(reader.Read());
         Assert.Equal(NbtTokenType.Value, reader.TokenType);
@@ -28,7 +31,7 @@ public sealed class NbtReaderTests
         Assert.Equal(NbtTokenType.StartList, reader.TokenType);
         Assert.Equal("Position", reader.Name);
         Assert.Equal(NbtTagType.Double, reader.ListElementType);
-        Assert.Equal(3, reader.ListCount);
+        Assert.Equal(3, reader.ListLength);
 
         foreach (var expected in new[] { 1.0, 64.0, 2.0 })
         {
@@ -42,6 +45,7 @@ public sealed class NbtReaderTests
 
         Assert.True(reader.Read());
         Assert.Equal(NbtTokenType.EndCompound, reader.TokenType);
+        Assert.Equal(0, reader.CurrentDepth);
 
         Assert.False(reader.Read());
     }
@@ -50,8 +54,7 @@ public sealed class NbtReaderTests
     public void SkipConsumesTheCurrentValue()
     {
         var bytes = BuildSampleDocument();
-        using var stream = new MemoryStream(bytes);
-        using var reader = new NbtReader(stream);
+        var reader = new NbtReader(bytes);
 
         reader.Read(); // start compound
         reader.Read(); // Health
@@ -63,21 +66,26 @@ public sealed class NbtReaderTests
     }
 
     [Fact]
+    public void DefaultReaderIsRejected()
+    {
+        var reader = new NbtReader();
+
+        Throws<InvalidOperationException>(ref reader, static (ref value) => value.Read());
+    }
+
+    [Fact]
     public void SkipBeforeReadingThrows()
     {
-        using var stream = new MemoryStream();
+        var reader = new NbtReader([]);
 
-        using var reader = new NbtReader(stream);
-
-        Assert.Throws<NbtException>(() => reader.Skip());
+        Throws<InvalidOperationException>(ref reader, static (ref value) => value.Skip());
     }
 
     [Fact]
     public void SkippingAContainerTwiceThrows()
     {
         var bytes = BuildSampleDocument();
-        using var stream = new MemoryStream(bytes);
-        using var reader = new NbtReader(stream);
+        var reader = new NbtReader(bytes);
 
         reader.Read(); // start compound
         reader.Read(); // Health
@@ -86,7 +94,7 @@ public sealed class NbtReaderTests
         reader.GetString();
         reader.Read(); // start list
         reader.Skip();
-        Assert.Throws<NbtException>(() => reader.Skip());
+        Throws<InvalidOperationException>(ref reader, static (ref value) => value.Skip());
 
         reader.Read();
         Assert.Equal(NbtTokenType.EndCompound, reader.TokenType);
@@ -95,55 +103,59 @@ public sealed class NbtReaderTests
     [Fact]
     public void NegativeListCountThrows()
     {
-        using var stream = new MemoryStream([0x09, 0x03, 0xFF, 0xFF, 0xFF, 0xFF]);
-        using var reader = new NbtReader(stream, NbtRootFormat.Unnamed);
+        var reader = new NbtReader(
+            [0x09, 0x03, 0xFF, 0xFF, 0xFF, 0xFF],
+            new NbtReaderOptions { RootFormat = NbtRootFormat.Unnamed });
 
-        Assert.Throws<NbtException>(() => reader.Read());
+        Throws<NbtException>(ref reader, static (ref value) => value.Read());
     }
 
     [Fact]
     public void NegativeArrayLengthThrows()
     {
-        using var stream = new MemoryStream([0x0B, 0xFF, 0xFF, 0xFF, 0xFF]);
-        using var reader = new NbtReader(stream, NbtRootFormat.Unnamed);
+        var reader = new NbtReader(
+            [0x0B, 0xFF, 0xFF, 0xFF, 0xFF],
+            new NbtReaderOptions { RootFormat = NbtRootFormat.Unnamed });
         reader.Read();
 
-        Assert.Throws<NbtException>(() => reader.GetIntArray());
+        Throws<NbtException>(ref reader, static (ref value) => value.GetInt32Array());
     }
 
     [Fact]
     public void ExcessiveArrayLengthThrows()
     {
-        using var stream = new MemoryStream([0x0B, 0x01, 0x00, 0x00, 0x01]);
-        using var reader = new NbtReader(stream, NbtRootFormat.Unnamed);
+        var reader = new NbtReader(
+            [0x0B, 0x01, 0x00, 0x00, 0x01],
+            new NbtReaderOptions { RootFormat = NbtRootFormat.Unnamed });
         reader.Read();
 
-        Assert.Throws<NbtException>(() => reader.GetIntArray());
+        Throws<NbtException>(ref reader, static (ref value) => value.GetInt32Array());
     }
 
     [Fact]
     public void HugeListCountFailsWithoutPreallocation()
     {
         // A root list of ints that claims int.MaxValue elements but supplies none.
-        using var stream = new MemoryStream([0x09, 0x03, 0x7F, 0xFF, 0xFF, 0xFF]);
+        var bytes = new byte[] { 0x09, 0x03, 0x7F, 0xFF, 0xFF, 0xFF };
 
         Assert.Throws<NbtException>(() =>
-            NbtSerializer.Deserialize(stream, new NbtSerializerOptions { RootFormat = NbtRootFormat.Unnamed }));
+            NbtSerializer.Deserialize(bytes, new NbtSerializerOptions { RootFormat = NbtRootFormat.Unnamed }));
     }
 
     [Fact]
     public void UnnamedRootHasNoName()
     {
-        using var stream = new MemoryStream();
-        using (var writer = new NbtWriter(stream, NbtRootFormat.Unnamed))
-        {
-            writer.WriteStartCompound("ignored");
-            writer.WriteInt32("Value", 7);
-            writer.WriteEndCompound();
-        }
+        var buffer = new ArrayBufferWriter<byte>();
+        var writer = new NbtWriter(buffer, new NbtWriterOptions { RootFormat = NbtRootFormat.Unnamed });
+        writer.WriteStartCompound();
+        writer.WritePropertyName("Value");
+        writer.WriteInt32(7);
+        writer.WriteEndCompound();
+        writer.Complete();
 
-        stream.Position = 0;
-        using var reader = new NbtReader(stream, NbtRootFormat.Unnamed);
+        var reader = new NbtReader(
+            buffer.WrittenSpan,
+            new NbtReaderOptions { RootFormat = NbtRootFormat.Unnamed });
         reader.Read();
 
         Assert.Null(reader.Name);
@@ -155,91 +167,118 @@ public sealed class NbtReaderTests
     public void WrongGetterThrows()
     {
         var bytes = BuildSampleDocument();
-        using var stream = new MemoryStream(bytes);
-        using var reader = new NbtReader(stream);
+        var reader = new NbtReader(bytes);
 
         reader.Read();
         reader.Read();
 
-        Assert.Throws<NbtException>(() => reader.GetString());
+        var exception = Throws<NbtException>(ref reader, static (ref value) => value.GetString());
+        Assert.Equal(NbtTagType.String, exception.ExpectedTagType);
+        Assert.Equal(NbtTagType.Int, exception.ActualTagType);
+        Assert.NotNull(exception.BytePosition);
     }
 
     [Fact]
     public void UnknownTagTypeThrows()
     {
-        using var stream = new MemoryStream([0x0D, 0x00, 0x00]);
-        using var reader = new NbtReader(stream);
+        var reader = new NbtReader([0x0D, 0x00, 0x00]);
 
-        Assert.Throws<NbtException>(() => reader.Read());
+        Throws<NbtException>(ref reader, static (ref value) => value.Read());
     }
 
     [Fact]
     public void TruncatedDataThrows()
     {
-        using var stream = new MemoryStream([0x0A, 0x00, 0x04, (byte)'r', (byte)'o', (byte)'o', (byte)'t']);
-        using var reader = new NbtReader(stream);
+        var reader = new NbtReader([0x0A, 0x00, 0x04, (byte)'r', (byte)'o', (byte)'o', (byte)'t']);
         reader.Read();
 
-        Assert.Throws<NbtException>(() => reader.Read());
+        Throws<NbtException>(ref reader, static (ref value) => value.Read());
     }
 
     [Fact]
     public void ListOfEndWithNonZeroLengthThrows()
     {
-        using var stream = new MemoryStream([0x09, 0x00, 0x01, (byte)'x', 0x00, 0x00, 0x00, 0x01]);
-        using var reader = new NbtReader(stream);
+        var reader = new NbtReader([0x09, 0x00, 0x01, (byte)'x', 0x00, 0x00, 0x00, 0x01]);
 
-        Assert.Throws<NbtException>(() => reader.Read());
+        Throws<NbtException>(ref reader, static (ref value) => value.Read());
     }
 
     [Fact]
     public void ExceedingMaxDepthThrows()
     {
-        // Build nested lists of lists: the root tag, then one list per level, ending with an empty list.
-        var nested = new MemoryStream();
-        nested.WriteByte((byte)NbtTagType.List);
-        for (var i = 1; i < NbtReader.MaxDepth + 1; i++)
+        // A root list containing a list containing a list of TAG_End.
+        var bytes = new byte[]
         {
-            nested.WriteByte((byte)NbtTagType.List);
-            nested.WriteByte(0x00);
-            nested.WriteByte(0x00);
-            nested.WriteByte(0x00);
-            nested.WriteByte(0x01);
-        }
+            0x09, 0x09, 0x00, 0x00, 0x00, 0x01,
+            0x09, 0x00, 0x00, 0x00, 0x01,
+            0x00, 0x00, 0x00, 0x00, 0x00,
+        };
 
-        nested.WriteByte((byte)NbtTagType.List);
-        nested.WriteByte(0x00);
-        nested.WriteByte(0x00);
-        nested.WriteByte(0x00);
-        nested.WriteByte(0x00);
+        var reader = new NbtReader(
+            bytes,
+            new NbtReaderOptions { RootFormat = NbtRootFormat.Unnamed, MaxDepth = 2 });
 
-        nested.Position = 0;
-        using var reader = new NbtReader(nested, NbtRootFormat.Unnamed);
-
-        Assert.Throws<NbtException>(() =>
+        Throws<NbtException>(ref reader, static (ref value) =>
         {
-            while (reader.Read())
+            while (value.Read())
             {
             }
         });
     }
 
-    private static byte[] BuildSampleDocument()
+    [Fact]
+    public void BytesConsumedTracksHeadersAndPayloads()
     {
-        using var stream = new MemoryStream();
-        using (var writer = new NbtWriter(stream))
+        var reader = new NbtReader([0x03, 0x00, 0x01, (byte)'v', 0x00, 0x00, 0x00, 0x2A]);
+
+        Assert.True(reader.Read());
+        Assert.Equal(4, reader.BytesConsumed);
+        Assert.Equal(42, reader.GetInt32());
+        Assert.Equal(8, reader.BytesConsumed);
+        Assert.False(reader.Read());
+    }
+
+    private delegate void NbtReaderAction(ref NbtReader reader);
+
+    private static TException Throws<TException>(ref NbtReader reader, NbtReaderAction action)
+        where TException : Exception
+    {
+        try
         {
-            writer.WriteStartCompound("root");
-            writer.WriteInt32("Health", 20);
-            writer.WriteString("Name", "Steve");
-            writer.WriteStartList("Position", NbtTagType.Double, 3);
-            writer.WriteElement(1.0);
-            writer.WriteElement(64.0);
-            writer.WriteElement(2.0);
-            writer.WriteEndList();
-            writer.WriteEndCompound();
+            action(ref reader);
+        }
+        catch (TException exception)
+        {
+            return exception;
+        }
+        catch (Exception exception)
+        {
+            throw new XunitException(
+                $"Expected {typeof(TException).Name} but caught {exception.GetType().Name}.",
+                exception);
         }
 
-        return stream.ToArray();
+        throw new XunitException($"Expected {typeof(TException).Name} but nothing was thrown.");
+    }
+
+    private static byte[] BuildSampleDocument()
+    {
+        var buffer = new ArrayBufferWriter<byte>();
+        var writer = new NbtWriter(buffer);
+        writer.WritePropertyName("root");
+        writer.WriteStartCompound();
+        writer.WritePropertyName("Health");
+        writer.WriteInt32(20);
+        writer.WritePropertyName("Name");
+        writer.WriteString("Steve");
+        writer.WritePropertyName("Position");
+        writer.WriteStartList(NbtTagType.Double, 3);
+        writer.WriteDouble(1.0);
+        writer.WriteDouble(64.0);
+        writer.WriteDouble(2.0);
+        writer.WriteEndList();
+        writer.WriteEndCompound();
+        writer.Complete();
+        return buffer.WrittenSpan.ToArray();
     }
 }

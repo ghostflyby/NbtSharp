@@ -1,7 +1,22 @@
+using System.Buffers;
+
 namespace NbtSharp.Tests;
 
 public sealed class NbtSerializerTests
 {
+    [Fact]
+    public void DomOverloadsAcceptExplicitNullOptions()
+    {
+        var root = new NbtRoot("root", 1);
+
+        Assert.NotEmpty(NbtSerializer.Serialize(root));
+        Assert.NotEmpty(NbtSerializer.SerializeDocument(root, options: null));
+
+        using var stream = new MemoryStream();
+        NbtSerializer.SerializeDocument(stream, root, options: null);
+        Assert.NotEqual(0, stream.Length);
+    }
+
     [Fact]
     public void RoundTripsAScalarRoot()
     {
@@ -244,23 +259,24 @@ public sealed class NbtSerializerTests
         var options = new NbtSerializerOptions { RootFormat = NbtRootFormat.Unnamed };
         using var stream = new MemoryStream();
 
-        Assert.Throws<NbtException>(() => NbtSerializer.Serialize(stream, new NbtRoot("root", 1), options));
+        Assert.Throws<NbtException>(() => NbtSerializer.SerializeDocument(stream, new NbtRoot("root", 1), options));
     }
 
     [Fact]
     public void DuplicateCompoundNamesKeepTheLastValue()
     {
-        using var stream = new MemoryStream();
-        using (var writer = new NbtWriter(stream))
-        {
-            writer.WriteStartCompound("root");
-            writer.WriteInt32("X", 1);
-            writer.WriteInt32("X", 2);
-            writer.WriteEndCompound();
-        }
+        var buffer = new ArrayBufferWriter<byte>();
+        var writer = new NbtWriter(buffer);
+        writer.WritePropertyName("root");
+        writer.WriteStartCompound();
+        writer.WritePropertyName("X");
+        writer.WriteInt32(1);
+        writer.WritePropertyName("X");
+        writer.WriteInt32(2);
+        writer.WriteEndCompound();
+        writer.Complete();
 
-        stream.Position = 0;
-        var compound = (NbtCompound)NbtSerializer.Deserialize(stream).Value.Value!;
+        var compound = (NbtCompound)NbtSerializer.Deserialize(buffer.WrittenSpan).Value.Value!;
 
         Assert.Equal(2, compound["X"] is int value ? value : 0);
     }
@@ -268,7 +284,7 @@ public sealed class NbtSerializerTests
     private static NbtRoot RoundTrip(NbtRoot root, NbtSerializerOptions? options = null)
     {
         using var stream = new MemoryStream();
-        NbtSerializer.Serialize(stream, root, options);
+        NbtSerializer.SerializeDocument(stream, root, options);
         stream.Position = 0;
         return NbtSerializer.Deserialize(stream, options);
     }
