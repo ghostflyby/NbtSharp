@@ -63,6 +63,8 @@ resharper_place_type_attribute_on_same_line = false
 dotnet_sort_system_directives_first = true
 csharp_style_namespace_declarations = file_scoped:suggestion
 dotnet_diagnostic.ide0005.severity = suggestion
+# The serializer intentionally exposes STJ-style optional-parameter overload families.
+dotnet_diagnostic.RS0026.severity = none
 # Rider-only inspection turned off by preference.
 resharper_loop_can_be_converted_to_query_highlighting = none
 # A multiline list ends with a trailing comma. Rider adds it during code cleanup;
