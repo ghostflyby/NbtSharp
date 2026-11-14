@@ -133,6 +133,18 @@ public sealed class NbtReaderTests
     }
 
     [Fact]
+    public void DeclaredArrayLengthBeyondAvailableDataThrows()
+    {
+        // Unnamed root: TAG_IntArray, length 1000, one payload byte.
+        var reader = new NbtReader(
+            [0x0B, 0x00, 0x00, 0x03, 0xE8, 0x00],
+            new NbtReaderOptions { RootFormat = NbtRootFormat.Unnamed });
+        reader.Read();
+
+        Throws<NbtException>(ref reader, static (ref value) => value.GetInt32Array());
+    }
+
+    [Fact]
     public void HugeListCountFailsWithoutPreallocation()
     {
         // A root list of ints that claims int.MaxValue elements but supplies none.

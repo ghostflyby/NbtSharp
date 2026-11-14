@@ -322,11 +322,20 @@ public ref struct NbtReader
         }
 
         var length = ReadArrayLength();
-        EnsureDocumentSize((long)length * sizeof(int));
-        var values = new int[length];
-        for (var i = 0; i < values.Length; i++)
+        EnsurePayloadFits((long)length * sizeof(int));
+        var values = new int[GetInitialArrayCapacity(length, sizeof(int))];
+        var count = 0;
+        for (var i = 0; i < length; i++)
         {
-            values[i] = ReadInt32();
+            if (count == values.Length)
+            {
+                var newCapacity = (int)Math.Min(
+                    length,
+                    Math.Max((long)values.Length * 2, values.Length + 1));
+                Array.Resize(ref values, newCapacity);
+            }
+
+            values[count++] = ReadInt32();
         }
 
         return values;
@@ -341,11 +350,20 @@ public ref struct NbtReader
         }
 
         var length = ReadArrayLength();
-        EnsureDocumentSize((long)length * sizeof(long));
-        var values = new long[length];
-        for (var i = 0; i < values.Length; i++)
+        EnsurePayloadFits((long)length * sizeof(long));
+        var values = new long[GetInitialArrayCapacity(length, sizeof(long))];
+        var count = 0;
+        for (var i = 0; i < length; i++)
         {
-            values[i] = ReadInt64();
+            if (count == values.Length)
+            {
+                var newCapacity = (int)Math.Min(
+                    length,
+                    Math.Max((long)values.Length * 2, values.Length + 1));
+                Array.Resize(ref values, newCapacity);
+            }
+
+            values[count++] = ReadInt64();
         }
 
         return values;
@@ -505,11 +523,6 @@ public ref struct NbtReader
 
     private void EnsureListElementsFit(NbtTagType elementType, int count, long position)
     {
-        if (_stream is not null)
-        {
-            return;
-        }
-
         var minimumSize = elementType switch
         {
             NbtTagType.Byte => 1,
@@ -528,8 +541,7 @@ public ref struct NbtReader
         }
 
         var required = (long)count * minimumSize;
-        var remaining = _buffer.IsEmpty ? _span.Length : _buffer.Length - BytesConsumed;
-        if (required > remaining)
+        if (TryGetRemainingBytes(out var remaining) && required > remaining)
         {
             throw new NbtException(
                 $"The NBT list declares {count} elements but the remaining data is too short.")
@@ -758,7 +770,7 @@ public ref struct NbtReader
             return string.Empty;
         }
 
-        EnsureDocumentSize(length);
+        EnsurePayloadFits(length);
         if (_span.Length >= length)
         {
             var bytes = _span[..length];
@@ -808,10 +820,32 @@ public ref struct NbtReader
             return [];
         }
 
-        EnsureDocumentSize(count);
-        var bytes = new byte[count];
-        ReadExactly(bytes);
-        return bytes;
+        EnsurePayloadFits(count);
+        if (_stream is null)
+        {
+            var bytes = new byte[count];
+            ReadExactly(bytes);
+            return bytes;
+        }
+
+        var buffer = new byte[GetInitialArrayCapacity(count, sizeof(byte))];
+        var offset = 0;
+        while (offset < count)
+        {
+            if (offset == buffer.Length)
+            {
+                var newCapacity = (int)Math.Min(
+                    count,
+                    Math.Max((long)buffer.Length * 2, buffer.Length + 1));
+                Array.Resize(ref buffer, newCapacity);
+            }
+
+            var take = Math.Min(buffer.Length - offset, count - offset);
+            ReadExactly(buffer.AsSpan(offset, take));
+            offset += take;
+        }
+
+        return buffer;
     }
 
     private void ReadExactly(scoped Span<byte> destination)
@@ -927,6 +961,48 @@ public ref struct NbtReader
         }
 
         return false;
+    }
+
+    private bool TryGetRemainingBytes(out long remaining)
+    {
+        if (_stream is not null)
+        {
+            remaining = 0;
+            return false;
+        }
+
+        remaining = _buffer.IsEmpty ? _span.Length : _buffer.Length - BytesConsumed;
+        return true;
+    }
+
+    private void EnsurePayloadFits(long byteCount)
+    {
+        if (TryGetRemainingBytes(out var remaining) && byteCount > remaining)
+        {
+            throw new NbtException(
+                $"The NBT payload declares {byteCount} bytes but only {remaining} are available.")
+            {
+                BytePosition = BytesConsumed,
+            };
+        }
+
+        EnsureDocumentSize(byteCount);
+    }
+
+    private int GetInitialArrayCapacity(int length, int elementSize)
+    {
+        if (length == 0)
+        {
+            return 0;
+        }
+
+        if (_stream is null)
+        {
+            return length;
+        }
+
+        var segmentElements = Math.Max(1, DefaultStreamBufferSize / elementSize);
+        return Math.Min(length, segmentElements);
     }
 
     private void EnsureDocumentSize(long count)

@@ -52,6 +52,19 @@ public sealed class NbtSequenceTests
     }
 
     [Fact]
+    public void DeclaredArrayLengthBeyondSequenceThrows()
+    {
+        var data = new byte[]
+        {
+            0x0B, 0x00, 0x04, (byte)'r', (byte)'o', (byte)'o', (byte)'t',
+            0x00, 0x00, 0x03, 0xE8,
+        };
+        var sequence = new ReadOnlySequence<byte>(data);
+
+        Assert.Throws<NbtException>(() => NbtSerializer.Deserialize<int[]>(sequence));
+    }
+
+    [Fact]
     public void DeserializesFromAThreeSegmentSequence()
     {
         var data = BuildDocument();

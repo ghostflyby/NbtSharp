@@ -42,6 +42,17 @@ public sealed class NbtStreamAdapterTests
         Assert.Equal(payload, NbtSerializer.Deserialize<byte[]>(stream));
     }
 
+    [Fact]
+    public void LargeIntArrayStreamRoundTrips()
+    {
+        var payload = Enumerable.Range(0, 200_000).ToArray();
+        using var stream = new MemoryStream();
+        NbtSerializer.Serialize(stream, payload, "root");
+        stream.Position = 0;
+
+        Assert.Equal(payload, NbtSerializer.Deserialize<int[]>(stream));
+    }
+
     [Theory]
     [InlineData(1)]
     [InlineData(2)]
@@ -138,6 +149,15 @@ public sealed class NbtStreamAdapterTests
     }
 
     [Fact]
+    public void TruncatedIntArrayStreamThrows()
+    {
+        var data = NbtSerializer.Serialize(new[] { 1, 2, 3 }, "root");
+        using var stream = new MemoryStream(data[..^4]);
+
+        Assert.Throws<NbtException>(() => NbtSerializer.Deserialize<int[]>(stream));
+    }
+
+    [Fact]
     public void NonSeekableStreamRoundTrips()
     {
         var payload = new byte[100_000];
@@ -200,6 +220,21 @@ public sealed class NbtStreamAdapterTests
         var options = new NbtSerializerOptions { MaxDocumentBytes = 20 };
 
         Assert.Throws<NbtException>(() => NbtSerializer.Deserialize<string>(stream, options));
+    }
+
+    [Fact]
+    public void StreamDeserializationRejectsDeclaredArrayBeyondTheDocumentLimit()
+    {
+        // Named root TAG_IntArray "root" with length 1000 and no payload.
+        var data = new byte[]
+        {
+            0x0B, 0x00, 0x04, (byte)'r', (byte)'o', (byte)'o', (byte)'t',
+            0x00, 0x00, 0x03, 0xE8,
+        };
+        using var stream = new MemoryStream(data);
+        var options = new NbtSerializerOptions { MaxDocumentBytes = 32 };
+
+        Assert.Throws<NbtException>(() => NbtSerializer.Deserialize<int[]>(stream, options));
     }
 
     [Fact]
