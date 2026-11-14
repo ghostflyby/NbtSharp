@@ -27,6 +27,7 @@ public ref struct NbtWriter
 {
     private const int DefaultMaxDepth = 512;
     private const int DefaultMaxCollectionLength = 16 * 1024 * 1024;
+    private const int MaxArrayWriteBytes = 64 * 1024;
 
     private readonly IBufferWriter<byte> _destination;
     private readonly NbtRootFormat _rootFormat;
@@ -153,11 +154,7 @@ public ref struct NbtWriter
         ValidateCollectionLength(values.Length);
         WriteNamedHeader(NbtTagType.IntArray, name);
         WriteInt32Payload(values.Length);
-        foreach (var value in values)
-        {
-            WriteInt32Payload(value);
-        }
-
+        WriteInt32ArrayPayload(values);
         FinishScalar();
     }
 
@@ -167,11 +164,7 @@ public ref struct NbtWriter
         ValidateCollectionLength(values.Length);
         WriteNamedHeader(NbtTagType.LongArray, name);
         WriteInt32Payload(values.Length);
-        foreach (var value in values)
-        {
-            WriteInt64Payload(value);
-        }
-
+        WriteInt64ArrayPayload(values);
         FinishScalar();
     }
 
@@ -276,11 +269,7 @@ public ref struct NbtWriter
         ValidateCollectionLength(values.Length);
         WriteAnonymousHeader(NbtTagType.IntArray);
         WriteInt32Payload(values.Length);
-        foreach (var value in values)
-        {
-            WriteInt32Payload(value);
-        }
-
+        WriteInt32ArrayPayload(values);
         FinishScalar();
     }
 
@@ -290,11 +279,7 @@ public ref struct NbtWriter
         ValidateCollectionLength(values.Length);
         WriteAnonymousHeader(NbtTagType.LongArray);
         WriteInt32Payload(values.Length);
-        foreach (var value in values)
-        {
-            WriteInt64Payload(value);
-        }
-
+        WriteInt64ArrayPayload(values);
         FinishScalar();
     }
 
@@ -751,11 +736,57 @@ public ref struct NbtWriter
         Advance(written);
     }
 
+    private void WriteInt32ArrayPayload(ReadOnlySpan<int> values)
+    {
+        while (!values.IsEmpty)
+        {
+            var elementCount = Math.Min(values.Length, MaxArrayWriteBytes / sizeof(int));
+            var byteCount = elementCount * sizeof(int);
+            var destination = GetSpan(byteCount);
+            if (BitConverter.IsLittleEndian)
+            {
+                BinaryPrimitives.ReverseEndianness(
+                    values[..elementCount],
+                    MemoryMarshal.Cast<byte, int>(destination[..byteCount]));
+            }
+            else
+            {
+                MemoryMarshal.AsBytes(values[..elementCount]).CopyTo(destination);
+            }
+
+            Advance(byteCount);
+            values = values[elementCount..];
+        }
+    }
+
+    private void WriteInt64ArrayPayload(ReadOnlySpan<long> values)
+    {
+        while (!values.IsEmpty)
+        {
+            var elementCount = Math.Min(values.Length, MaxArrayWriteBytes / sizeof(long));
+            var byteCount = elementCount * sizeof(long);
+            var destination = GetSpan(byteCount);
+            if (BitConverter.IsLittleEndian)
+            {
+                BinaryPrimitives.ReverseEndianness(
+                    values[..elementCount],
+                    MemoryMarshal.Cast<byte, long>(destination[..byteCount]));
+            }
+            else
+            {
+                MemoryMarshal.AsBytes(values[..elementCount]).CopyTo(destination);
+            }
+
+            Advance(byteCount);
+            values = values[elementCount..];
+        }
+    }
+
     private void WriteBytes(ReadOnlySpan<byte> bytes)
     {
         while (bytes.Length > 0)
         {
-            var span = GetSpan(Math.Min(bytes.Length, 4096));
+            var span = GetSpan(Math.Min(bytes.Length, MaxArrayWriteBytes));
             var count = Math.Min(span.Length, bytes.Length);
             EnsureDocumentSize(count);
             bytes[..count].CopyTo(span);

@@ -324,18 +324,28 @@ public ref struct NbtReader
         var length = ReadArrayLength();
         EnsurePayloadFits((long)length * sizeof(int));
         var values = new int[GetInitialArrayCapacity(length, sizeof(int))];
-        var count = 0;
-        for (var i = 0; i < length; i++)
+        var totalBytes = (long)length * sizeof(int);
+        var filled = 0L;
+        while (filled < totalBytes)
         {
-            if (count == values.Length)
+            var capacityBytes = (long)values.Length * sizeof(int);
+            if (filled == capacityBytes)
             {
                 var newCapacity = (int)Math.Min(
                     length,
                     Math.Max((long)values.Length * 2, values.Length + 1));
                 Array.Resize(ref values, newCapacity);
+                capacityBytes = (long)values.Length * sizeof(int);
             }
 
-            values[count++] = ReadInt32();
+            var take = (int)Math.Min(capacityBytes - filled, totalBytes - filled);
+            ReadExactly(MemoryMarshal.AsBytes(values.AsSpan()).Slice((int)filled, take));
+            filled += take;
+        }
+
+        if (BitConverter.IsLittleEndian)
+        {
+            BinaryPrimitives.ReverseEndianness(values.AsSpan(), values.AsSpan());
         }
 
         return values;
@@ -352,18 +362,28 @@ public ref struct NbtReader
         var length = ReadArrayLength();
         EnsurePayloadFits((long)length * sizeof(long));
         var values = new long[GetInitialArrayCapacity(length, sizeof(long))];
-        var count = 0;
-        for (var i = 0; i < length; i++)
+        var totalBytes = (long)length * sizeof(long);
+        var filled = 0L;
+        while (filled < totalBytes)
         {
-            if (count == values.Length)
+            var capacityBytes = (long)values.Length * sizeof(long);
+            if (filled == capacityBytes)
             {
                 var newCapacity = (int)Math.Min(
                     length,
                     Math.Max((long)values.Length * 2, values.Length + 1));
                 Array.Resize(ref values, newCapacity);
+                capacityBytes = (long)values.Length * sizeof(long);
             }
 
-            values[count++] = ReadInt64();
+            var take = (int)Math.Min(capacityBytes - filled, totalBytes - filled);
+            ReadExactly(MemoryMarshal.AsBytes(values.AsSpan()).Slice((int)filled, take));
+            filled += take;
+        }
+
+        if (BitConverter.IsLittleEndian)
+        {
+            BinaryPrimitives.ReverseEndianness(values.AsSpan(), values.AsSpan());
         }
 
         return values;
