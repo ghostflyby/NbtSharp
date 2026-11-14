@@ -44,6 +44,7 @@ public sealed class NbtCompoundTests
     [Fact]
     public void MissingMemberThrows()
     {
+        // ReSharper disable once CollectionNeverUpdated.Local
         var compound = new NbtCompound();
 
         Assert.Throws<KeyNotFoundException>(() => compound["Missing"]);
