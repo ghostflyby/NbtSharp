@@ -5,6 +5,9 @@ namespace NbtSharp;
 /// </summary>
 public enum NbtTokenType
 {
+    /// <summary>The reader has not produced a token yet, or the root value is exhausted.</summary>
+    None,
+
     /// <summary>The start of a compound tag.</summary>
     StartCompound,
 
