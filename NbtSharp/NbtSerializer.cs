@@ -268,9 +268,22 @@ public static class NbtSerializer
             MaxDocumentBytes = 0,
         };
 
+        // Re-parse only after the buffered data has at least doubled, so a document arriving in
+        // many small reads is scanned O(log n) times instead of once per read.
+        var nextParseLength = 0L;
         while (true)
         {
-            var result = await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
+            var readLength = nextParseLength;
+            if (options.MaxDocumentBytes > 0 && readLength > options.MaxDocumentBytes)
+            {
+                readLength = options.MaxDocumentBytes;
+            }
+
+            var result = nextParseLength == 0
+                ? await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
+                : await reader.ReadAtLeastAsync(
+                    (int)Math.Min(readLength, int.MaxValue),
+                    cancellationToken).ConfigureAwait(false);
             try
             {
                 var nbtReader = new NbtReader(result.Buffer, readerOptions);
@@ -293,6 +306,7 @@ public static class NbtSerializer
                         $"The NBT document exceeds the configured limit of {options.MaxDocumentBytes} bytes.");
                 }
 
+                nextParseLength = Math.Max(1, result.Buffer.Length * 2);
                 reader.AdvanceTo(result.Buffer.Start, result.Buffer.End);
             }
         }
