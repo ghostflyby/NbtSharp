@@ -14,10 +14,10 @@
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
     <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
     <Authors>ghostflyby</Authors>
-    <Description>An NBT (Named Binary Tag) library with a System.Text.Json-style serialization layer.</Description>
+    <Description>TODO</Description>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageTags>nbt;minecraft;serialization;binary</PackageTags>
+    <PackageTags>TODO</PackageTags>
     <RepositoryType>git</RepositoryType>
     <RepositoryUrl>https://github.com/ghostflyby/NbtSharp</RepositoryUrl>
     <PackageProjectUrl>https://github.com/ghostflyby/NbtSharp</PackageProjectUrl>
