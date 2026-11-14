@@ -13,8 +13,8 @@ namespace NbtSharp;
 /// <remarks>
 /// <para>
 /// A <see cref="PipeReader"/> supplies the document incrementally: the reader advances the pipe as
-/// it consumes bytes and blocks for more data only when the current buffer is exhausted. A
-/// <see cref="ReadOnlySequence{T}"/> is exposed through a pipe reader as well, while the span
+/// it consumes bytes and calls <see cref="PipeReader.TryRead(out ReadResult)"/> for the next buffer.
+/// A <see cref="ReadOnlySequence{T}"/> is exposed through a pipe reader as well, while the span
 /// constructor is a contiguous in-memory fast path.
 /// </para>
 /// <para>
@@ -95,9 +95,10 @@ public ref struct NbtReader
     /// <param name="pipe">The pipe reader that supplies the document. The caller owns it.</param>
     /// <param name="options">The reader options, or the defaults.</param>
     /// <remarks>
-    /// Reads are incremental. The reader marks consumed data with
-    /// <see cref="PipeReader.AdvanceTo(SequencePosition, SequencePosition)"/> and blocks on
-    /// <see cref="PipeReader.ReadAsync(CancellationToken)"/> when the current buffer is exhausted.
+    /// Reads are incremental and synchronous. The reader marks consumed data with
+    /// <see cref="PipeReader.AdvanceTo(SequencePosition, SequencePosition)"/> and calls
+    /// <see cref="PipeReader.TryRead(out ReadResult)"/> for the next buffer; the pipe must return
+    /// data synchronously. A live pipe that needs an asynchronous read cannot be used here.
     /// </remarks>
     public NbtReader(PipeReader pipe, NbtReaderOptions options = default)
     {
@@ -986,7 +987,8 @@ public ref struct NbtReader
     {
         if (!_pipe!.TryRead(out var result))
         {
-            result = _pipe.ReadAsync().AsTask().GetAwaiter().GetResult();
+            throw new InvalidOperationException(
+                "The PipeReader did not return data synchronously. A synchronous reader requires data that is available from TryRead; use a sequence-backed pipe or an asynchronous API for a live producer.");
         }
 
         _buffer = result.Buffer;

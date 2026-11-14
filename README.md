@@ -219,8 +219,9 @@ The `Stream` overloads are synchronous. `Serialize(Stream)` flushes the document
 completes and leaves the stream open; `Deserialize(Stream)` reads the stream incrementally, so
 non-seekable streams are supported. A stream is treated as one document: trailing bytes after the
 root value are ignored, and the stream may have been read ahead. To read consecutive documents from
-one stream, use `Deserialize(PipeReader)` with a caller-owned pipe reader. The writer does not roll
-back partial output if a converter throws.
+one stream, use `Deserialize(PipeReader)` with a caller-owned pipe reader. A caller-owned pipe must
+return data synchronously from `TryRead`; a live producer that requires an asynchronous read is not
+supported. The writer does not roll back partial output if a converter throws.
 
 ## Build and test
 

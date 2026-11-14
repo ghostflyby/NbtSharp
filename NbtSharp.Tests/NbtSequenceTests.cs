@@ -39,6 +39,16 @@ public sealed class NbtSequenceTests
         Assert.Equal(NbtTokenType.StartCompound, reader.TokenType);
         Assert.Equal("root", reader.Name);
         Assert.Equal(7, reader.BytesConsumed);
+        reader.Dispose();
+    }
+
+    [Fact]
+    public void TruncatedSequenceThrows()
+    {
+        var data = NbtSerializer.Serialize(new string('x', 100), "root");
+        var sequence = new ReadOnlySequence<byte>(data[..^5]);
+
+        Assert.Throws<NbtException>(() => NbtSerializer.Deserialize<string>(sequence));
     }
 
     [Fact]

@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Diagnostics.CodeAnalysis;
 using System.IO.Pipelines;
+using NbtSharp.IO;
 
 namespace NbtSharp;
 
@@ -212,9 +213,7 @@ public static class NbtSerializer
     {
         ArgumentNullException.ThrowIfNull(stream);
         options ??= new NbtSerializerOptions();
-        var pipe = PipeReader.Create(
-            stream,
-            new StreamPipeReaderOptions(leaveOpen: true));
+        var pipe = new NbtSynchronousStreamPipeReader(stream);
         try
         {
             return Deserialize<T>(pipe, out rootName, options);
@@ -233,7 +232,8 @@ public static class NbtSerializer
     /// <remarks>
     /// The caller owns <paramref name="reader"/>; this method does not complete it. The reader
     /// advances the pipe as bytes are consumed, leaving the bytes after the root available to the
-    /// next call.
+    /// next call. Reads are synchronous: the pipe must return data from
+    /// <see cref="PipeReader.TryRead(out ReadResult)"/>.
     /// </remarks>
     public static T Deserialize<T>(PipeReader reader, NbtSerializerOptions? options = null) =>
         Deserialize<T>(reader, out _, options);
@@ -249,7 +249,8 @@ public static class NbtSerializer
     /// <remarks>
     /// The caller owns <paramref name="reader"/>; this method does not complete it. The reader
     /// advances the pipe as bytes are consumed, leaving the bytes after the root available to the
-    /// next call.
+    /// next call. Reads are synchronous: the pipe must return data from
+    /// <see cref="PipeReader.TryRead(out ReadResult)"/>.
     /// </remarks>
     public static T Deserialize<T>(
         PipeReader reader,

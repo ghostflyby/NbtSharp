@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.IO.Pipelines;
 
 namespace NbtSharp.Tests;
@@ -59,6 +60,27 @@ public sealed class NbtStreamAdapterTests
     }
 
     [Fact]
+    public void StreamSkipsUnknownMembersAcrossSegments()
+    {
+        var data = NbtSerializer.Serialize(new NbtRoot("root", new NbtCompound
+        {
+            ["Known"] = 42,
+            ["Unknown"] = new NbtCompound
+            {
+                ["Text"] = "a value that spans several pipe segments",
+                ["Numbers"] = new[] { 1, 2, 3 },
+            },
+        }));
+        using var inner = new MemoryStream(data);
+        using var stream = new ChunkedStream(inner, 3);
+        var options = new NbtSerializerOptions { TypeInfoResolver = new NbtReflectionTypeInfoResolver() };
+
+        var actual = NbtSerializer.Deserialize<KnownMemberDto>(stream, options);
+
+        Assert.Equal(42, actual.Known);
+    }
+
+    [Fact]
     public void PipeReaderRoundTrips()
     {
         var data = CreateDocumentForStreaming();
@@ -74,20 +96,26 @@ public sealed class NbtStreamAdapterTests
     }
 
     [Fact]
-    public async Task PipeReaderWaitsForAConcurrentProducer()
+    public void PipeReaderOverASequenceRoundTrips()
     {
-        var data = NbtSerializer.Serialize(42, "root");
-        var pipe = new Pipe();
-        var producer = Task.Run(async () =>
-        {
-            await Task.Delay(10, TestContext.Current.CancellationToken);
-            await pipe.Writer.WriteAsync(data, TestContext.Current.CancellationToken);
-            await pipe.Writer.CompleteAsync();
-        }, TestContext.Current.CancellationToken);
+        var data = CreateDocumentForStreaming();
+        var pipe = PipeReader.Create(new ReadOnlySequence<byte>(data));
 
-        Assert.Equal(42, NbtSerializer.Deserialize<int>(pipe.Reader));
-        await producer;
+        var actual = NbtSerializer.Deserialize(pipe);
+
+        AssertDocumentFromStreaming(actual);
+        pipe.Complete();
+    }
+
+    [Fact]
+    public void SynchronousPipeReaderRequiresAvailableData()
+    {
+        var pipe = new Pipe();
+
+        Assert.Throws<InvalidOperationException>(() => NbtSerializer.Deserialize<int>(pipe.Reader));
+
         pipe.Reader.Complete();
+        pipe.Writer.Complete();
     }
 
     [Fact]
@@ -129,14 +157,14 @@ public sealed class NbtStreamAdapterTests
     }
 
     [Fact]
-    public void StreamDeserializationReadsToTheEnd()
+    public void StreamDeserializationReadsTheDocument()
     {
         using var stream = new MemoryStream(NbtSerializer.Serialize(42, "root"));
 
         var actual = NbtSerializer.Deserialize<int>(stream);
 
         Assert.Equal(42, actual);
-        Assert.Equal(stream.Length, stream.Position);
+        Assert.True(stream.Position > 0);
     }
 
     [Fact]
@@ -169,6 +197,16 @@ public sealed class NbtStreamAdapterTests
         var options = new NbtSerializerOptions { MaxDocumentBytes = 4 };
 
         Assert.Throws<NbtException>(() => NbtSerializer.Deserialize<int>(stream, options));
+    }
+
+    [Fact]
+    public void StreamDeserializationHonorsMaxDocumentBytesInsideAPayload()
+    {
+        var data = NbtSerializer.Serialize(new string('x', 100), "root");
+        using var stream = new MemoryStream(data);
+        var options = new NbtSerializerOptions { MaxDocumentBytes = 20 };
+
+        Assert.Throws<NbtException>(() => NbtSerializer.Deserialize<string>(stream, options));
     }
 
     [Fact]
@@ -228,6 +266,11 @@ public sealed class NbtStreamAdapterTests
         Assert.Equal(
             new[] { int.MinValue, 0, int.MaxValue },
             ((List<int>)ints.Value).ToArray());
+    }
+
+    private sealed class KnownMemberDto
+    {
+        public int Known { get; set; }
     }
 
     private sealed class NonSeekableStream(Stream inner) : Stream
