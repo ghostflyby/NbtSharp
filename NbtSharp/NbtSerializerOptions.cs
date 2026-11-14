@@ -26,11 +26,7 @@ public sealed class NbtSerializerOptions
     public IList<NbtConverter> Converters => _converters;
 
     /// <summary>Gets or initializes the resolver that supplies type information for CLR types.</summary>
-    public INbtTypeInfoResolver? TypeInfoResolver
-    {
-        get;
-        init => field = value;
-    }
+    public INbtTypeInfoResolver? TypeInfoResolver { get; init; }
 
     /// <summary>Gets or initializes whether the root tag carries a name. The default is named.</summary>
     public NbtRootFormat RootFormat
@@ -66,11 +62,7 @@ public sealed class NbtSerializerOptions
     /// Gets or initializes whether duplicate compound member names are rejected while reading. The
     /// default is <see langword="false"/>, which keeps the last occurrence.
     /// </summary>
-    public bool RejectDuplicateCompoundNames
-    {
-        get;
-        init => field = value;
-    }
+    public bool RejectDuplicateCompoundNames { get; init; }
 
     /// <summary>Gets or initializes the maximum nesting depth. The default is 512.</summary>
     public int MaxDepth
