@@ -29,7 +29,7 @@ public sealed class NbtSerializerOptions
     public INbtTypeInfoResolver? TypeInfoResolver
     {
         get;
-        set
+        init
         {
             field = value;
             Invalidate();

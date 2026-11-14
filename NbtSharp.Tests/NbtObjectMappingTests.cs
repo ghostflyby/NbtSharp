@@ -172,24 +172,24 @@ public sealed class NbtObjectMappingTests
 
     private sealed class Player
     {
-        public string Name { get; set; } = "";
+        public string Name { get; init; } = "";
 
-        public int Health { get; set; }
+        public int Health { get; init; }
 
-        public List<Item> Items { get; set; } = [];
+        public List<Item> Items { get; init; } = [];
     }
 
     private sealed class Item
     {
-        public string Id { get; set; } = "";
+        public string Id { get; init; } = "";
 
-        public int Count { get; set; }
+        public int Count { get; init; }
     }
 
     private sealed class RenamedDto
     {
         [NbtPropertyName("n")]
-        public int Value { get; set; }
+        public int Value { get; init; }
 
         [NbtIgnore]
         public int Ignored { get; set; }
@@ -229,9 +229,9 @@ public sealed class NbtObjectMappingTests
 
     private sealed class NullableDto
     {
-        public int Required { get; set; }
+        public int Required { get; init; }
 
-        public string? Optional { get; set; }
+        public string? Optional { get; init; }
     }
 
     private sealed class UnsupportedDto

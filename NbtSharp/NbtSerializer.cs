@@ -284,7 +284,7 @@ public static class NbtSerializer
         }
         finally
         {
-            pipe.Complete();
+            await pipe.CompleteAsync();
         }
     }
 
@@ -307,7 +307,7 @@ public static class NbtSerializer
         }
         finally
         {
-            pipe.Complete();
+            await pipe.CompleteAsync();
         }
     }
 

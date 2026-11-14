@@ -136,7 +136,7 @@ public sealed class NbtStreamAdapterTests
 
         Assert.Equal(42, actual);
         await producer;
-        pipe.Reader.Complete();
+        await pipe.Reader.CompleteAsync();
     }
 
     [Fact]
