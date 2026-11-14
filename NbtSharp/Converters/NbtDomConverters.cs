@@ -154,6 +154,7 @@ internal static class NbtDomConverters
 
             throw new NbtException("The compound was not terminated.")
             {
+                IsTruncated = true,
                 BytePosition = reader.BytesConsumed,
             };
         }
@@ -283,6 +284,7 @@ internal static class NbtDomConverters
             {
                 throw new NbtException("The TAG_List<TAG_End> was not terminated.")
                 {
+                    IsTruncated = true,
                     BytePosition = reader.BytesConsumed,
                 };
             }

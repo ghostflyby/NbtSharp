@@ -58,6 +58,7 @@ internal sealed class NbtDictionaryConverter<TDictionary, TValue> : NbtConverter
 
         throw new NbtException("The compound was not terminated.")
         {
+            IsTruncated = true,
             BytePosition = reader.BytesConsumed,
         };
     }

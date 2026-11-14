@@ -41,4 +41,6 @@ public class NbtException : Exception
 
     /// <summary>Gets the NBT tag type that was found, when known.</summary>
     public NbtTagType? ActualTagType { get; internal init; }
+
+    internal bool IsTruncated { get; init; }
 }

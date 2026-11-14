@@ -132,8 +132,7 @@ public sealed class NbtObjectMappingTests
     [Fact]
     public void NullMembersCanBeRejected()
     {
-        var options = ReflectionOptions();
-        options.NullValueHandling = NbtNullValueHandling.Throw;
+        var options = ReflectionOptions(nullValueHandling: NbtNullValueHandling.Throw);
 
         Assert.Throws<NbtException>(() => NbtSerializer.Serialize(new NullableDto { Required = 1 }, "root", options));
     }
@@ -152,8 +151,8 @@ public sealed class NbtObjectMappingTests
         var options = ReflectionOptions();
         Assert.Equal(2, NbtSerializer.Deserialize<SimpleDto>(buffer.WrittenSpan, options).X);
 
-        options.RejectDuplicateCompoundNames = true;
-        Assert.Throws<NbtException>(() => NbtSerializer.Deserialize<SimpleDto>(buffer.WrittenSpan, options));
+        var throwingOptions = ReflectionOptions(rejectDuplicateCompoundNames: true);
+        Assert.Throws<NbtException>(() => NbtSerializer.Deserialize<SimpleDto>(buffer.WrittenSpan, throwingOptions));
     }
 
     [Fact]
@@ -165,10 +164,14 @@ public sealed class NbtObjectMappingTests
             NbtSerializer.Serialize(new UnsupportedDto(1), "root", options));
     }
 
-    private static NbtSerializerOptions ReflectionOptions() => new()
-    {
-        TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
-    };
+    private static NbtSerializerOptions ReflectionOptions(
+        bool rejectDuplicateCompoundNames = false,
+        NbtNullValueHandling nullValueHandling = NbtNullValueHandling.Omit) => new()
+        {
+            TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
+            RejectDuplicateCompoundNames = rejectDuplicateCompoundNames,
+            NullValueHandling = nullValueHandling,
+        };
 
     private sealed class Player
     {

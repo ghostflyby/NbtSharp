@@ -55,16 +55,16 @@ NbtSharp.NbtReflectionTypeInfoResolver.GetTypeInfo(System.Type! type, NbtSharp.N
 NbtSharp.NbtReflectionTypeInfoResolver.NbtReflectionTypeInfoResolver() -> void
 NbtSharp.NbtSerializerOptions.Converters.get -> System.Collections.Generic.IList<NbtSharp.NbtConverter!>!
 NbtSharp.NbtSerializerOptions.MaxCollectionLength.get -> int
-NbtSharp.NbtSerializerOptions.MaxCollectionLength.set -> void
+NbtSharp.NbtSerializerOptions.MaxCollectionLength.init -> void
 NbtSharp.NbtSerializerOptions.MaxDepth.get -> int
-NbtSharp.NbtSerializerOptions.MaxDepth.set -> void
+NbtSharp.NbtSerializerOptions.MaxDepth.init -> void
 NbtSharp.NbtSerializerOptions.MaxDocumentBytes.get -> long
-NbtSharp.NbtSerializerOptions.MaxDocumentBytes.set -> void
+NbtSharp.NbtSerializerOptions.MaxDocumentBytes.init -> void
 NbtSharp.NbtSerializerOptions.NullValueHandling.get -> NbtSharp.NbtNullValueHandling
-NbtSharp.NbtSerializerOptions.NullValueHandling.set -> void
+NbtSharp.NbtSerializerOptions.NullValueHandling.init -> void
 NbtSharp.NbtSerializerOptions.RejectDuplicateCompoundNames.get -> bool
-NbtSharp.NbtSerializerOptions.RejectDuplicateCompoundNames.set -> void
-NbtSharp.NbtSerializerOptions.RootFormat.set -> void
+NbtSharp.NbtSerializerOptions.RejectDuplicateCompoundNames.init -> void
+NbtSharp.NbtSerializerOptions.RootFormat.init -> void
 NbtSharp.NbtSerializerOptions.TypeInfoResolver.get -> NbtSharp.INbtTypeInfoResolver?
 NbtSharp.NbtSerializerOptions.TypeInfoResolver.init -> void
 NbtSharp.NbtTokenType.EndCompound = 2 -> NbtSharp.NbtTokenType

@@ -64,6 +64,17 @@ public sealed class NbtLimitTests
     }
 
     [Fact]
+    public void PaddedInputIgnoresTrailingBytesForTheDocumentLimit()
+    {
+        var data = NbtSerializer.Serialize(42, "root");
+        var padded = new byte[data.Length + 32];
+        data.CopyTo(padded, 0);
+        var options = new NbtSerializerOptions { MaxDocumentBytes = data.Length };
+
+        Assert.Equal(42, NbtSerializer.Deserialize<int>(padded, options));
+    }
+
+    [Fact]
     public void WriterRejectsExcessiveDocumentSize()
     {
         var options = new NbtSerializerOptions { MaxDocumentBytes = 2 };
@@ -74,9 +85,10 @@ public sealed class NbtLimitTests
     [Fact]
     public void InvalidEnumOptionsAreRejected()
     {
-        var options = new NbtSerializerOptions();
-        Assert.Throws<ArgumentOutOfRangeException>(() => options.RootFormat = (NbtRootFormat)42);
-        Assert.Throws<ArgumentOutOfRangeException>(() => options.NullValueHandling = (NbtNullValueHandling)42);
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new NbtSerializerOptions { RootFormat = (NbtRootFormat)42 });
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new NbtSerializerOptions { NullValueHandling = (NbtNullValueHandling)42 });
 
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             new NbtReader([0x00], new NbtReaderOptions { RootFormat = (NbtRootFormat)42 }));
@@ -89,11 +101,9 @@ public sealed class NbtLimitTests
     [Fact]
     public void NegativeLimitsAreRejected()
     {
-        var options = new NbtSerializerOptions();
-
-        Assert.Throws<ArgumentOutOfRangeException>(() => options.MaxDepth = -1);
-        Assert.Throws<ArgumentOutOfRangeException>(() => options.MaxCollectionLength = -1);
-        Assert.Throws<ArgumentOutOfRangeException>(() => options.MaxDocumentBytes = -1);
+        Assert.Throws<ArgumentOutOfRangeException>(() => new NbtSerializerOptions { MaxDepth = -1 });
+        Assert.Throws<ArgumentOutOfRangeException>(() => new NbtSerializerOptions { MaxCollectionLength = -1 });
+        Assert.Throws<ArgumentOutOfRangeException>(() => new NbtSerializerOptions { MaxDocumentBytes = -1 });
     }
 
     [Fact]

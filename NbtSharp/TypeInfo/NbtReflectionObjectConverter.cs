@@ -106,6 +106,7 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
 
         throw new NbtException("The compound was not terminated.")
         {
+            IsTruncated = true,
             BytePosition = reader.BytesConsumed,
         };
     }

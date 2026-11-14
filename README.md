@@ -211,17 +211,18 @@ implemented. Strings are encoded through
 [Myitian.Text.ModifiedUTF8Encoding](https://github.com/Myitian/Modified-UTF8-Encoding); decoding
 follows Java's `DataInputStream.readUTF` and rejects lead bytes of 0xF0 or greater.
 
-The generic serializer can resolve reflection and construct closed generic converters at runtime, so
-its entry points are annotated with `RequiresUnreferencedCode` and `RequiresDynamicCode`. The
-reflection resolver is opt-in. A source generator for fully AOT-safe type information is planned.
+Generic serializer entry points that may resolve converters or reflection are annotated with
+`RequiresUnreferencedCode` and `RequiresDynamicCode`. DOM and span entry points use built-in
+converters and remain AOT-clean. The reflection resolver is opt-in. A source generator for fully
+AOT-safe type information is planned.
 
 The `Stream` overloads are synchronous. `Serialize(Stream)` flushes the document when serialization
 completes and leaves the stream open; `Deserialize(Stream)` reads the stream through a fixed-size
 buffer, so non-seekable streams are supported. A stream is treated as one document: trailing bytes
 after the root value are ignored, and the stream may have been read ahead. `DeserializeAsync` is
-available for `Stream`, `ReadOnlySequence<byte>`, and `PipeReader`; it reads the document
-asynchronously through a `PipeReader` before parsing it. The writer does not roll back partial
-output if a converter throws.
+available for `Stream`, `ReadOnlySequence<byte>`, and `PipeReader`; it consumes one document
+asynchronously through a `PipeReader`, leaving bytes after the root available to the caller. The
+writer does not roll back partial output if a converter throws.
 
 ## Build and test
 

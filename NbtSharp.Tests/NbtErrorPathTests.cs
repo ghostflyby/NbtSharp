@@ -97,8 +97,7 @@ public sealed class NbtErrorPathTests
         writer.WriteEndCompound();
         writer.Complete();
 
-        var options = ReflectionOptions();
-        options.RejectDuplicateCompoundNames = true;
+        var options = ReflectionOptions(rejectDuplicateCompoundNames: true);
 
         var exception = Assert.Throws<NbtException>(() =>
             NbtSerializer.Deserialize<PlayerDto>(buffer.WrittenSpan, options));
@@ -106,9 +105,10 @@ public sealed class NbtErrorPathTests
         Assert.Equal("$.Name", exception.Path);
     }
 
-    private static NbtSerializerOptions ReflectionOptions() => new()
+    private static NbtSerializerOptions ReflectionOptions(bool rejectDuplicateCompoundNames = false) => new()
     {
         TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
+        RejectDuplicateCompoundNames = rejectDuplicateCompoundNames,
     };
 
     private sealed class PlayerDto

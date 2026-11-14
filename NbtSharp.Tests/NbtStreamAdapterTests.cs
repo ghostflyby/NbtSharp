@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.IO.Pipelines;
+using Xunit.Sdk;
 
 namespace NbtSharp.Tests;
 
@@ -158,6 +159,79 @@ public sealed class NbtStreamAdapterTests
     }
 
     [Fact]
+    public void StreamReaderCannotBeUsedAfterDispose()
+    {
+        var data = NbtSerializer.Serialize(42, "root");
+        using var stream = new MemoryStream(data);
+        var reader = new NbtReader(stream);
+
+        Assert.True(reader.Read());
+        Assert.Equal(42, reader.GetInt32());
+        reader.Dispose();
+
+        Throws<ObjectDisposedException>(ref reader, static (ref NbtReader value) => value.Read());
+    }
+
+    [Fact]
+    public async Task DeserializeAsyncStopsAtTheRootOfAnOpenPipe()
+    {
+        var data = NbtSerializer.Serialize(42, "root");
+        var pipe = new Pipe();
+        await pipe.Writer.WriteAsync(data, TestContext.Current.CancellationToken);
+
+        var actual = await NbtSerializer.DeserializeAsync<int>(
+            pipe.Reader,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(42, actual);
+        await pipe.Reader.CompleteAsync();
+        await pipe.Writer.CompleteAsync();
+    }
+
+    [Fact]
+    public async Task DeserializeAsyncConsumesOneDocumentFromAPipe()
+    {
+        var first = NbtSerializer.Serialize(1, "a");
+        var second = NbtSerializer.Serialize(2, "b");
+        var pipe = new Pipe();
+        var buffer = pipe.Writer.GetSpan(first.Length + second.Length);
+        first.CopyTo(buffer);
+        second.CopyTo(buffer[first.Length..]);
+        pipe.Writer.Advance(first.Length + second.Length);
+        pipe.Writer.Complete();
+
+        var firstValue = await NbtSerializer.DeserializeAsync<int>(
+            pipe.Reader,
+            cancellationToken: TestContext.Current.CancellationToken);
+        var secondValue = await NbtSerializer.DeserializeAsync<int>(
+            pipe.Reader,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, firstValue);
+        Assert.Equal(2, secondValue);
+        await pipe.Reader.CompleteAsync();
+    }
+
+    [Fact]
+    public async Task DeserializeAsyncHonorsMaxDocumentBytes()
+    {
+        var data = NbtSerializer.Serialize(42, "root");
+        var pipe = new Pipe();
+        data.CopyTo(pipe.Writer.GetSpan(data.Length));
+        pipe.Writer.Advance(data.Length);
+        pipe.Writer.Complete();
+        var options = new NbtSerializerOptions { MaxDocumentBytes = 4 };
+
+        await Assert.ThrowsAsync<NbtException>(async () =>
+            await NbtSerializer.DeserializeAsync<int>(
+                pipe.Reader,
+                options,
+                TestContext.Current.CancellationToken));
+
+        await pipe.Reader.CompleteAsync();
+    }
+
+    [Fact]
     public void NonSeekableStreamRoundTrips()
     {
         var payload = new byte[100_000];
@@ -294,6 +368,29 @@ public sealed class NbtStreamAdapterTests
         Assert.Equal(
             new[] { int.MinValue, 0, int.MaxValue },
             ((List<int>)ints.Value).ToArray());
+    }
+
+    private delegate void NbtReaderAction(ref NbtReader reader);
+
+    private static TException Throws<TException>(ref NbtReader reader, NbtReaderAction action)
+        where TException : Exception
+    {
+        try
+        {
+            action(ref reader);
+        }
+        catch (TException exception)
+        {
+            return exception;
+        }
+        catch (Exception exception)
+        {
+            throw new XunitException(
+                $"Expected {typeof(TException).Name} but caught {exception.GetType().Name}.",
+                exception);
+        }
+
+        throw new XunitException($"Expected {typeof(TException).Name} but nothing was thrown.");
     }
 
     private sealed class KnownMemberDto

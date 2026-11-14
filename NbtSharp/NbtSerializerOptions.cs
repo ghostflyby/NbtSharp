@@ -25,22 +25,18 @@ public sealed class NbtSerializerOptions
     /// <summary>Gets the custom converters, checked in order before the built-in converters.</summary>
     public IList<NbtConverter> Converters => _converters;
 
-    /// <summary>Gets or sets the resolver that supplies type information for CLR types.</summary>
+    /// <summary>Gets or initializes the resolver that supplies type information for CLR types.</summary>
     public INbtTypeInfoResolver? TypeInfoResolver
     {
         get;
-        init
-        {
-            field = value;
-            Invalidate();
-        }
+        init => field = value;
     }
 
-    /// <summary>Gets or sets whether the root tag carries a name. The default is named.</summary>
+    /// <summary>Gets or initializes whether the root tag carries a name. The default is named.</summary>
     public NbtRootFormat RootFormat
     {
         get;
-        set
+        init
         {
             if (value is not NbtRootFormat.Named and not NbtRootFormat.Unnamed)
             {
@@ -51,11 +47,11 @@ public sealed class NbtSerializerOptions
         }
     } = NbtRootFormat.Named;
 
-    /// <summary>Gets or sets how null compound members are handled. The default is to omit them.</summary>
+    /// <summary>Gets or initializes how null compound members are handled. The default is to omit them.</summary>
     public NbtNullValueHandling NullValueHandling
     {
         get;
-        set
+        init
         {
             if (value is not NbtNullValueHandling.Omit and not NbtNullValueHandling.Throw)
             {
@@ -67,42 +63,42 @@ public sealed class NbtSerializerOptions
     } = NbtNullValueHandling.Omit;
 
     /// <summary>
-    /// Gets or sets whether duplicate compound member names are rejected while reading. The default
-    /// is <see langword="false"/>, which keeps the last occurrence.
+    /// Gets or initializes whether duplicate compound member names are rejected while reading. The
+    /// default is <see langword="false"/>, which keeps the last occurrence.
     /// </summary>
     public bool RejectDuplicateCompoundNames
     {
         get;
-        set => field = value;
+        init => field = value;
     }
 
-    /// <summary>Gets or sets the maximum nesting depth. The default is 512.</summary>
+    /// <summary>Gets or initializes the maximum nesting depth. The default is 512.</summary>
     public int MaxDepth
     {
         get;
-        set
+        init
         {
             ArgumentOutOfRangeException.ThrowIfNegative(value);
             field = value;
         }
     } = 512;
 
-    /// <summary>Gets or sets the maximum number of elements in a list or array.</summary>
+    /// <summary>Gets or initializes the maximum number of elements in a list or array.</summary>
     public int MaxCollectionLength
     {
         get;
-        set
+        init
         {
             ArgumentOutOfRangeException.ThrowIfNegative(value);
             field = value;
         }
     } = 16 * 1024 * 1024;
 
-    /// <summary>Gets or sets the maximum document size in bytes. 0 means unlimited.</summary>
+    /// <summary>Gets or initializes the maximum document size in bytes. 0 means unlimited.</summary>
     public long MaxDocumentBytes
     {
         get;
-        set
+        init
         {
             ArgumentOutOfRangeException.ThrowIfNegative(value);
             field = value;

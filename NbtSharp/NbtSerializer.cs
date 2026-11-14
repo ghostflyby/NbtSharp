@@ -27,8 +27,6 @@ namespace NbtSharp;
 /// <c>SerializeDocument</c> overloads accept explicit options for a DOM root.
 /// </para>
 /// </remarks>
-[RequiresUnreferencedCode("Converter resolution may use reflection or runtime generic construction.")]
-[RequiresDynamicCode("Converter resolution may use runtime generic construction.")]
 public static class NbtSerializer
 {
     /// <summary>Serializes <paramref name="value"/> into a new byte array.</summary>
@@ -37,6 +35,8 @@ public static class NbtSerializer
     /// <param name="rootName">The root tag name. Empty is valid.</param>
     /// <param name="options">The serializer options, or the defaults.</param>
     /// <returns>The encoded NBT document.</returns>
+    [RequiresUnreferencedCode("Converter resolution may use reflection or runtime generic construction.")]
+    [RequiresDynamicCode("Converter resolution may use runtime generic construction.")]
     public static byte[] Serialize<T>(T value, string rootName = "", NbtSerializerOptions? options = null)
     {
         var buffer = new ArrayBufferWriter<byte>();
@@ -50,6 +50,8 @@ public static class NbtSerializer
     /// <param name="value">The value to serialize.</param>
     /// <param name="rootName">The root tag name. Empty is valid.</param>
     /// <param name="options">The serializer options, or the defaults.</param>
+    [RequiresUnreferencedCode("Converter resolution may use reflection or runtime generic construction.")]
+    [RequiresDynamicCode("Converter resolution may use runtime generic construction.")]
     public static void Serialize<T>(
         IBufferWriter<byte> destination,
         T value,
@@ -97,6 +99,8 @@ public static class NbtSerializer
     /// The document is written through a <see cref="PipeWriter"/> over the stream and flushed when
     /// the document is complete. The stream stays open.
     /// </remarks>
+    [RequiresUnreferencedCode("Converter resolution may use reflection or runtime generic construction.")]
+    [RequiresDynamicCode("Converter resolution may use runtime generic construction.")]
     public static void Serialize<T>(
         Stream destination,
         T value,
@@ -114,7 +118,15 @@ public static class NbtSerializer
         }
         catch (Exception ex)
         {
-            pipeWriter.Complete(ex);
+            try
+            {
+                pipeWriter.Complete(ex);
+            }
+            catch
+            {
+                // Preserve the original serialization failure.
+            }
+
             throw;
         }
 
@@ -126,6 +138,8 @@ public static class NbtSerializer
     /// <param name="data">The NBT document.</param>
     /// <param name="options">The serializer options, or the defaults.</param>
     /// <returns>The decoded value.</returns>
+    [RequiresUnreferencedCode("Converter resolution may use reflection or runtime generic construction.")]
+    [RequiresDynamicCode("Converter resolution may use runtime generic construction.")]
     public static T Deserialize<T>(ReadOnlySpan<byte> data, NbtSerializerOptions? options = null) =>
         Deserialize<T>(data, out _, options);
 
@@ -135,6 +149,8 @@ public static class NbtSerializer
     /// <param name="rootName">The root name, or <see langword="null"/> for an unnamed root.</param>
     /// <param name="options">The serializer options, or the defaults.</param>
     /// <returns>The decoded value.</returns>
+    [RequiresUnreferencedCode("Converter resolution may use reflection or runtime generic construction.")]
+    [RequiresDynamicCode("Converter resolution may use runtime generic construction.")]
     public static T Deserialize<T>(
         ReadOnlySpan<byte> data,
         out string? rootName,
@@ -150,6 +166,8 @@ public static class NbtSerializer
     /// <param name="data">The NBT document.</param>
     /// <param name="options">The serializer options, or the defaults.</param>
     /// <returns>The decoded value.</returns>
+    [RequiresUnreferencedCode("Converter resolution may use reflection or runtime generic construction.")]
+    [RequiresDynamicCode("Converter resolution may use runtime generic construction.")]
     public static T Deserialize<T>(ReadOnlySequence<byte> data, NbtSerializerOptions? options = null) =>
         Deserialize<T>(data, out _, options);
 
@@ -159,6 +177,8 @@ public static class NbtSerializer
     /// <param name="rootName">The root name, or <see langword="null"/> for an unnamed root.</param>
     /// <param name="options">The serializer options, or the defaults.</param>
     /// <returns>The decoded value.</returns>
+    [RequiresUnreferencedCode("Converter resolution may use reflection or runtime generic construction.")]
+    [RequiresDynamicCode("Converter resolution may use runtime generic construction.")]
     public static T Deserialize<T>(
         ReadOnlySequence<byte> data,
         out string? rootName,
@@ -181,6 +201,8 @@ public static class NbtSerializer
     /// does not need to be seekable. Bytes after the root value are ignored, but may already have
     /// been read from the stream.
     /// </remarks>
+    [RequiresUnreferencedCode("Converter resolution may use reflection or runtime generic construction.")]
+    [RequiresDynamicCode("Converter resolution may use runtime generic construction.")]
     public static T Deserialize<T>(Stream stream, NbtSerializerOptions? options = null) =>
         Deserialize<T>(stream, out _, options);
 
@@ -198,6 +220,8 @@ public static class NbtSerializer
     /// does not need to be seekable. Bytes after the root value are ignored, but may already have
     /// been read from the stream.
     /// </remarks>
+    [RequiresUnreferencedCode("Converter resolution may use reflection or runtime generic construction.")]
+    [RequiresDynamicCode("Converter resolution may use runtime generic construction.")]
     public static T Deserialize<T>(
         Stream stream,
         out string? rootName,
@@ -223,9 +247,11 @@ public static class NbtSerializer
     /// <param name="cancellationToken">The token used to cancel the read.</param>
     /// <returns>A task that yields the decoded value.</returns>
     /// <remarks>
-    /// The caller owns <paramref name="reader"/>; this method does not complete it. The document is
-    /// read completely before it is parsed.
+    /// The caller owns <paramref name="reader"/>; this method does not complete it. One document is
+    /// consumed, and bytes after the root remain available to the next call.
     /// </remarks>
+    [RequiresUnreferencedCode("Converter resolution may use reflection or runtime generic construction.")]
+    [RequiresDynamicCode("Converter resolution may use runtime generic construction.")]
     public static async Task<T> DeserializeAsync<T>(
         PipeReader reader,
         NbtSerializerOptions? options = null,
@@ -233,32 +259,43 @@ public static class NbtSerializer
     {
         ArgumentNullException.ThrowIfNull(reader);
         options ??= new NbtSerializerOptions();
-        var buffer = new ArrayBufferWriter<byte>();
+        var readerOptions = options.CreateReaderOptions();
+        readerOptions = new NbtReaderOptions
+        {
+            RootFormat = readerOptions.RootFormat,
+            MaxDepth = readerOptions.MaxDepth,
+            MaxCollectionLength = readerOptions.MaxCollectionLength,
+            MaxDocumentBytes = 0,
+        };
+
         while (true)
         {
             var result = await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
-            var sequence = result.Buffer;
-            foreach (var segment in sequence)
+            try
             {
-                if (options.MaxDocumentBytes > 0 &&
-                    (long)buffer.WrittenCount + segment.Length > options.MaxDocumentBytes)
+                var nbtReader = new NbtReader(result.Buffer, readerOptions);
+                var value = DeserializeCore<T>(ref nbtReader, options, out _);
+                var consumed = nbtReader.BytesConsumed;
+                if (options.MaxDocumentBytes > 0 && consumed > options.MaxDocumentBytes)
                 {
                     throw new NbtException(
                         $"The NBT document exceeds the configured limit of {options.MaxDocumentBytes} bytes.");
                 }
 
-                segment.Span.CopyTo(buffer.GetSpan(segment.Length));
-                buffer.Advance(segment.Length);
+                reader.AdvanceTo(result.Buffer.GetPosition(consumed), result.Buffer.End);
+                return value;
             }
-
-            reader.AdvanceTo(sequence.End, sequence.End);
-            if (result.IsCompleted)
+            catch (NbtException ex) when (ex.IsTruncated && !result.IsCompleted)
             {
-                break;
+                if (options.MaxDocumentBytes > 0 && result.Buffer.Length >= options.MaxDocumentBytes)
+                {
+                    throw new NbtException(
+                        $"The NBT document exceeds the configured limit of {options.MaxDocumentBytes} bytes.");
+                }
+
+                reader.AdvanceTo(result.Buffer.Start, result.Buffer.End);
             }
         }
-
-        return Deserialize<T>(buffer.WrittenSpan, options);
     }
 
     /// <summary>Deserializes a complete NBT document from a stream asynchronously.</summary>
@@ -268,9 +305,11 @@ public static class NbtSerializer
     /// <param name="cancellationToken">The token used to cancel the read.</param>
     /// <returns>A task that yields the decoded value.</returns>
     /// <remarks>
-    /// The stream is read through a <see cref="PipeReader"/> and is left open. The document is read
-    /// completely before it is parsed.
+    /// The stream is read through a <see cref="PipeReader"/>, one document is consumed, and the
+    /// stream is left open.
     /// </remarks>
+    [RequiresUnreferencedCode("Converter resolution may use reflection or runtime generic construction.")]
+    [RequiresDynamicCode("Converter resolution may use runtime generic construction.")]
     public static async Task<T> DeserializeAsync<T>(
         Stream stream,
         NbtSerializerOptions? options = null,
@@ -284,7 +323,14 @@ public static class NbtSerializer
         }
         finally
         {
-            await pipe.CompleteAsync();
+            try
+            {
+                await pipe.CompleteAsync().ConfigureAwait(false);
+            }
+            catch
+            {
+                // Preserve the original result or exception.
+            }
         }
     }
 
@@ -294,7 +340,9 @@ public static class NbtSerializer
     /// <param name="options">The serializer options, or the defaults.</param>
     /// <param name="cancellationToken">The token used to cancel the read.</param>
     /// <returns>A task that yields the decoded value.</returns>
-    /// <remarks>The document is read through a <see cref="PipeReader"/> and then parsed.</remarks>
+    /// <remarks>One document is read through a <see cref="PipeReader"/> and then parsed.</remarks>
+    [RequiresUnreferencedCode("Converter resolution may use reflection or runtime generic construction.")]
+    [RequiresDynamicCode("Converter resolution may use runtime generic construction.")]
     public static async Task<T> DeserializeAsync<T>(
         ReadOnlySequence<byte> data,
         NbtSerializerOptions? options = null,
@@ -307,7 +355,14 @@ public static class NbtSerializer
         }
         finally
         {
-            await pipe.CompleteAsync();
+            try
+            {
+                await pipe.CompleteAsync().ConfigureAwait(false);
+            }
+            catch
+            {
+                // Preserve the original result or exception.
+            }
         }
     }
 
@@ -320,6 +375,8 @@ public static class NbtSerializer
     /// This overload is for list elements and for converter payloads whose member or root header
     /// was already written. Compound members use <see cref="SerializeMember{T}"/>.
     /// </remarks>
+    [RequiresUnreferencedCode("Converter resolution may use reflection or runtime generic construction.")]
+    [RequiresDynamicCode("Converter resolution may use runtime generic construction.")]
     public static void SerializeValue<T>(ref NbtWriter writer, T value, NbtSerializerOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -337,6 +394,8 @@ public static class NbtSerializer
     /// <see cref="NbtConverter{T}.TryGetTagType(T, NbtSerializerOptions, out NbtTagType)"/> before
     /// the header can be written.
     /// </remarks>
+    [RequiresUnreferencedCode("Converter resolution may use reflection or runtime generic construction.")]
+    [RequiresDynamicCode("Converter resolution may use runtime generic construction.")]
     public static void SerializeMember<T>(
         ref NbtWriter writer,
         string name,
@@ -353,6 +412,8 @@ public static class NbtSerializer
     /// <param name="reader">The reader positioned at the value's first token.</param>
     /// <param name="options">The serializer options.</param>
     /// <returns>The decoded value.</returns>
+    [RequiresUnreferencedCode("Converter resolution may use reflection or runtime generic construction.")]
+    [RequiresDynamicCode("Converter resolution may use runtime generic construction.")]
     public static T DeserializeValue<T>(ref NbtReader reader, NbtSerializerOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -385,6 +446,8 @@ public static class NbtSerializer
     /// <param name="destination">The buffer writer that receives the document.</param>
     /// <param name="root">The document, including its root name.</param>
     /// <param name="options">The serializer options, or the defaults.</param>
+    [UnconditionalSuppressMessage("Aot", "IL2026", Justification = "DOM values resolve to built-in converters.")]
+    [UnconditionalSuppressMessage("Aot", "IL3050", Justification = "DOM values resolve to built-in converters.")]
     public static void SerializeDocument(
         IBufferWriter<byte> destination,
         NbtRoot root,
@@ -406,6 +469,8 @@ public static class NbtSerializer
     /// <param name="destination">The stream that receives the document.</param>
     /// <param name="root">The document, including its root name.</param>
     /// <param name="options">The serializer options, or the defaults.</param>
+    [UnconditionalSuppressMessage("Aot", "IL2026", Justification = "DOM values resolve to built-in converters.")]
+    [UnconditionalSuppressMessage("Aot", "IL3050", Justification = "DOM values resolve to built-in converters.")]
     public static void SerializeDocument(Stream destination, NbtRoot root, NbtSerializerOptions? options)
     {
         ArgumentNullException.ThrowIfNull(destination);
@@ -418,6 +483,8 @@ public static class NbtSerializer
     /// <param name="data">The NBT document.</param>
     /// <param name="options">The serializer options, or the defaults.</param>
     /// <returns>The parsed document.</returns>
+    [UnconditionalSuppressMessage("Aot", "IL2026", Justification = "DOM values resolve to built-in converters.")]
+    [UnconditionalSuppressMessage("Aot", "IL3050", Justification = "DOM values resolve to built-in converters.")]
     public static NbtRoot Deserialize(ReadOnlySpan<byte> data, NbtSerializerOptions? options = null)
     {
         var value = Deserialize<NbtValue>(data, out var rootName, options);
@@ -428,6 +495,8 @@ public static class NbtSerializer
     /// <param name="data">The NBT document.</param>
     /// <param name="options">The serializer options, or the defaults.</param>
     /// <returns>The parsed document.</returns>
+    [UnconditionalSuppressMessage("Aot", "IL2026", Justification = "DOM values resolve to built-in converters.")]
+    [UnconditionalSuppressMessage("Aot", "IL3050", Justification = "DOM values resolve to built-in converters.")]
     public static NbtRoot Deserialize(ReadOnlySequence<byte> data, NbtSerializerOptions? options = null)
     {
         var value = Deserialize<NbtValue>(data, out var rootName, options);
@@ -442,12 +511,16 @@ public static class NbtSerializer
     /// The stream is consumed synchronously through a fixed-size buffer and does not need to be
     /// seekable.
     /// </remarks>
+    [UnconditionalSuppressMessage("Aot", "IL2026", Justification = "DOM values resolve to built-in converters.")]
+    [UnconditionalSuppressMessage("Aot", "IL3050", Justification = "DOM values resolve to built-in converters.")]
     public static NbtRoot Deserialize(Stream stream, NbtSerializerOptions? options = null)
     {
         var value = Deserialize<NbtValue>(stream, out var rootName, options);
         return new NbtRoot(rootName, value);
     }
 
+    [RequiresUnreferencedCode("Converter resolution may use reflection or runtime generic construction.")]
+    [RequiresDynamicCode("Converter resolution may use runtime generic construction.")]
     internal static object? DeserializeValueInternal(
         ref NbtReader reader,
         Type type,
@@ -497,6 +570,8 @@ public static class NbtSerializer
         }
     }
 
+    [RequiresUnreferencedCode("Converter resolution may use reflection or runtime generic construction.")]
+    [RequiresDynamicCode("Converter resolution may use runtime generic construction.")]
     internal static void SerializeMemberInternal(
         ref NbtWriter writer,
         string name,
@@ -535,6 +610,8 @@ public static class NbtSerializer
         SerializeValueInternal(ref writer, value, type, options, "." + name, headerWritten: true);
     }
 
+    [RequiresUnreferencedCode("Converter resolution may use reflection or runtime generic construction.")]
+    [RequiresDynamicCode("Converter resolution may use runtime generic construction.")]
     internal static void SerializeValueInternal(
         ref NbtWriter writer,
         object? value,
@@ -586,6 +663,8 @@ public static class NbtSerializer
         }
     }
 
+    [RequiresUnreferencedCode("Converter resolution may use reflection or runtime generic construction.")]
+    [RequiresDynamicCode("Converter resolution may use runtime generic construction.")]
     private static void SerializeRootValue(
         ref NbtWriter writer,
         object? value,
@@ -627,6 +706,8 @@ public static class NbtSerializer
             : segment + exception.Path;
     }
 
+    [RequiresUnreferencedCode("Converter resolution may use reflection or runtime generic construction.")]
+    [RequiresDynamicCode("Converter resolution may use runtime generic construction.")]
     private static T DeserializeCore<T>(
         ref NbtReader reader,
         NbtSerializerOptions options,
@@ -637,7 +718,10 @@ public static class NbtSerializer
         {
             if (!reader.Read())
             {
-                throw new NbtException("The NBT data does not contain a root tag.");
+                throw new NbtException("The NBT data does not contain a root tag.")
+                {
+                    IsTruncated = true,
+                };
             }
 
             rootName = reader.Name;

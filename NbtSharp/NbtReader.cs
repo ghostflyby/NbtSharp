@@ -15,6 +15,7 @@ namespace NbtSharp;
 /// A span is read directly. A <see cref="ReadOnlySequence{T}"/> is read segment by segment, where
 /// each segment is a contiguous span. A stream is read through a fixed-size pooled buffer, which
 /// makes it equivalent to a sequence of contiguous spans; <see cref="Dispose"/> returns that buffer.
+/// A stream reader must not be copied, because the pooled buffer is shared between copies.
 /// </para>
 /// <para>
 /// The reader mirrors the NBT wire structure. A compound member produces a value or container-start
@@ -57,15 +58,9 @@ public ref struct NbtReader
     /// <summary>Initializes a reader over a contiguous span of NBT bytes.</summary>
     /// <param name="data">The complete NBT document.</param>
     /// <param name="options">The reader options, or the defaults.</param>
-    /// <exception cref="NbtException">The document exceeds <see cref="NbtReaderOptions.MaxDocumentBytes"/>.</exception>
     public NbtReader(ReadOnlySpan<byte> data, NbtReaderOptions options = default)
     {
         ValidateOptions(options);
-        if (options.MaxDocumentBytes > 0 && data.Length > options.MaxDocumentBytes)
-        {
-            throw new NbtException($"The NBT document is larger than the configured limit of {options.MaxDocumentBytes} bytes.");
-        }
-
         this = default;
         _span = data;
         _rootFormat = options.RootFormat;
@@ -80,15 +75,9 @@ public ref struct NbtReader
     /// </summary>
     /// <param name="data">The complete NBT document.</param>
     /// <param name="options">The reader options, or the defaults.</param>
-    /// <exception cref="NbtException">The document exceeds <see cref="NbtReaderOptions.MaxDocumentBytes"/>.</exception>
     public NbtReader(ReadOnlySequence<byte> data, NbtReaderOptions options = default)
     {
         ValidateOptions(options);
-        if (options.MaxDocumentBytes > 0 && data.Length > options.MaxDocumentBytes)
-        {
-            throw new NbtException($"The NBT document is larger than the configured limit of {options.MaxDocumentBytes} bytes.");
-        }
-
         this = default;
         _buffer = data;
         _nextSegmentPosition = data.Start;
@@ -121,7 +110,17 @@ public ref struct NbtReader
     /// <remarks>
     /// The stream itself is left open. Span and sequence readers have no resources to release.
     /// </remarks>
-    public void Dispose() => _streamBuffer?.Dispose();
+    public void Dispose()
+    {
+        if (_streamBuffer is null)
+        {
+            return;
+        }
+
+        _span = default;
+        _streamCompleted = true;
+        _streamBuffer.Dispose();
+    }
 
     /// <summary>Gets the type of the most recently produced token.</summary>
     public NbtTokenType TokenType { get; private set; }
@@ -395,6 +394,8 @@ public ref struct NbtReader
         {
             throw new InvalidOperationException("The reader was not initialized with NBT data.");
         }
+
+        ThrowIfDisposed();
     }
 
     private static void ValidateOptions(NbtReaderOptions options)
@@ -566,6 +567,7 @@ public ref struct NbtReader
             throw new NbtException(
                 $"The NBT list declares {count} elements but the remaining data is too short.")
             {
+                IsTruncated = true,
                 BytePosition = position,
             };
         }
@@ -613,6 +615,7 @@ public ref struct NbtReader
         {
             throw new NbtException("Unexpected end of NBT data.")
             {
+                IsTruncated = true,
                 BytePosition = position,
             };
         }
@@ -730,6 +733,7 @@ public ref struct NbtReader
         {
             throw new NbtException("Unexpected end of NBT data.")
             {
+                IsTruncated = true,
                 BytePosition = position,
             };
         }
@@ -883,6 +887,7 @@ public ref struct NbtReader
             {
                 throw new NbtException("Unexpected end of NBT data.")
                 {
+                    IsTruncated = true,
                     BytePosition = BytesConsumed,
                 };
             }
@@ -917,6 +922,7 @@ public ref struct NbtReader
             {
                 throw new NbtException("Unexpected end of NBT data.")
                 {
+                    IsTruncated = true,
                     BytePosition = BytesConsumed,
                 };
             }
@@ -943,7 +949,19 @@ public ref struct NbtReader
         return true;
     }
 
-    private bool EnsureData() => !_span.IsEmpty || MoveNext();
+    private bool EnsureData()
+    {
+        ThrowIfDisposed();
+        return !_span.IsEmpty || MoveNext();
+    }
+
+    private readonly void ThrowIfDisposed()
+    {
+        if (_streamBuffer is { IsDisposed: true })
+        {
+            throw new ObjectDisposedException(nameof(NbtReader));
+        }
+    }
 
     private bool MoveNext()
     {
@@ -1002,6 +1020,7 @@ public ref struct NbtReader
             throw new NbtException(
                 $"The NBT payload declares {byteCount} bytes but only {remaining} are available.")
             {
+                IsTruncated = true,
                 BytePosition = BytesConsumed,
             };
         }
@@ -1040,6 +1059,8 @@ public ref struct NbtReader
     private sealed class StreamBuffer(int size) : IDisposable
     {
         private byte[]? _buffer = ArrayPool<byte>.Shared.Rent(size);
+
+        public bool IsDisposed => _buffer is null;
 
         public byte[] Buffer => _buffer ?? throw new ObjectDisposedException(nameof(StreamBuffer));
 

@@ -47,6 +47,7 @@ internal static class NbtCollectionReader
             {
                 throw new NbtException("The list ended before all declared elements were read.")
                 {
+                    IsTruncated = true,
                     BytePosition = reader.BytesConsumed,
                 };
             }
@@ -62,6 +63,7 @@ internal static class NbtCollectionReader
         {
             throw new NbtException("The list was not terminated.")
             {
+                IsTruncated = true,
                 BytePosition = reader.BytesConsumed,
             };
         }
