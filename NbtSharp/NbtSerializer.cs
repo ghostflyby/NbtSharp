@@ -247,8 +247,14 @@ public static class NbtSerializer
     /// <param name="cancellationToken">The token used to cancel the read.</param>
     /// <returns>A task that yields the decoded value.</returns>
     /// <remarks>
+    /// <para>
     /// The caller owns <paramref name="reader"/>; this method does not complete it. One document is
     /// consumed, and bytes after the root remain available to the next call.
+    /// </para>
+    /// <para>
+    /// A truncated parse can invoke converters again for the same bytes, so converters should not
+    /// depend on being called exactly once.
+    /// </para>
     /// </remarks>
     [RequiresUnreferencedCode("Converter resolution may use reflection or runtime generic construction.")]
     [RequiresDynamicCode("Converter resolution may use runtime generic construction.")]
@@ -260,54 +266,49 @@ public static class NbtSerializer
         ArgumentNullException.ThrowIfNull(reader);
         options ??= new NbtSerializerOptions();
         var readerOptions = options.CreateReaderOptions();
-        readerOptions = new NbtReaderOptions
-        {
-            RootFormat = readerOptions.RootFormat,
-            MaxDepth = readerOptions.MaxDepth,
-            MaxCollectionLength = readerOptions.MaxCollectionLength,
-            MaxDocumentBytes = 0,
-        };
 
-        // Re-parse only after the buffered data has at least doubled, so a document arriving in
-        // many small reads is scanned O(log n) times instead of once per read.
-        var nextParseLength = 0L;
         while (true)
         {
-            var readLength = nextParseLength;
-            if (options.MaxDocumentBytes > 0 && readLength > options.MaxDocumentBytes)
+            var result = await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
+            if (result.IsCanceled)
             {
-                readLength = options.MaxDocumentBytes;
+                reader.AdvanceTo(result.Buffer.Start, result.Buffer.End);
+                throw new OperationCanceledException("The pipe read was canceled.");
             }
 
-            var result = nextParseLength == 0
-                ? await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
-                : await reader.ReadAtLeastAsync(
-                    (int)Math.Min(readLength, int.MaxValue),
-                    cancellationToken).ConfigureAwait(false);
             try
             {
-                var nbtReader = new NbtReader(result.Buffer, readerOptions);
-                var value = DeserializeCore<T>(ref nbtReader, options, out _);
-                var consumed = nbtReader.BytesConsumed;
-                if (options.MaxDocumentBytes > 0 && consumed > options.MaxDocumentBytes)
+                try
                 {
-                    throw new NbtException(
-                        $"The NBT document exceeds the configured limit of {options.MaxDocumentBytes} bytes.");
-                }
+                    var nbtReader = new NbtReader(result.Buffer, readerOptions);
+                    var value = DeserializeCore<T>(ref nbtReader, options, out _);
+                    var consumed = nbtReader.BytesConsumed;
+                    if (options.MaxDocumentBytes > 0 && consumed > options.MaxDocumentBytes)
+                    {
+                        throw new NbtException(
+                            $"The NBT document exceeds the configured limit of {options.MaxDocumentBytes} bytes.");
+                    }
 
-                reader.AdvanceTo(result.Buffer.GetPosition(consumed), result.Buffer.End);
-                return value;
+                    reader.AdvanceTo(result.Buffer.GetPosition(consumed), result.Buffer.End);
+                    return value;
+                }
+                catch (NbtException ex) when (ex.IsTruncated && !result.IsCompleted)
+                {
+                    if (options.MaxDocumentBytes > 0 &&
+                        result.Buffer.Length >= options.MaxDocumentBytes)
+                    {
+                        throw new NbtException(
+                            $"The NBT document exceeds the configured limit of {options.MaxDocumentBytes} bytes.");
+                    }
+
+                    reader.AdvanceTo(result.Buffer.Start, result.Buffer.End);
+                    continue;
+                }
             }
-            catch (NbtException ex) when (ex.IsTruncated && !result.IsCompleted)
+            catch
             {
-                if (options.MaxDocumentBytes > 0 && result.Buffer.Length >= options.MaxDocumentBytes)
-                {
-                    throw new NbtException(
-                        $"The NBT document exceeds the configured limit of {options.MaxDocumentBytes} bytes.");
-                }
-
-                nextParseLength = Math.Max(1, result.Buffer.Length * 2);
                 reader.AdvanceTo(result.Buffer.Start, result.Buffer.End);
+                throw;
             }
         }
     }

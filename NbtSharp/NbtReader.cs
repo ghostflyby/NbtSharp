@@ -562,6 +562,7 @@ public ref struct NbtReader
         }
 
         var required = (long)count * minimumSize;
+        EnsureDocumentSize(required);
         if (TryGetRemainingBytes(out var remaining) && required > remaining)
         {
             throw new NbtException(
@@ -633,6 +634,8 @@ public ref struct NbtReader
 
     private bool Expect(NbtTagType expected)
     {
+        ThrowIfDisposed();
+
         if (!HasPendingValue)
         {
             if (TokenType is NbtTokenType.StartCompound or NbtTokenType.StartList)
@@ -1015,6 +1018,7 @@ public ref struct NbtReader
 
     private void EnsurePayloadFits(long byteCount)
     {
+        EnsureDocumentSize(byteCount);
         if (TryGetRemainingBytes(out var remaining) && byteCount > remaining)
         {
             throw new NbtException(
@@ -1024,8 +1028,6 @@ public ref struct NbtReader
                 BytePosition = BytesConsumed,
             };
         }
-
-        EnsureDocumentSize(byteCount);
     }
 
     private int GetInitialArrayCapacity(int length, int elementSize)

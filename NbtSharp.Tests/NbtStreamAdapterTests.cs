@@ -173,6 +173,20 @@ public sealed class NbtStreamAdapterTests
     }
 
     [Fact]
+    public void StreamReaderGetterCannotBeUsedAfterDispose()
+    {
+        var data = NbtSerializer.Serialize(42, "root");
+        using var stream = new MemoryStream(data);
+        var reader = new NbtReader(stream);
+
+        Assert.True(reader.Read());
+        reader.Dispose();
+        reader.Dispose();
+
+        Throws<ObjectDisposedException>(ref reader, static (ref NbtReader value) => value.GetInt32());
+    }
+
+    [Fact]
     public async Task DeserializeAsyncStopsAtTheRootOfAnOpenPipe()
     {
         var data = NbtSerializer.Serialize(42, "root");
@@ -210,6 +224,102 @@ public sealed class NbtStreamAdapterTests
         Assert.Equal(1, firstValue);
         Assert.Equal(2, secondValue);
         await pipe.Reader.CompleteAsync();
+    }
+
+    [Fact]
+    public async Task DeserializeAsyncCompletesFromAnOpenPipeAcrossReads()
+    {
+        var text = new string('x', 4000);
+        var data = NbtSerializer.Serialize(text, "root");
+        var firstLength = data.Length * 3 / 5;
+        var pipe = new Pipe();
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(
+            TestContext.Current.CancellationToken);
+        cts.CancelAfter(TimeSpan.FromSeconds(5));
+
+        await pipe.Writer.WriteAsync(data.AsMemory(0, firstLength), cts.Token);
+        var task = NbtSerializer.DeserializeAsync<string>(pipe.Reader, cancellationToken: cts.Token);
+        await pipe.Writer.WriteAsync(data.AsMemory(firstLength), cts.Token);
+
+        var actual = await task;
+
+        Assert.Equal(text, actual);
+        await pipe.Reader.CompleteAsync();
+        await pipe.Writer.CompleteAsync();
+    }
+
+    [Fact]
+    public async Task DeserializeAsyncLeavesThePipeUsableAfterAFailure()
+    {
+        var data = NbtSerializer.Serialize(42, "root");
+        var pipe = new Pipe();
+        data.CopyTo(pipe.Writer.GetSpan(data.Length));
+        pipe.Writer.Advance(data.Length);
+        pipe.Writer.Complete();
+        var strict = new NbtSerializerOptions { MaxDocumentBytes = 4 };
+
+        await Assert.ThrowsAsync<NbtException>(() =>
+            NbtSerializer.DeserializeAsync<int>(
+                pipe.Reader,
+                strict,
+                TestContext.Current.CancellationToken));
+
+        var relaxed = new NbtSerializerOptions { MaxDocumentBytes = 100 };
+        Assert.Equal(42, await NbtSerializer.DeserializeAsync<int>(
+            pipe.Reader,
+            relaxed,
+            TestContext.Current.CancellationToken));
+        await pipe.Reader.CompleteAsync();
+    }
+
+    [Fact]
+    public async Task DeserializeAsyncHonorsCancelPendingRead()
+    {
+        var pipe = new Pipe();
+        var task = NbtSerializer.DeserializeAsync<int>(
+            pipe.Reader,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        pipe.Reader.CancelPendingRead();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(async () => await task);
+        await pipe.Reader.CompleteAsync();
+        await pipe.Writer.CompleteAsync();
+    }
+
+    [Fact]
+    public async Task DeserializeAsyncRejectsDeclaredPayloadBeyondTheLimit()
+    {
+        // Named root TAG_IntArray "root" declaring 1000 elements with no payload.
+        var data = new byte[]
+        {
+            0x0B, 0x00, 0x04, (byte)'r', (byte)'o', (byte)'o', (byte)'t',
+            0x00, 0x00, 0x03, 0xE8,
+        };
+        var pipe = new Pipe();
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(
+            TestContext.Current.CancellationToken);
+        cts.CancelAfter(TimeSpan.FromSeconds(5));
+        await pipe.Writer.WriteAsync(data, cts.Token);
+        var options = new NbtSerializerOptions { MaxDocumentBytes = 32 };
+
+        await Assert.ThrowsAsync<NbtException>(() =>
+            NbtSerializer.DeserializeAsync<int[]>(pipe.Reader, options, cts.Token));
+
+        await pipe.Reader.CompleteAsync();
+        await pipe.Writer.CompleteAsync();
+    }
+
+    [Fact]
+    public async Task DeserializeAsyncThrowsForATruncatedSequence()
+    {
+        var data = NbtSerializer.Serialize(new string('x', 100), "root");
+        var sequence = new ReadOnlySequence<byte>(data[..^5]);
+
+        await Assert.ThrowsAsync<NbtException>(() =>
+            NbtSerializer.DeserializeAsync<string>(
+                sequence,
+                cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Fact]
