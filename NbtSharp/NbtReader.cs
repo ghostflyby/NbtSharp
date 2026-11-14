@@ -1,6 +1,5 @@
 using System.Buffers;
 using System.Buffers.Binary;
-using System.IO.Pipelines;
 using System.Runtime.InteropServices;
 using System.Text;
 using Myitian.Text;
@@ -8,14 +7,14 @@ using Myitian.Text;
 namespace NbtSharp;
 
 /// <summary>
-/// Reads Java Edition NBT as a forward-only sequence of tokens over a span or a pipe reader.
+/// Reads Java Edition NBT as a forward-only sequence of tokens over a contiguous span, a sequence of
+/// spans, or a stream read through a fixed-size buffer.
 /// </summary>
 /// <remarks>
 /// <para>
-/// A <see cref="PipeReader"/> supplies the document incrementally: the reader advances the pipe as
-/// it consumes bytes and calls <see cref="PipeReader.TryRead(out ReadResult)"/> for the next buffer.
-/// A <see cref="ReadOnlySequence{T}"/> is exposed through a pipe reader as well, while the span
-/// constructor is a contiguous in-memory fast path.
+/// A span is read directly. A <see cref="ReadOnlySequence{T}"/> is read segment by segment, where
+/// each segment is a contiguous span. A stream is read through a fixed-size pooled buffer, which
+/// makes it equivalent to a sequence of contiguous spans; <see cref="Dispose"/> returns that buffer.
 /// </para>
 /// <para>
 /// The reader mirrors the NBT wire structure. A compound member produces a value or container-start
@@ -34,27 +33,24 @@ public ref struct NbtReader
 {
     private const int DefaultMaxDepth = 512;
     private const int DefaultMaxCollectionLength = 16 * 1024 * 1024;
+    private const int DefaultStreamBufferSize = 64 * 1024;
 
     private static readonly ModifiedUTF8Encoding StringEncoding = new(throwOnInvalidBytes: true);
 
     private ReadOnlySpan<byte> _span;
-    private readonly PipeReader? _pipe;
     private readonly NbtRootFormat _rootFormat;
     private readonly int _maxDepth;
     private readonly int _maxCollectionLength;
     private readonly long _maxDocumentBytes;
-    private ReadOnlySequence<byte> _buffer;
+    private readonly ReadOnlySequence<byte> _buffer;
     private SequencePosition _nextSegmentPosition;
-    private SequencePosition _currentSegmentStart;
+    private readonly Stream? _stream;
+    private readonly StreamBuffer? _streamBuffer;
     private List<ContainerState>? _containers;
     private long[]? _valuesReadAtDepth;
-    private long _currentSegmentOffset;
     private long _tokenStart;
     private long _valueStart;
-    private bool _pipeInitialized;
-    private bool _pipeCompleted;
-    private bool _readResultPending;
-    private bool _ownsPipe;
+    private bool _streamCompleted;
     private bool _rootRead;
     private bool _rootComplete;
 
@@ -79,80 +75,13 @@ public ref struct NbtReader
     }
 
     /// <summary>
-    /// Initializes a reader over a possibly segmented sequence of NBT bytes. The sequence is exposed
-    /// through a <see cref="PipeReader"/> whose lifetime this instance owns.
+    /// Initializes a reader over a possibly segmented sequence of NBT bytes. Each segment is read as
+    /// a contiguous span.
     /// </summary>
     /// <param name="data">The complete NBT document.</param>
     /// <param name="options">The reader options, or the defaults.</param>
     /// <exception cref="NbtException">The document exceeds <see cref="NbtReaderOptions.MaxDocumentBytes"/>.</exception>
     public NbtReader(ReadOnlySequence<byte> data, NbtReaderOptions options = default)
-        : this(CreateSequencePipe(data, options), options)
-    {
-        _ownsPipe = true;
-    }
-
-    /// <summary>Initializes a reader that pulls NBT bytes from <paramref name="pipe"/>.</summary>
-    /// <param name="pipe">The pipe reader that supplies the document. The caller owns it.</param>
-    /// <param name="options">The reader options, or the defaults.</param>
-    /// <remarks>
-    /// Reads are incremental and synchronous. The reader marks consumed data with
-    /// <see cref="PipeReader.AdvanceTo(SequencePosition, SequencePosition)"/> and calls
-    /// <see cref="PipeReader.TryRead(out ReadResult)"/> for the next buffer; the pipe must return
-    /// data synchronously. A live pipe that needs an asynchronous read cannot be used here.
-    /// </remarks>
-    public NbtReader(PipeReader pipe, NbtReaderOptions options = default)
-    {
-        ArgumentNullException.ThrowIfNull(pipe);
-        ValidateOptions(options);
-        this = default;
-        _pipe = pipe;
-        _rootFormat = options.RootFormat;
-        _maxDepth = options.MaxDepth > 0 ? options.MaxDepth : DefaultMaxDepth;
-        _maxCollectionLength = options.MaxCollectionLength > 0 ? options.MaxCollectionLength : DefaultMaxCollectionLength;
-        _maxDocumentBytes = options.MaxDocumentBytes;
-    }
-
-    /// <summary>
-    /// Marks consumed data as processed and completes the pipe reader created by this instance, if
-    /// any.
-    /// </summary>
-    /// <remarks>
-    /// Disposing a reader over a caller-supplied pipe advances that pipe without completing it, so
-    /// the pipe can be reused. The span constructor has no pipe to advance.
-    /// </remarks>
-    public void Dispose()
-    {
-        ReleasePipe();
-        if (!_ownsPipe)
-        {
-            return;
-        }
-
-        _ownsPipe = false;
-        _pipe?.Complete();
-    }
-
-    private void ReleasePipe()
-    {
-        if (_pipe is null || !_pipeInitialized)
-        {
-            return;
-        }
-
-        if (_readResultPending)
-        {
-            AdvancePipe();
-        }
-
-        _buffer = default;
-        _nextSegmentPosition = default;
-        _currentSegmentStart = default;
-        _span = default;
-        _currentSegmentOffset = 0;
-        _pipeInitialized = false;
-    }
-
-    private static PipeReader CreateSequencePipe(ReadOnlySequence<byte> data, NbtReaderOptions options)
     {
         ValidateOptions(options);
         if (options.MaxDocumentBytes > 0 && data.Length > options.MaxDocumentBytes)
@@ -160,8 +89,39 @@ public ref struct NbtReader
             throw new NbtException($"The NBT document is larger than the configured limit of {options.MaxDocumentBytes} bytes.");
         }
 
-        return PipeReader.Create(data);
+        this = default;
+        _buffer = data;
+        _nextSegmentPosition = data.Start;
+        _rootFormat = options.RootFormat;
+        _maxDepth = options.MaxDepth > 0 ? options.MaxDepth : DefaultMaxDepth;
+        _maxCollectionLength = options.MaxCollectionLength > 0 ? options.MaxCollectionLength : DefaultMaxCollectionLength;
+        _maxDocumentBytes = options.MaxDocumentBytes;
     }
+
+    /// <summary>
+    /// Initializes a reader over the remaining bytes of a stream. The reader reads through a
+    /// fixed-size pooled buffer; call <see cref="Dispose"/> to return it.
+    /// </summary>
+    /// <param name="stream">The stream that supplies the document. It is left open.</param>
+    /// <param name="options">The reader options, or the defaults.</param>
+    public NbtReader(Stream stream, NbtReaderOptions options = default)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        ValidateOptions(options);
+        this = default;
+        _stream = stream;
+        _streamBuffer = new StreamBuffer(DefaultStreamBufferSize);
+        _rootFormat = options.RootFormat;
+        _maxDepth = options.MaxDepth > 0 ? options.MaxDepth : DefaultMaxDepth;
+        _maxCollectionLength = options.MaxCollectionLength > 0 ? options.MaxCollectionLength : DefaultMaxCollectionLength;
+        _maxDocumentBytes = options.MaxDocumentBytes;
+    }
+
+    /// <summary>Returns the stream buffer rented by this reader, if any.</summary>
+    /// <remarks>
+    /// The stream itself is left open. Span and sequence readers have no resources to release.
+    /// </remarks>
+    public void Dispose() => _streamBuffer?.Dispose();
 
     /// <summary>Gets the type of the most recently produced token.</summary>
     public NbtTokenType TokenType { get; private set; }
@@ -545,7 +505,7 @@ public ref struct NbtReader
 
     private void EnsureListElementsFit(NbtTagType elementType, int count, long position)
     {
-        if (_pipe is not null)
+        if (_stream is not null)
         {
             return;
         }
@@ -568,7 +528,8 @@ public ref struct NbtReader
         }
 
         var required = (long)count * minimumSize;
-        if (required > _span.Length)
+        var remaining = _buffer.IsEmpty ? _span.Length : _buffer.Length - BytesConsumed;
+        if (required > remaining)
         {
             throw new NbtException(
                 $"The NBT list declares {count} elements but the remaining data is too short.")
@@ -803,9 +764,9 @@ public ref struct NbtReader
             var bytes = _span[..length];
             var value = DecodeString(bytes, position);
             _span = _span[length..];
-            _currentSegmentOffset += length;
             BytesConsumed += length;
             return value;
+
         }
 
         var buffer = new byte[length];
@@ -875,7 +836,6 @@ public ref struct NbtReader
             var take = Math.Min(_span.Length, destination.Length - offset);
             _span[..take].CopyTo(destination[offset..]);
             _span = _span[take..];
-            _currentSegmentOffset += take;
             BytesConsumed += take;
             offset += take;
         }
@@ -909,7 +869,6 @@ public ref struct NbtReader
 
             var take = Math.Min(count, _span.Length);
             _span = _span[(int)take..];
-            _currentSegmentOffset += take;
             BytesConsumed += take;
             count -= take;
         }
@@ -926,7 +885,6 @@ public ref struct NbtReader
         EnsureDocumentSize(1);
         value = _span[0];
         _span = _span[1..];
-        _currentSegmentOffset++;
         BytesConsumed++;
         return true;
     }
@@ -935,76 +893,40 @@ public ref struct NbtReader
 
     private bool MoveNext()
     {
-        if (_pipe is null)
+        if (_stream is not null)
         {
-            return false;
-        }
-
-        if (!_pipeInitialized)
-        {
-            FillFromPipe();
-            _pipeInitialized = true;
-        }
-
-        while (true)
-        {
-            if (TryGetNextSegment())
-            {
-                return true;
-            }
-
-            if (_pipeCompleted)
+            if (_streamCompleted)
             {
                 return false;
             }
 
-            AdvancePipe();
-            FillFromPipe();
+            var buffer = _streamBuffer!.Buffer;
+            var read = _stream.Read(buffer);
+            if (read == 0)
+            {
+                _streamCompleted = true;
+                return false;
+            }
+
+            _span = buffer.AsSpan(0, read);
+            return true;
         }
+
+        return TryGetNextSegment();
     }
 
     private bool TryGetNextSegment()
     {
-        while (true)
+        while (_buffer.TryGet(ref _nextSegmentPosition, out var memory, advance: true))
         {
-            var start = _nextSegmentPosition;
-            if (!_buffer.TryGet(ref _nextSegmentPosition, out var memory, advance: true))
-            {
-                return false;
-            }
-
             if (!memory.IsEmpty)
             {
-                _currentSegmentStart = start;
-                _currentSegmentOffset = 0;
                 _span = memory.Span;
                 return true;
             }
         }
-    }
 
-    private void FillFromPipe()
-    {
-        if (!_pipe!.TryRead(out var result))
-        {
-            throw new InvalidOperationException(
-                "The PipeReader did not return data synchronously. A synchronous reader requires data that is available from TryRead; use a sequence-backed pipe or an asynchronous API for a live producer.");
-        }
-
-        _buffer = result.Buffer;
-        _nextSegmentPosition = _buffer.Start;
-        _pipeCompleted = result.IsCompleted;
-        _readResultPending = true;
-        _span = default;
-    }
-
-    private void AdvancePipe()
-    {
-        var consumed = _buffer.IsEmpty
-            ? _buffer.End
-            : _buffer.GetPosition(_currentSegmentOffset, _currentSegmentStart);
-        _pipe!.AdvanceTo(consumed, _buffer.End);
-        _readResultPending = false;
+        return false;
     }
 
     private void EnsureDocumentSize(long count)
@@ -1016,6 +938,23 @@ public ref struct NbtReader
             {
                 BytePosition = BytesConsumed,
             };
+        }
+    }
+
+    private sealed class StreamBuffer(int size) : IDisposable
+    {
+        private byte[]? _buffer = ArrayPool<byte>.Shared.Rent(size);
+
+        public byte[] Buffer => _buffer ?? throw new ObjectDisposedException(nameof(StreamBuffer));
+
+        public void Dispose()
+        {
+            var buffer = _buffer;
+            _buffer = null;
+            if (buffer is not null)
+            {
+                ArrayPool<byte>.Shared.Return(buffer);
+            }
         }
     }
 

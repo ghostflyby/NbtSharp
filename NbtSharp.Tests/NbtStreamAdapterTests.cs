@@ -81,41 +81,51 @@ public sealed class NbtStreamAdapterTests
     }
 
     [Fact]
-    public void PipeReaderRoundTrips()
+    public async Task DeserializeAsyncRoundTripsAStream()
     {
         var data = CreateDocumentForStreaming();
-        var pipe = new Pipe();
-        data.CopyTo(pipe.Writer.GetSpan(data.Length));
-        pipe.Writer.Advance(data.Length);
-        pipe.Writer.Complete();
+        using var inner = new MemoryStream(data);
+        using var stream = new ChunkedStream(inner, 3);
 
-        var actual = NbtSerializer.Deserialize(pipe.Reader);
+        var actual = await NbtSerializer.DeserializeAsync<NbtRoot>(
+            stream,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         AssertDocumentFromStreaming(actual);
-        pipe.Reader.Complete();
     }
 
     [Fact]
-    public void PipeReaderOverASequenceRoundTrips()
+    public async Task DeserializeAsyncRoundTripsASequence()
     {
         var data = CreateDocumentForStreaming();
-        var pipe = PipeReader.Create(new ReadOnlySequence<byte>(data));
+        var sequence = new ReadOnlySequence<byte>(data);
 
-        var actual = NbtSerializer.Deserialize(pipe);
+        var actual = await NbtSerializer.DeserializeAsync<NbtRoot>(
+            sequence,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         AssertDocumentFromStreaming(actual);
-        pipe.Complete();
     }
 
     [Fact]
-    public void SynchronousPipeReaderRequiresAvailableData()
+    public async Task DeserializeAsyncWaitsForAConcurrentProducer()
     {
+        var data = NbtSerializer.Serialize(42, "root");
         var pipe = new Pipe();
+        var producer = Task.Run(async () =>
+        {
+            await Task.Delay(10, TestContext.Current.CancellationToken);
+            await pipe.Writer.WriteAsync(data, TestContext.Current.CancellationToken);
+            await pipe.Writer.CompleteAsync();
+        }, TestContext.Current.CancellationToken);
 
-        Assert.Throws<InvalidOperationException>(() => NbtSerializer.Deserialize<int>(pipe.Reader));
+        var actual = await NbtSerializer.DeserializeAsync<int>(
+            pipe.Reader,
+            cancellationToken: TestContext.Current.CancellationToken);
 
+        Assert.Equal(42, actual);
+        await producer;
         pipe.Reader.Complete();
-        pipe.Writer.Complete();
     }
 
     [Fact]
@@ -125,23 +135,6 @@ public sealed class NbtStreamAdapterTests
         using var stream = new MemoryStream(data[..^5]);
 
         Assert.Throws<NbtException>(() => NbtSerializer.Deserialize<string>(stream));
-    }
-
-    [Fact]
-    public void PipeReaderCanDeserializeConsecutiveDocuments()
-    {
-        var first = NbtSerializer.Serialize(1, "a");
-        var second = NbtSerializer.Serialize(2, "b");
-        var pipe = new Pipe();
-        var span = pipe.Writer.GetSpan(first.Length + second.Length);
-        first.CopyTo(span);
-        second.CopyTo(span[first.Length..]);
-        pipe.Writer.Advance(first.Length + second.Length);
-        pipe.Writer.Complete();
-
-        Assert.Equal(1, NbtSerializer.Deserialize<int>(pipe.Reader));
-        Assert.Equal(2, NbtSerializer.Deserialize<int>(pipe.Reader));
-        pipe.Reader.Complete();
     }
 
     [Fact]

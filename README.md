@@ -38,7 +38,7 @@ encodes as `TAG_List<TAG_Int>` with length zero.
 The serialization layer is split like `System.Text.Json`:
 
 - `NbtReader` and `NbtWriter` are `ref struct` token APIs. The reader accepts a span, a sequence,
-  or a pipe reader; the writer targets a buffer writer or a pipe writer.
+  or a stream; the writer targets a buffer writer or a pipe writer.
 - `NbtSerializer` provides generic `Serialize<T>` / `Deserialize<T>` entry points plus DOM
   convenience overloads.
 - `NbtConverter<T>` converts one CLR type. A converter may choose a different NBT tag type for
@@ -216,12 +216,12 @@ its entry points are annotated with `RequiresUnreferencedCode` and `RequiresDyna
 reflection resolver is opt-in. A source generator for fully AOT-safe type information is planned.
 
 The `Stream` overloads are synchronous. `Serialize(Stream)` flushes the document when serialization
-completes and leaves the stream open; `Deserialize(Stream)` reads the stream incrementally, so
-non-seekable streams are supported. A stream is treated as one document: trailing bytes after the
-root value are ignored, and the stream may have been read ahead. To read consecutive documents from
-one stream, use `Deserialize(PipeReader)` with a caller-owned pipe reader. A caller-owned pipe must
-return data synchronously from `TryRead`; a live producer that requires an asynchronous read is not
-supported. The writer does not roll back partial output if a converter throws.
+completes and leaves the stream open; `Deserialize(Stream)` reads the stream through a fixed-size
+buffer, so non-seekable streams are supported. A stream is treated as one document: trailing bytes
+after the root value are ignored, and the stream may have been read ahead. `DeserializeAsync` is
+available for `Stream`, `ReadOnlySequence<byte>`, and `PipeReader`; it reads the document
+asynchronously through a `PipeReader` before parsing it. The writer does not roll back partial
+output if a converter throws.
 
 ## Build and test
 

@@ -1,7 +1,6 @@
 using System.Buffers;
 using System.Diagnostics.CodeAnalysis;
 using System.IO.Pipelines;
-using NbtSharp.IO;
 
 namespace NbtSharp;
 
@@ -16,11 +15,11 @@ namespace NbtSharp;
 /// <see cref="INbtTypeInfoResolver"/> such as <see cref="NbtReflectionTypeInfoResolver"/>.
 /// </para>
 /// <para>
-/// Deserialization from a <see cref="Stream"/> or a <see cref="ReadOnlySequence{T}"/> is backed by
-/// <see cref="PipeReader"/>, and serialization into a <see cref="Stream"/> is backed by
-/// <see cref="PipeWriter"/>. Documents are consumed and produced incrementally, so a stream does
-/// not need to be seekable. The span overload is a contiguous in-memory fast path. Trailing bytes
-/// after the root value are ignored; a stream-backed pipe may read some of them into its buffer.
+/// Synchronous deserialization reads a span, a sequence of spans, or a stream through a fixed-size
+/// buffer. Asynchronous deserialization reads through a <see cref="PipeReader"/>. Serialization
+/// into a <see cref="Stream"/> is backed by <see cref="PipeWriter"/>. Documents are consumed and
+/// produced incrementally, so a stream does not need to be seekable. Trailing bytes after the root
+/// value are ignored; a stream-backed source may read some of them into its buffer.
 /// </para>
 /// <para>
 /// A generic call whose declared type is <see cref="NbtRoot"/> writes only the contained value and
@@ -167,14 +166,7 @@ public static class NbtSerializer
     {
         options ??= new NbtSerializerOptions();
         var reader = new NbtReader(data, options.CreateReaderOptions());
-        try
-        {
-            return DeserializeCore<T>(ref reader, options, out rootName);
-        }
-        finally
-        {
-            reader.Dispose();
-        }
+        return DeserializeCore<T>(ref reader, options, out rootName);
     }
 
     /// <summary>
@@ -185,7 +177,7 @@ public static class NbtSerializer
     /// <param name="options">The serializer options, or the defaults.</param>
     /// <returns>The decoded value.</returns>
     /// <remarks>
-    /// This overload reads the stream incrementally through a <see cref="PipeReader"/>. The stream
+    /// This overload reads the stream synchronously through a fixed-size pooled buffer. The stream
     /// does not need to be seekable. Bytes after the root value are ignored, but may already have
     /// been read from the stream.
     /// </remarks>
@@ -202,7 +194,7 @@ public static class NbtSerializer
     /// <param name="options">The serializer options, or the defaults.</param>
     /// <returns>The decoded value.</returns>
     /// <remarks>
-    /// This overload reads the stream incrementally through a <see cref="PipeReader"/>. The stream
+    /// This overload reads the stream synchronously through a fixed-size pooled buffer. The stream
     /// does not need to be seekable. Bytes after the root value are ignored, but may already have
     /// been read from the stream.
     /// </remarks>
@@ -213,10 +205,82 @@ public static class NbtSerializer
     {
         ArgumentNullException.ThrowIfNull(stream);
         options ??= new NbtSerializerOptions();
-        var pipe = new NbtSynchronousStreamPipeReader(stream);
+        var reader = new NbtReader(stream, options.CreateReaderOptions());
         try
         {
-            return Deserialize<T>(pipe, out rootName, options);
+            return DeserializeCore<T>(ref reader, options, out rootName);
+        }
+        finally
+        {
+            reader.Dispose();
+        }
+    }
+
+    /// <summary>Deserializes a complete NBT document from a pipe reader asynchronously.</summary>
+    /// <typeparam name="T">The declared value type.</typeparam>
+    /// <param name="reader">The pipe reader that supplies the document.</param>
+    /// <param name="options">The serializer options, or the defaults.</param>
+    /// <param name="cancellationToken">The token used to cancel the read.</param>
+    /// <returns>A task that yields the decoded value.</returns>
+    /// <remarks>
+    /// The caller owns <paramref name="reader"/>; this method does not complete it. The document is
+    /// read completely before it is parsed.
+    /// </remarks>
+    public static async Task<T> DeserializeAsync<T>(
+        PipeReader reader,
+        NbtSerializerOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(reader);
+        options ??= new NbtSerializerOptions();
+        var buffer = new ArrayBufferWriter<byte>();
+        while (true)
+        {
+            var result = await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
+            var sequence = result.Buffer;
+            foreach (var segment in sequence)
+            {
+                if (options.MaxDocumentBytes > 0 &&
+                    (long)buffer.WrittenCount + segment.Length > options.MaxDocumentBytes)
+                {
+                    throw new NbtException(
+                        $"The NBT document exceeds the configured limit of {options.MaxDocumentBytes} bytes.");
+                }
+
+                segment.Span.CopyTo(buffer.GetSpan(segment.Length));
+                buffer.Advance(segment.Length);
+            }
+
+            reader.AdvanceTo(sequence.End, sequence.End);
+            if (result.IsCompleted)
+            {
+                break;
+            }
+        }
+
+        return Deserialize<T>(buffer.WrittenSpan, options);
+    }
+
+    /// <summary>Deserializes a complete NBT document from a stream asynchronously.</summary>
+    /// <typeparam name="T">The declared value type.</typeparam>
+    /// <param name="stream">The stream that supplies the document.</param>
+    /// <param name="options">The serializer options, or the defaults.</param>
+    /// <param name="cancellationToken">The token used to cancel the read.</param>
+    /// <returns>A task that yields the decoded value.</returns>
+    /// <remarks>
+    /// The stream is read through a <see cref="PipeReader"/> and is left open. The document is read
+    /// completely before it is parsed.
+    /// </remarks>
+    public static async Task<T> DeserializeAsync<T>(
+        Stream stream,
+        NbtSerializerOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        var pipe = PipeReader.Create(stream, new StreamPipeReaderOptions(leaveOpen: true));
+        try
+        {
+            return await DeserializeAsync<T>(pipe, options, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -224,49 +288,26 @@ public static class NbtSerializer
         }
     }
 
-    /// <summary>Deserializes a complete NBT document from a pipe reader.</summary>
+    /// <summary>Deserializes a complete NBT document from a sequence asynchronously.</summary>
     /// <typeparam name="T">The declared value type.</typeparam>
-    /// <param name="reader">The pipe reader that supplies the document.</param>
+    /// <param name="data">The NBT document.</param>
     /// <param name="options">The serializer options, or the defaults.</param>
-    /// <returns>The decoded value.</returns>
-    /// <remarks>
-    /// The caller owns <paramref name="reader"/>; this method does not complete it. The reader
-    /// advances the pipe as bytes are consumed, leaving the bytes after the root available to the
-    /// next call. Reads are synchronous: the pipe must return data from
-    /// <see cref="PipeReader.TryRead(out ReadResult)"/>.
-    /// </remarks>
-    public static T Deserialize<T>(PipeReader reader, NbtSerializerOptions? options = null) =>
-        Deserialize<T>(reader, out _, options);
-
-    /// <summary>
-    /// Deserializes a complete NBT document from a pipe reader and returns the root name.
-    /// </summary>
-    /// <typeparam name="T">The declared value type.</typeparam>
-    /// <param name="reader">The pipe reader that supplies the document.</param>
-    /// <param name="rootName">The root name, or <see langword="null"/> for an unnamed root.</param>
-    /// <param name="options">The serializer options, or the defaults.</param>
-    /// <returns>The decoded value.</returns>
-    /// <remarks>
-    /// The caller owns <paramref name="reader"/>; this method does not complete it. The reader
-    /// advances the pipe as bytes are consumed, leaving the bytes after the root available to the
-    /// next call. Reads are synchronous: the pipe must return data from
-    /// <see cref="PipeReader.TryRead(out ReadResult)"/>.
-    /// </remarks>
-    public static T Deserialize<T>(
-        PipeReader reader,
-        out string? rootName,
-        NbtSerializerOptions? options = null)
+    /// <param name="cancellationToken">The token used to cancel the read.</param>
+    /// <returns>A task that yields the decoded value.</returns>
+    /// <remarks>The document is read through a <see cref="PipeReader"/> and then parsed.</remarks>
+    public static async Task<T> DeserializeAsync<T>(
+        ReadOnlySequence<byte> data,
+        NbtSerializerOptions? options = null,
+        CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(reader);
-        options ??= new NbtSerializerOptions();
-        var nbtReader = new NbtReader(reader, options.CreateReaderOptions());
+        var pipe = PipeReader.Create(data);
         try
         {
-            return DeserializeCore<T>(ref nbtReader, options, out rootName);
+            return await DeserializeAsync<T>(pipe, options, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
-            nbtReader.Dispose();
+            pipe.Complete();
         }
     }
 
@@ -398,23 +439,12 @@ public static class NbtSerializer
     /// <param name="options">The serializer options, or the defaults.</param>
     /// <returns>The parsed document.</returns>
     /// <remarks>
-    /// The stream is consumed incrementally through a <see cref="PipeReader"/> and does not need to
-    /// be seekable.
+    /// The stream is consumed synchronously through a fixed-size buffer and does not need to be
+    /// seekable.
     /// </remarks>
     public static NbtRoot Deserialize(Stream stream, NbtSerializerOptions? options = null)
     {
         var value = Deserialize<NbtValue>(stream, out var rootName, options);
-        return new NbtRoot(rootName, value);
-    }
-
-    /// <summary>Reads a complete DOM document from a pipe reader.</summary>
-    /// <param name="reader">The pipe reader that supplies the document.</param>
-    /// <param name="options">The serializer options, or the defaults.</param>
-    /// <returns>The parsed document.</returns>
-    /// <remarks>The caller owns <paramref name="reader"/>; this method does not complete it.</remarks>
-    public static NbtRoot Deserialize(PipeReader reader, NbtSerializerOptions? options = null)
-    {
-        var value = Deserialize<NbtValue>(reader, out var rootName, options);
         return new NbtRoot(rootName, value);
     }
 
