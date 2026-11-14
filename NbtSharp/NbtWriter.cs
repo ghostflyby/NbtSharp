@@ -1,822 +1,437 @@
-using System.Buffers;
-using System.Buffers.Binary;
-using System.IO.Pipelines;
-using System.Runtime.InteropServices;
 using Myitian.Text;
+using NbtSharp.IO;
 
 namespace NbtSharp;
 
 /// <summary>
-/// Writes Java Edition NBT as a forward-only sequence of tokens to an
-/// <see cref="IBufferWriter{T}"/> or a <see cref="PipeWriter"/>.
+/// Writes Java Edition NBT as a sequence of tokens.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Named writes are atomic: <see cref="WriteInt32(string, int)"/>,
-/// <see cref="WriteStartCompound(string)"/>, and the other named methods write the tag type, name,
-/// and payload together, matching the NBT wire order. Anonymous writes are used for list elements
-/// and for value payloads whose header was already written by the serializer.
+/// Writing is forward-only. The root tag is written first, every opened container must be closed, and
+/// the unnamed root format omits the name of the root tag only.
 /// </para>
 /// <para>
-/// A list header must be written with its element type and count before any element. The writer
-/// verifies that every element has the declared type and that the declared number of elements were
-/// written. <see cref="Complete"/> validates that the root value and all containers are complete.
+/// A list header records both its element type and its element count before any element is written,
+/// so <see cref="WriteStartList"/> requires the count up front and the writer verifies that exactly
+/// that many elements follow. Calling <see cref="Dispose"/> while containers are still open throws
+/// <see cref="NbtException"/> after the underlying stream is handled.
 /// </para>
 /// </remarks>
-public ref struct NbtWriter
+public sealed class NbtWriter : IDisposable
 {
-    private const int DefaultMaxDepth = 512;
-    private const int DefaultMaxCollectionLength = 16 * 1024 * 1024;
-    private const int MaxArrayWriteBytes = 64 * 1024;
-
-    private readonly IBufferWriter<byte> _destination;
-    private readonly NbtRootFormat _rootFormat;
-    private readonly int _maxDepth;
-    private readonly int _maxCollectionLength;
-    private readonly long _maxDocumentBytes;
-    private List<ContainerState>? _containers;
+    private readonly NbtBinaryWriter _writer;
+    private readonly Stream _stream;
+    private readonly bool _disposeStream;
+    private readonly bool _unnamedRoot;
+    private readonly List<ContainerState> _containers = [];
     private bool _rootWritten;
-    private bool _rootComplete;
-    private bool _completed;
-    private NbtTagType _expectedTagType;
-    private long[]? _valuesAtDepth;
+    private bool _disposed;
 
-    /// <summary>Initializes a writer over <paramref name="destination"/>.</summary>
-    /// <param name="destination">The buffer writer that receives the NBT bytes.</param>
-    /// <param name="options">The writer options, or the defaults.</param>
-    public NbtWriter(IBufferWriter<byte> destination, NbtWriterOptions options = default)
+    /// <summary>Initializes a writer over <paramref name="stream"/>.</summary>
+    /// <param name="stream">The stream that receives the NBT data.</param>
+    /// <param name="rootFormat">Whether the root tag is preceded by a name.</param>
+    /// <param name="disposeStream">Whether disposing the writer also disposes <paramref name="stream"/>.</param>
+    public NbtWriter(Stream stream, NbtRootFormat rootFormat = NbtRootFormat.Named, bool disposeStream = false)
     {
-        ArgumentNullException.ThrowIfNull(destination);
-        ValidateOptions(options);
-
-        this = default;
-        _destination = destination;
-        _rootFormat = options.RootFormat;
-        _maxDepth = options.MaxDepth > 0 ? options.MaxDepth : DefaultMaxDepth;
-        _maxCollectionLength = options.MaxCollectionLength > 0 ? options.MaxCollectionLength : DefaultMaxCollectionLength;
-        _maxDocumentBytes = options.MaxDocumentBytes;
+        ArgumentNullException.ThrowIfNull(stream);
+        _stream = stream;
+        _writer = new NbtBinaryWriter(stream);
+        _disposeStream = disposeStream;
+        _unnamedRoot = rootFormat == NbtRootFormat.Unnamed;
     }
 
-    /// <summary>Gets the number of bytes written so far.</summary>
-    public long BytesWritten { get; private set; }
+    /// <summary>Gets the current nesting depth.</summary>
+    public int Depth => _containers.Count;
 
-    /// <summary>Gets the number of containers currently open.</summary>
-    public readonly int CurrentDepth => _containers?.Count ?? 0;
-
-    internal readonly long ValuesWrittenAtDepth(int depth) =>
-        _valuesAtDepth is not null && depth >= 0 && depth < _valuesAtDepth.Length ? _valuesAtDepth[depth] : 0;
-
-    internal bool IsPayloadExpected { get; private set; }
-
-    internal readonly bool IsInList => _containers is { Count: > 0 } && _containers[^1].IsList;
-
-    internal readonly bool IsInCompound => _containers is { Count: > 0 } && !_containers[^1].IsList;
-
-    private ref ContainerState Top => ref CollectionsMarshal.AsSpan(_containers!)[^1];
-
-    /// <summary>Writes a named signed 8-bit integer.</summary>
-    public void WriteSByte(string name, sbyte value)
-    {
-        WriteNamedHeader(NbtTagType.Byte, name);
-        WriteByte((byte)value);
-        FinishScalar();
-    }
-
-    /// <summary>Writes a named signed 16-bit integer.</summary>
-    public void WriteInt16(string name, short value)
-    {
-        WriteNamedHeader(NbtTagType.Short, name);
-        WriteInt16Payload(value);
-        FinishScalar();
-    }
-
-    /// <summary>Writes a named signed 32-bit integer.</summary>
-    public void WriteInt32(string name, int value)
-    {
-        WriteNamedHeader(NbtTagType.Int, name);
-        WriteInt32Payload(value);
-        FinishScalar();
-    }
-
-    /// <summary>Writes a named signed 64-bit integer.</summary>
-    public void WriteInt64(string name, long value)
-    {
-        WriteNamedHeader(NbtTagType.Long, name);
-        WriteInt64Payload(value);
-        FinishScalar();
-    }
-
-    /// <summary>Writes a named 32-bit IEEE 754 number.</summary>
-    public void WriteSingle(string name, float value)
-    {
-        WriteNamedHeader(NbtTagType.Float, name);
-        WriteSinglePayload(value);
-        FinishScalar();
-    }
-
-    /// <summary>Writes a named 64-bit IEEE 754 number.</summary>
-    public void WriteDouble(string name, double value)
-    {
-        WriteNamedHeader(NbtTagType.Double, name);
-        WriteDoublePayload(value);
-        FinishScalar();
-    }
-
-    /// <summary>Writes a named string from a span of characters.</summary>
-    public void WriteString(string name, ReadOnlySpan<char> value)
-    {
-        ValidateStringLength(value);
-        WriteNamedHeader(NbtTagType.String, name);
-        WriteStringPayload(value);
-        FinishScalar();
-    }
-
-    /// <summary>Writes a named string.</summary>
-    public void WriteString(string name, string value)
-    {
-        ArgumentNullException.ThrowIfNull(value);
-        WriteString(name, value.AsSpan());
-    }
-
-    /// <summary>Writes a named byte array.</summary>
-    public void WriteByteArray(string name, ReadOnlySpan<byte> values)
-    {
-        ValidateCollectionLength(values.Length);
-        WriteNamedHeader(NbtTagType.ByteArray, name);
-        WriteInt32Payload(values.Length);
-        WriteBytes(values);
-        FinishScalar();
-    }
-
-    /// <summary>Writes a named integer array.</summary>
-    public void WriteInt32Array(string name, ReadOnlySpan<int> values)
-    {
-        ValidateCollectionLength(values.Length);
-        WriteNamedHeader(NbtTagType.IntArray, name);
-        WriteInt32Payload(values.Length);
-        WriteInt32ArrayPayload(values);
-        FinishScalar();
-    }
-
-    /// <summary>Writes a named long array.</summary>
-    public void WriteInt64Array(string name, ReadOnlySpan<long> values)
-    {
-        ValidateCollectionLength(values.Length);
-        WriteNamedHeader(NbtTagType.LongArray, name);
-        WriteInt32Payload(values.Length);
-        WriteInt64ArrayPayload(values);
-        FinishScalar();
-    }
-
-    /// <summary>Writes the start of a named compound.</summary>
+    /// <summary>Writes the start of a compound tag.</summary>
+    /// <param name="name">The tag name.</param>
     public void WriteStartCompound(string name)
     {
         EnsureCanEnterContainer();
-        WriteNamedHeader(NbtTagType.Compound, name);
-        PushContainer(isList: false, NbtTagType.End, remaining: 0);
+        WriteTagHeader(NbtTagType.Compound, name);
+        EnterContainer(isList: false, NbtTagType.End, remaining: 0);
     }
 
-    /// <summary>Writes the start of a named list.</summary>
+    /// <summary>Writes the end of the current compound tag.</summary>
+    public void WriteEndCompound()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_containers.Count == 0 || _containers[^1].IsList)
+        {
+            throw new NbtException("There is no open compound to close.");
+        }
+
+        _writer.WriteByte((byte)NbtTagType.End);
+        PopContainer();
+    }
+
+    /// <summary>Writes a signed 8-bit integer tag.</summary>
+    public void WriteByte(string name, sbyte value)
+    {
+        WriteTagHeader(NbtTagType.Byte, name);
+        _writer.WriteSByte(value);
+    }
+
+    /// <summary>Writes a signed 16-bit integer tag.</summary>
+    public void WriteInt16(string name, short value)
+    {
+        WriteTagHeader(NbtTagType.Short, name);
+        _writer.WriteInt16(value);
+    }
+
+    /// <summary>Writes a signed 32-bit integer tag.</summary>
+    public void WriteInt32(string name, int value)
+    {
+        WriteTagHeader(NbtTagType.Int, name);
+        _writer.WriteInt32(value);
+    }
+
+    /// <summary>Writes a signed 64-bit integer tag.</summary>
+    public void WriteInt64(string name, long value)
+    {
+        WriteTagHeader(NbtTagType.Long, name);
+        _writer.WriteInt64(value);
+    }
+
+    /// <summary>Writes a 32-bit IEEE 754 tag.</summary>
+    public void WriteSingle(string name, float value)
+    {
+        WriteTagHeader(NbtTagType.Float, name);
+        _writer.WriteSingle(value);
+    }
+
+    /// <summary>Writes a 64-bit IEEE 754 tag.</summary>
+    public void WriteDouble(string name, double value)
+    {
+        WriteTagHeader(NbtTagType.Double, name);
+        _writer.WriteDouble(value);
+    }
+
+    /// <summary>Writes a string tag.</summary>
+    public void WriteString(string name, string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        ValidateStringLength(value);
+        WriteTagHeader(NbtTagType.String, name);
+        _writer.WriteString(value);
+    }
+
+    /// <summary>Writes a byte array tag.</summary>
+    public void WriteByteArray(string name, sbyte[] value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        WriteTagHeader(NbtTagType.ByteArray, name);
+        WriteByteArrayPayload(value);
+    }
+
+    /// <summary>Writes an integer array tag.</summary>
+    public void WriteIntArray(string name, int[] value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        WriteTagHeader(NbtTagType.IntArray, name);
+        WriteIntArrayPayload(value);
+    }
+
+    /// <summary>Writes a long array tag.</summary>
+    public void WriteLongArray(string name, long[] value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        WriteTagHeader(NbtTagType.LongArray, name);
+        WriteLongArrayPayload(value);
+    }
+
+    /// <summary>Writes the start of a list tag.</summary>
+    /// <param name="name">The tag name.</param>
+    /// <param name="elementType">The tag type shared by all elements.</param>
+    /// <param name="count">The number of elements that will be written.</param>
+    /// <exception cref="NbtException">The element type and count combination is not encodable.</exception>
     public void WriteStartList(string name, NbtTagType elementType, int count)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(count);
         ValidateListHeader(elementType, count);
         EnsureCanEnterContainer();
-        WriteNamedHeader(NbtTagType.List, name);
-        WriteByte((byte)elementType);
-        WriteInt32Payload(count);
-        PushContainer(isList: true, elementType, count);
+        WriteTagHeader(NbtTagType.List, name);
+        WriteListHeader(elementType, count);
     }
 
-    /// <summary>Writes an anonymous signed 8-bit integer.</summary>
-    /// <remarks>Valid for a list element or a value payload whose header was already written.</remarks>
-    public void WriteSByte(sbyte value)
-    {
-        WriteAnonymousHeader(NbtTagType.Byte);
-        WriteByte((byte)value);
-        FinishScalar();
-    }
-
-    /// <summary>Writes an anonymous signed 16-bit integer.</summary>
-    public void WriteInt16(short value)
-    {
-        WriteAnonymousHeader(NbtTagType.Short);
-        WriteInt16Payload(value);
-        FinishScalar();
-    }
-
-    /// <summary>Writes an anonymous signed 32-bit integer.</summary>
-    public void WriteInt32(int value)
-    {
-        WriteAnonymousHeader(NbtTagType.Int);
-        WriteInt32Payload(value);
-        FinishScalar();
-    }
-
-    /// <summary>Writes an anonymous signed 64-bit integer.</summary>
-    public void WriteInt64(long value)
-    {
-        WriteAnonymousHeader(NbtTagType.Long);
-        WriteInt64Payload(value);
-        FinishScalar();
-    }
-
-    /// <summary>Writes an anonymous 32-bit IEEE 754 number.</summary>
-    public void WriteSingle(float value)
-    {
-        WriteAnonymousHeader(NbtTagType.Float);
-        WriteSinglePayload(value);
-        FinishScalar();
-    }
-
-    /// <summary>Writes an anonymous 64-bit IEEE 754 number.</summary>
-    public void WriteDouble(double value)
-    {
-        WriteAnonymousHeader(NbtTagType.Double);
-        WriteDoublePayload(value);
-        FinishScalar();
-    }
-
-    /// <summary>Writes an anonymous string from a span of characters.</summary>
-    public void WriteString(ReadOnlySpan<char> value)
-    {
-        ValidateStringLength(value);
-        WriteAnonymousHeader(NbtTagType.String);
-        WriteStringPayload(value);
-        FinishScalar();
-    }
-
-    /// <summary>Writes an anonymous string.</summary>
-    public void WriteString(string value)
-    {
-        ArgumentNullException.ThrowIfNull(value);
-        WriteString(value.AsSpan());
-    }
-
-    /// <summary>Writes an anonymous byte array.</summary>
-    public void WriteByteArray(ReadOnlySpan<byte> values)
-    {
-        ValidateCollectionLength(values.Length);
-        WriteAnonymousHeader(NbtTagType.ByteArray);
-        WriteInt32Payload(values.Length);
-        WriteBytes(values);
-        FinishScalar();
-    }
-
-    /// <summary>Writes an anonymous integer array.</summary>
-    public void WriteInt32Array(ReadOnlySpan<int> values)
-    {
-        ValidateCollectionLength(values.Length);
-        WriteAnonymousHeader(NbtTagType.IntArray);
-        WriteInt32Payload(values.Length);
-        WriteInt32ArrayPayload(values);
-        FinishScalar();
-    }
-
-    /// <summary>Writes an anonymous long array.</summary>
-    public void WriteInt64Array(ReadOnlySpan<long> values)
-    {
-        ValidateCollectionLength(values.Length);
-        WriteAnonymousHeader(NbtTagType.LongArray);
-        WriteInt32Payload(values.Length);
-        WriteInt64ArrayPayload(values);
-        FinishScalar();
-    }
-
-    /// <summary>Writes the start of an anonymous compound.</summary>
-    public void WriteStartCompound()
-    {
-        EnsureCanEnterContainer();
-        WriteAnonymousHeader(NbtTagType.Compound);
-        PushContainer(isList: false, NbtTagType.End, remaining: 0);
-    }
-
-    /// <summary>Writes the start of an anonymous list.</summary>
-    public void WriteStartList(NbtTagType elementType, int count)
+    /// <summary>Writes the start of a list tag as an element of the enclosing list.</summary>
+    /// <param name="elementType">The element type of the nested list.</param>
+    /// <param name="count">The number of elements that will be written.</param>
+    public void WriteStartListElement(NbtTagType elementType, int count)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(count);
         ValidateListHeader(elementType, count);
         EnsureCanEnterContainer();
-        WriteAnonymousHeader(NbtTagType.List);
-        WriteByte((byte)elementType);
-        WriteInt32Payload(count);
-        PushContainer(isList: true, elementType, count);
+        BeginListElement(NbtTagType.List);
+        WriteListHeader(elementType, count);
     }
 
-    /// <summary>Writes the end of the current compound.</summary>
-    public void WriteEndCompound()
-    {
-        EnsureNotCompleted();
-        if (IsPayloadExpected)
-        {
-            throw new InvalidOperationException("A value payload is expected but no value was written.");
-        }
-
-        if (_containers is null || _containers.Count == 0 || _containers[^1].IsList)
-        {
-            throw new InvalidOperationException("There is no open compound to close.");
-        }
-
-        WriteByte((byte)NbtTagType.End);
-        PopContainer();
-        FinishRootIfClosed();
-    }
-
-    /// <summary>Writes the end of the current list.</summary>
+    /// <summary>Writes the end of the current list tag.</summary>
+    /// <exception cref="NbtException">Elements promised by the list header are missing.</exception>
     public void WriteEndList()
     {
-        EnsureNotCompleted();
-        if (IsPayloadExpected)
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_containers.Count == 0 || !_containers[^1].IsList)
         {
-            throw new InvalidOperationException("A value payload is expected but no value was written.");
-        }
-
-        if (_containers is null || _containers.Count == 0 || !_containers[^1].IsList)
-        {
-            throw new InvalidOperationException("There is no open list to close.");
+            throw new NbtException("There is no open list to close.");
         }
 
         if (_containers[^1].Remaining != 0)
         {
-            throw new NbtException($"{_containers[^1].Remaining} list elements promised by the header were not written.")
-            {
-                BytePosition = BytesWritten,
-            };
+            throw new NbtException($"{_containers[^1].Remaining} list elements promised by the header were not written.");
         }
 
         PopContainer();
-        FinishRootIfClosed();
     }
 
-    /// <summary>Validates that the root value and all containers are complete.</summary>
-    /// <exception cref="InvalidOperationException">The document is not complete.</exception>
-    public void Complete()
+    /// <summary>Writes a signed 8-bit integer element inside the current list.</summary>
+    public void WriteElement(sbyte value)
     {
-        EnsureNotCompleted();
-
-        if (!_rootWritten)
-        {
-            throw new InvalidOperationException("No root value was written.");
-        }
-
-        if (IsPayloadExpected)
-        {
-            throw new InvalidOperationException("A value payload is expected but no value was written.");
-        }
-
-        if (!_rootComplete || (_containers is not null && _containers.Count > 0))
-        {
-            throw new InvalidOperationException("The root value is not complete; close all open containers first.");
-        }
-
-        _completed = true;
+        BeginListElement(NbtTagType.Byte);
+        _writer.WriteSByte(value);
     }
 
-    internal void WriteRootHeader(NbtTagType tagType, string rootName)
+    /// <summary>Writes a signed 16-bit integer element inside the current list.</summary>
+    public void WriteElement(short value)
     {
-        EnsureNotCompleted();
-        if (IsPayloadExpected)
+        BeginListElement(NbtTagType.Short);
+        _writer.WriteInt16(value);
+    }
+
+    /// <summary>Writes a signed 32-bit integer element inside the current list.</summary>
+    public void WriteElement(int value)
+    {
+        BeginListElement(NbtTagType.Int);
+        _writer.WriteInt32(value);
+    }
+
+    /// <summary>Writes a signed 64-bit integer element inside the current list.</summary>
+    public void WriteElement(long value)
+    {
+        BeginListElement(NbtTagType.Long);
+        _writer.WriteInt64(value);
+    }
+
+    /// <summary>Writes a 32-bit IEEE 754 element inside the current list.</summary>
+    public void WriteElement(float value)
+    {
+        BeginListElement(NbtTagType.Float);
+        _writer.WriteSingle(value);
+    }
+
+    /// <summary>Writes a 64-bit IEEE 754 element inside the current list.</summary>
+    public void WriteElement(double value)
+    {
+        BeginListElement(NbtTagType.Double);
+        _writer.WriteDouble(value);
+    }
+
+    /// <summary>Writes a string element inside the current list.</summary>
+    public void WriteElement(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        ValidateStringLength(value);
+        BeginListElement(NbtTagType.String);
+        _writer.WriteString(value);
+    }
+
+    /// <summary>Writes a byte array element inside the current list.</summary>
+    public void WriteElement(sbyte[] value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        BeginListElement(NbtTagType.ByteArray);
+        WriteByteArrayPayload(value);
+    }
+
+    /// <summary>Writes an integer array element inside the current list.</summary>
+    public void WriteElement(int[] value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        BeginListElement(NbtTagType.IntArray);
+        WriteIntArrayPayload(value);
+    }
+
+    /// <summary>Writes a long array element inside the current list.</summary>
+    public void WriteElement(long[] value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        BeginListElement(NbtTagType.LongArray);
+        WriteLongArrayPayload(value);
+    }
+
+    /// <summary>Writes the start of a compound element inside the current list.</summary>
+    public void WriteStartCompoundElement()
+    {
+        EnsureCanEnterContainer();
+        BeginListElement(NbtTagType.Compound);
+        EnterContainer(isList: false, NbtTagType.End, remaining: 0);
+    }
+
+    /// <summary>Flushes the underlying stream.</summary>
+    public void Flush() => _stream.Flush();
+
+    internal void Abort()
+    {
+        if (_disposed)
         {
-            throw new InvalidOperationException("A value payload is already expected.");
+            return;
         }
 
-        if (_rootWritten || _rootComplete)
+        _disposed = true;
+        _containers.Clear();
+        if (_disposeStream)
         {
-            throw new InvalidOperationException("The root value has already been written.");
+            _stream.Dispose();
+        }
+    }
+
+    /// <inheritdoc/>
+    /// <exception cref="NbtException">Containers remain open.</exception>
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
         }
 
-        ArgumentNullException.ThrowIfNull(rootName);
-        ValidateStringLength(rootName.AsSpan());
-        WriteByte((byte)tagType);
-        if (_rootFormat == NbtRootFormat.Named)
+        _disposed = true;
+        var openContainers = _containers.Count;
+        _containers.Clear();
+        if (_disposeStream)
         {
-            WriteStringPayload(rootName.AsSpan());
+            _stream.Dispose();
+        }
+
+        if (openContainers > 0)
+        {
+            throw new NbtException($"{openContainers} container(s) were left open when the writer was disposed.");
+        }
+    }
+
+    private void WriteTagHeader(NbtTagType tagType, string name)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(name);
+        ValidateStringLength(name);
+
+        var isRoot = !_rootWritten;
+        if (!isRoot)
+        {
+            if (_containers.Count == 0)
+            {
+                throw new NbtException("The root tag is already complete; no further tags can be written.");
+            }
+
+            if (_containers[^1].IsList)
+            {
+                throw new NbtException("List elements are written with the element writer methods, not with named tag methods.");
+            }
+        }
+
+        _writer.WriteByte((byte)tagType);
+        if (!(isRoot && _unnamedRoot))
+        {
+            _writer.WriteString(name);
         }
 
         _rootWritten = true;
-        IncrementValuesAtDepth(0);
-        IsPayloadExpected = true;
-        _expectedTagType = tagType;
     }
 
-    internal void WriteMemberHeader(NbtTagType tagType, string name)
-    {
-        EnsureNotCompleted();
-        if (IsPayloadExpected)
-        {
-            throw new InvalidOperationException("A value payload is already expected.");
-        }
-
-        if (_rootComplete)
-        {
-            throw new InvalidOperationException("The root value is already complete.");
-        }
-
-        if (_containers is null || _containers.Count == 0)
-        {
-            throw new InvalidOperationException("Root values use WriteRootHeader or a named write method.");
-        }
-
-        if (Top.IsList)
-        {
-            throw new InvalidOperationException("List elements use anonymous writes.");
-        }
-
-        ArgumentNullException.ThrowIfNull(name);
-        ValidateStringLength(name.AsSpan());
-        WriteByte((byte)tagType);
-        WriteStringPayload(name.AsSpan());
-        IncrementValuesAtDepth(_containers.Count);
-        IsPayloadExpected = true;
-        _expectedTagType = tagType;
-    }
-
-    private void WriteNamedHeader(NbtTagType tagType, string name)
-    {
-        EnsureNotCompleted();
-        if (IsPayloadExpected)
-        {
-            throw new InvalidOperationException("A value payload is already expected.");
-        }
-
-        if (_rootComplete)
-        {
-            throw new InvalidOperationException("The root value is already complete.");
-        }
-
-        ArgumentNullException.ThrowIfNull(name);
-        ValidateStringLength(name.AsSpan());
-
-        if (_containers is null || _containers.Count == 0)
-        {
-            if (_rootWritten)
-            {
-                throw new InvalidOperationException("The root value has already been written.");
-            }
-
-            WriteByte((byte)tagType);
-            if (_rootFormat == NbtRootFormat.Named)
-            {
-                WriteStringPayload(name.AsSpan());
-            }
-
-            _rootWritten = true;
-            IncrementValuesAtDepth(0);
-            return;
-        }
-
-        if (Top.IsList)
-        {
-            throw new InvalidOperationException("List elements use the anonymous write methods.");
-        }
-
-        WriteByte((byte)tagType);
-        WriteStringPayload(name.AsSpan());
-        IncrementValuesAtDepth(_containers.Count);
-    }
-
-    private void WriteAnonymousHeader(NbtTagType tagType)
-    {
-        EnsureNotCompleted();
-        if (IsPayloadExpected)
-        {
-            if (tagType != _expectedTagType)
-            {
-                throw new NbtException($"The member header declared {_expectedTagType} but {tagType} was written.")
-                {
-                    BytePosition = BytesWritten,
-                    ExpectedTagType = _expectedTagType,
-                    ActualTagType = tagType,
-                };
-            }
-
-            IsPayloadExpected = false;
-            return;
-        }
-
-        if (_rootComplete)
-        {
-            throw new InvalidOperationException("The root value is already complete.");
-        }
-
-        if (_containers is null || _containers.Count == 0)
-        {
-            throw new InvalidOperationException("Anonymous values require a list or a pending member/root payload.");
-        }
-
-        if (!Top.IsList)
-        {
-            throw new InvalidOperationException("Compound members require a name; use a named write method or SerializeMember.");
-        }
-
-        ref var top = ref Top;
-        if (top.ElementType != tagType)
-        {
-            throw new NbtException($"The list declares elements of type {top.ElementType} but {tagType} was written.")
-            {
-                BytePosition = BytesWritten,
-                ExpectedTagType = top.ElementType,
-                ActualTagType = tagType,
-            };
-        }
-
-        if (top.Remaining == 0)
-        {
-            throw new NbtException("The list header declared no more elements.")
-            {
-                BytePosition = BytesWritten,
-            };
-        }
-
-        top.Remaining--;
-        IncrementValuesAtDepth(_containers.Count);
-    }
-
-    private static void ValidateOptions(NbtWriterOptions options)
-    {
-        if (options.RootFormat is not NbtRootFormat.Named and not NbtRootFormat.Unnamed)
-        {
-            throw new ArgumentOutOfRangeException(nameof(options), "Unknown root format.");
-        }
-
-        ArgumentOutOfRangeException.ThrowIfNegative(options.MaxDepth);
-        ArgumentOutOfRangeException.ThrowIfNegative(options.MaxCollectionLength);
-        ArgumentOutOfRangeException.ThrowIfNegative(options.MaxDocumentBytes);
-    }
-
-    private void ValidateStringLength(ReadOnlySpan<char> value)
+    private static void ValidateStringLength(string value)
     {
         var byteCount = ModifiedUTF8Encoding.Instance.GetByteCount(value);
         if (byteCount > ushort.MaxValue)
         {
-            throw new NbtException($"The string is too long to encode: {byteCount} bytes.")
-            {
-                BytePosition = BytesWritten,
-            };
+            throw new NbtException($"The string is too long to encode: {byteCount} bytes.");
         }
     }
 
-    private void ValidateCollectionLength(int count)
+    private static void ValidateListHeader(NbtTagType elementType, int count)
     {
-        if (count > _maxCollectionLength)
+        var isKnownType = elementType is NbtTagType.End or <= NbtTagType.LongArray;
+        if (!isKnownType)
         {
-            throw new NbtException(
-                $"The collection length {count} exceeds the configured limit of {_maxCollectionLength}.")
-            {
-                BytePosition = BytesWritten,
-            };
-        }
-    }
-
-    private void ValidateListHeader(NbtTagType elementType, int count)
-    {
-        if ((byte)elementType > (byte)NbtTagType.LongArray)
-        {
-            throw new NbtException($"Unknown NBT list element type {(byte)elementType}.")
-            {
-                BytePosition = BytesWritten,
-            };
+            throw new NbtException($"Unknown NBT list element type {(byte)elementType}.");
         }
 
         if (elementType == NbtTagType.End && count != 0)
         {
-            throw new NbtException("A list of TAG_End must have length zero.")
-            {
-                BytePosition = BytesWritten,
-                ExpectedTagType = NbtTagType.End,
-                ActualTagType = elementType,
-            };
+            throw new NbtException("A list of TAG_End must have length zero.");
         }
-
-        ValidateCollectionLength(count);
     }
 
-    private void EnsureNotCompleted()
+    private void WriteListHeader(NbtTagType elementType, int count)
     {
-        if (_destination is null)
+        _writer.WriteByte((byte)elementType);
+        _writer.WriteInt32(count);
+        EnterContainer(isList: true, elementType, count);
+    }
+
+    private void WriteByteArrayPayload(sbyte[] value)
+    {
+        _writer.WriteInt32(value.Length);
+        foreach (var item in value)
         {
-            throw new InvalidOperationException("The writer was not initialized with a destination.");
+            _writer.WriteSByte(item);
+        }
+    }
+
+    private void WriteIntArrayPayload(int[] value)
+    {
+        _writer.WriteInt32(value.Length);
+        foreach (var item in value)
+        {
+            _writer.WriteInt32(item);
+        }
+    }
+
+    private void WriteLongArrayPayload(long[] value)
+    {
+        _writer.WriteInt32(value.Length);
+        foreach (var item in value)
+        {
+            _writer.WriteInt64(item);
+        }
+    }
+
+    private void BeginListElement(NbtTagType tagType)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_containers.Count == 0 || !_containers[^1].IsList)
+        {
+            throw new NbtException("There is no open list to write an element into.");
         }
 
-        if (_completed)
+        var top = _containers[^1];
+        if (top.ElementType != tagType)
         {
-            throw new InvalidOperationException("The writer has already been completed.");
+            throw new NbtException($"The list declares elements of type {top.ElementType} but {tagType} was written.");
         }
+
+        if (top.Remaining == 0)
+        {
+            throw new NbtException("The list header declared no more elements.");
+        }
+
+        top.Remaining--;
+        _containers[^1] = top;
+    }
+
+    private void EnterContainer(bool isList, NbtTagType elementType, int remaining)
+    {
+        _containers.Add(new ContainerState(isList, elementType, remaining));
     }
 
     private void EnsureCanEnterContainer()
     {
-        EnsureNotCompleted();
-        if ((_containers?.Count ?? 0) >= _maxDepth)
+        if (_containers.Count >= NbtReader.MaxDepth)
         {
-            throw new NbtException($"The NBT nesting depth exceeds the limit of {_maxDepth}.")
-            {
-                BytePosition = BytesWritten,
-            };
+            throw new NbtException($"The NBT nesting depth exceeds the limit of {NbtReader.MaxDepth}.");
         }
     }
 
-    private void IncrementValuesAtDepth(int depth)
-    {
-        if (_valuesAtDepth is null)
-        {
-            _valuesAtDepth = new long[8];
-        }
-        else if (depth >= _valuesAtDepth.Length)
-        {
-            Array.Resize(ref _valuesAtDepth, Math.Max(depth + 1, _valuesAtDepth.Length * 2));
-        }
-
-        _valuesAtDepth[depth]++;
-    }
-
-    private void FinishScalar()
-    {
-        if (_containers is null || _containers.Count == 0)
-        {
-            if (_rootWritten)
-            {
-                _rootComplete = true;
-            }
-        }
-    }
-
-    private void FinishRootIfClosed()
-    {
-        if (_containers is null || _containers.Count == 0)
-        {
-            _rootComplete = true;
-        }
-    }
-
-    private void PushContainer(bool isList, NbtTagType elementType, int remaining)
-    {
-        _containers ??= [];
-        _containers.Add(new ContainerState(isList, elementType, remaining));
-    }
-
-    private void PopContainer() => _containers!.RemoveAt(_containers.Count - 1);
-
-    private void WriteByte(byte value)
-    {
-        var span = GetSpan(1);
-        span[0] = value;
-        Advance(1);
-    }
-
-    private void WriteInt16Payload(short value)
-    {
-        var span = GetSpan(sizeof(short));
-        BinaryPrimitives.WriteInt16BigEndian(span, value);
-        Advance(sizeof(short));
-    }
-
-    private void WriteUInt16Payload(ushort value)
-    {
-        var span = GetSpan(sizeof(ushort));
-        BinaryPrimitives.WriteUInt16BigEndian(span, value);
-        Advance(sizeof(ushort));
-    }
-
-    private void WriteInt32Payload(int value)
-    {
-        var span = GetSpan(sizeof(int));
-        BinaryPrimitives.WriteInt32BigEndian(span, value);
-        Advance(sizeof(int));
-    }
-
-    private void WriteInt64Payload(long value)
-    {
-        var span = GetSpan(sizeof(long));
-        BinaryPrimitives.WriteInt64BigEndian(span, value);
-        Advance(sizeof(long));
-    }
-
-    private void WriteSinglePayload(float value)
-    {
-        var span = GetSpan(sizeof(float));
-        BinaryPrimitives.WriteSingleBigEndian(span, value);
-        Advance(sizeof(float));
-    }
-
-    private void WriteDoublePayload(double value)
-    {
-        var span = GetSpan(sizeof(double));
-        BinaryPrimitives.WriteDoubleBigEndian(span, value);
-        Advance(sizeof(double));
-    }
-
-    private void WriteStringPayload(ReadOnlySpan<char> value)
-    {
-        var byteCount = ModifiedUTF8Encoding.Instance.GetByteCount(value);
-        if (byteCount > ushort.MaxValue)
-        {
-            throw new NbtException($"The string is too long to encode: {byteCount} bytes.")
-            {
-                BytePosition = BytesWritten,
-            };
-        }
-
-        WriteUInt16Payload((ushort)byteCount);
-        if (byteCount == 0)
-        {
-            return;
-        }
-
-        var span = GetSpan(byteCount);
-        var written = ModifiedUTF8Encoding.Instance.GetBytes(value, span);
-        if (written != byteCount)
-        {
-            throw new NbtException($"The string encoder wrote {written} bytes but {byteCount} were expected.")
-            {
-                BytePosition = BytesWritten,
-            };
-        }
-
-        Advance(written);
-    }
-
-    private void WriteInt32ArrayPayload(ReadOnlySpan<int> values)
-    {
-        while (!values.IsEmpty)
-        {
-            var elementCount = Math.Min(values.Length, MaxArrayWriteBytes / sizeof(int));
-            var byteCount = elementCount * sizeof(int);
-            var destination = GetSpan(byteCount);
-            if (BitConverter.IsLittleEndian)
-            {
-                BinaryPrimitives.ReverseEndianness(
-                    values[..elementCount],
-                    MemoryMarshal.Cast<byte, int>(destination[..byteCount]));
-            }
-            else
-            {
-                MemoryMarshal.AsBytes(values[..elementCount]).CopyTo(destination);
-            }
-
-            Advance(byteCount);
-            values = values[elementCount..];
-        }
-    }
-
-    private void WriteInt64ArrayPayload(ReadOnlySpan<long> values)
-    {
-        while (!values.IsEmpty)
-        {
-            var elementCount = Math.Min(values.Length, MaxArrayWriteBytes / sizeof(long));
-            var byteCount = elementCount * sizeof(long);
-            var destination = GetSpan(byteCount);
-            if (BitConverter.IsLittleEndian)
-            {
-                BinaryPrimitives.ReverseEndianness(
-                    values[..elementCount],
-                    MemoryMarshal.Cast<byte, long>(destination[..byteCount]));
-            }
-            else
-            {
-                MemoryMarshal.AsBytes(values[..elementCount]).CopyTo(destination);
-            }
-
-            Advance(byteCount);
-            values = values[elementCount..];
-        }
-    }
-
-    private void WriteBytes(ReadOnlySpan<byte> bytes)
-    {
-        while (bytes.Length > 0)
-        {
-            var span = GetSpan(Math.Min(bytes.Length, MaxArrayWriteBytes));
-            var count = Math.Min(span.Length, bytes.Length);
-            EnsureDocumentSize(count);
-            bytes[..count].CopyTo(span);
-            Advance(count);
-            bytes = bytes[count..];
-        }
-    }
-
-    private Span<byte> GetSpan(int sizeHint)
-    {
-        EnsureDocumentSize(sizeHint);
-        return _destination.GetSpan(sizeHint);
-    }
-
-    private void Advance(int count)
-    {
-        _destination.Advance(count);
-        BytesWritten += count;
-    }
-
-    private void EnsureDocumentSize(int count)
-    {
-        if (_maxDocumentBytes > 0 && BytesWritten + count > _maxDocumentBytes)
-        {
-            throw new NbtException($"The NBT document exceeds the configured limit of {_maxDocumentBytes} bytes.")
-            {
-                BytePosition = BytesWritten,
-            };
-        }
-    }
+    private void PopContainer() => _containers.RemoveAt(_containers.Count - 1);
 
     private struct ContainerState(bool isList, NbtTagType elementType, int remaining)
     {

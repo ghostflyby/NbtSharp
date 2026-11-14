@@ -1,187 +1,96 @@
-using System.Buffers;
-using System.Buffers.Binary;
 using System.Runtime.InteropServices;
-using System.Text;
-using Myitian.Text;
+using NbtSharp.IO;
 
 namespace NbtSharp;
 
 /// <summary>
-/// Reads Java Edition NBT as a forward-only sequence of tokens over a contiguous span, a sequence of
-/// spans, or a stream read through a fixed-size buffer.
+/// Reads Java Edition NBT as a sequence of tokens.
 /// </summary>
 /// <remarks>
 /// <para>
-/// A span is read directly. A <see cref="ReadOnlySequence{T}"/> is read segment by segment, where
-/// each segment is a contiguous span. A stream is read through a fixed-size pooled buffer, which
-/// makes it equivalent to a sequence of contiguous spans; <see cref="Dispose"/> returns that buffer.
-/// A stream reader must not be copied, because the pooled buffer is shared between copies.
+/// The reader is forward-only. Calling <see cref="Read"/> advances past one token. A compound or list
+/// start token is followed by its members or elements and then by a matching
+/// <see cref="NbtTokenType.EndCompound"/> or <see cref="NbtTokenType.EndList"/> token. For a value
+/// token, <see cref="TagType"/> identifies the payload and the matching typed getter reads it.
+/// Reading a value through a getter for a different type throws <see cref="NbtException"/>.
 /// </para>
 /// <para>
-/// The reader mirrors the NBT wire structure. A compound member produces a value or container-start
-/// token whose <see cref="Name"/> is the member name; list elements have no name. <c>TAG_End</c> is
-/// reported as <see cref="NbtTokenType.EndCompound"/>, and the end of a list is synthesized from its
-/// declared element count without consuming an extra byte.
-/// </para>
-/// <para>
-/// Typed getters read the current value and do not advance to the next token. Calling a getter for a
-/// different tag type throws <see cref="NbtException"/> with the expected and actual tag types and
-/// the byte position. API misuse, such as reading a value twice or calling a getter before
-/// <see cref="Read"/>, throws <see cref="InvalidOperationException"/>.
+/// Nested containers are limited to <see cref="MaxDepth"/> levels. Exceeding that limit throws
+/// <see cref="NbtException"/> rather than risking a stack overflow.
 /// </para>
 /// </remarks>
-public ref struct NbtReader
+public sealed class NbtReader : IDisposable
 {
-    private const int DefaultMaxDepth = 512;
-    private const int DefaultMaxCollectionLength = 16 * 1024 * 1024;
-    private const int DefaultStreamBufferSize = 64 * 1024;
+    /// <summary>The maximum nesting depth the reader accepts.</summary>
+    public const int MaxDepth = 512;
 
-    private static readonly ModifiedUTF8Encoding StringEncoding = new(throwOnInvalidBytes: true);
+    /// <summary>The maximum number of elements the reader accepts in an array tag.</summary>
+    public const int MaxArrayLength = 16 * 1024 * 1024;
 
-    private ReadOnlySpan<byte> _span;
-    private readonly NbtRootFormat _rootFormat;
-    private readonly int _maxDepth;
-    private readonly int _maxCollectionLength;
-    private readonly long _maxDocumentBytes;
-    private readonly ReadOnlySequence<byte> _buffer;
-    private SequencePosition _nextSegmentPosition;
-    private readonly Stream? _stream;
-    private readonly StreamBuffer? _streamBuffer;
-    private List<ContainerState>? _containers;
-    private long[]? _valuesReadAtDepth;
-    private long _tokenStart;
-    private long _valueStart;
-    private bool _streamCompleted;
+    private readonly NbtBinaryReader _reader;
+    private readonly Stream? _streamToDispose;
+    private readonly List<ContainerState> _containers = [];
     private bool _rootRead;
-    private bool _rootComplete;
+    private bool _valuePending;
+    private bool _containerPending;
+    private bool _disposed;
 
-    /// <summary>Initializes a reader over a contiguous span of NBT bytes.</summary>
-    /// <param name="data">The complete NBT document.</param>
-    /// <param name="options">The reader options, or the defaults.</param>
-    public NbtReader(ReadOnlySpan<byte> data, NbtReaderOptions options = default)
-    {
-        ValidateOptions(options);
-        this = default;
-        _span = data;
-        _rootFormat = options.RootFormat;
-        _maxDepth = options.MaxDepth > 0 ? options.MaxDepth : DefaultMaxDepth;
-        _maxCollectionLength = options.MaxCollectionLength > 0 ? options.MaxCollectionLength : DefaultMaxCollectionLength;
-        _maxDocumentBytes = options.MaxDocumentBytes;
-    }
-
-    /// <summary>
-    /// Initializes a reader over a possibly segmented sequence of NBT bytes. Each segment is read as
-    /// a contiguous span.
-    /// </summary>
-    /// <param name="data">The complete NBT document.</param>
-    /// <param name="options">The reader options, or the defaults.</param>
-    public NbtReader(ReadOnlySequence<byte> data, NbtReaderOptions options = default)
-    {
-        ValidateOptions(options);
-        this = default;
-        _buffer = data;
-        _nextSegmentPosition = data.Start;
-        _rootFormat = options.RootFormat;
-        _maxDepth = options.MaxDepth > 0 ? options.MaxDepth : DefaultMaxDepth;
-        _maxCollectionLength = options.MaxCollectionLength > 0 ? options.MaxCollectionLength : DefaultMaxCollectionLength;
-        _maxDocumentBytes = options.MaxDocumentBytes;
-    }
-
-    /// <summary>
-    /// Initializes a reader over the remaining bytes of a stream. The reader reads through a
-    /// fixed-size pooled buffer; call <see cref="Dispose"/> to return it.
-    /// </summary>
-    /// <param name="stream">The stream that supplies the document. It is left open.</param>
-    /// <param name="options">The reader options, or the defaults.</param>
-    public NbtReader(Stream stream, NbtReaderOptions options = default)
+    /// <summary>Initializes a reader over <paramref name="stream"/>.</summary>
+    /// <param name="stream">The stream that supplies the NBT data.</param>
+    /// <param name="rootFormat">Whether the root tag is preceded by a name.</param>
+    /// <param name="disposeStream">Whether disposing the reader also disposes <paramref name="stream"/>.</param>
+    public NbtReader(Stream stream, NbtRootFormat rootFormat = NbtRootFormat.Named, bool disposeStream = false)
     {
         ArgumentNullException.ThrowIfNull(stream);
-        ValidateOptions(options);
-        this = default;
-        _stream = stream;
-        _streamBuffer = new StreamBuffer(DefaultStreamBufferSize);
-        _rootFormat = options.RootFormat;
-        _maxDepth = options.MaxDepth > 0 ? options.MaxDepth : DefaultMaxDepth;
-        _maxCollectionLength = options.MaxCollectionLength > 0 ? options.MaxCollectionLength : DefaultMaxCollectionLength;
-        _maxDocumentBytes = options.MaxDocumentBytes;
+        _reader = new NbtBinaryReader(stream);
+        _streamToDispose = disposeStream ? stream : null;
+        RootFormat = rootFormat;
     }
 
-    /// <summary>Returns the stream buffer rented by this reader, if any.</summary>
-    /// <remarks>
-    /// The stream itself is left open. Span and sequence readers have no resources to release.
-    /// </remarks>
-    public void Dispose()
-    {
-        if (_streamBuffer is null)
-        {
-            return;
-        }
+    /// <summary>Gets whether the root tag is preceded by a name.</summary>
+    public NbtRootFormat RootFormat { get; }
 
-        _span = default;
-        _streamCompleted = true;
-        _streamBuffer.Dispose();
-    }
-
-    /// <summary>Gets the type of the most recently produced token.</summary>
+    /// <summary>Gets the type of the most recently read token.</summary>
     public NbtTokenType TokenType { get; private set; }
 
-    /// <summary>Gets the NBT tag type of the most recently produced token.</summary>
+    /// <summary>Gets the tag type of the most recently read token.</summary>
     public NbtTagType TagType { get; private set; }
 
-    /// <summary>Gets the name of the current compound member or root tag, if any.</summary>
+    /// <summary>Gets the name that accompanies the most recently read tag, if any.</summary>
     public string? Name { get; private set; }
-
-    /// <summary>Gets the number of bytes consumed from the start of the document.</summary>
-    public long BytesConsumed { get; private set; }
-
-    /// <summary>Gets the number of containers currently open, including the container of the current token.</summary>
-    public readonly int CurrentDepth => _containers?.Count ?? 0;
 
     /// <summary>Gets the element type declared by the most recently read list header.</summary>
     public NbtTagType ListElementType { get; private set; }
 
     /// <summary>Gets the element count declared by the most recently read list header.</summary>
-    public int ListLength { get; private set; }
+    public int ListCount { get; private set; }
 
-    internal bool HasPendingValue { get; private set; }
+    /// <summary>Gets the current nesting depth.</summary>
+    public int Depth => _containers.Count;
 
-    internal bool HasPendingContainer { get; private set; }
+    private ref ContainerState Top => ref CollectionsMarshal.AsSpan(_containers)[^1];
 
-    internal readonly long ValuesReadAtDepth(int depth) =>
-        _valuesReadAtDepth is not null && depth >= 0 && depth < _valuesReadAtDepth.Length
-            ? _valuesReadAtDepth[depth]
-            : 0;
-
-    private ref ContainerState Top => ref CollectionsMarshal.AsSpan(_containers!)[^1];
-
-    /// <summary>Advances the reader to the next value or container-end token.</summary>
-    /// <returns><see langword="false"/> once the root value has been consumed.</returns>
-    /// <exception cref="InvalidOperationException">The current value has not been read yet.</exception>
-    /// <exception cref="NbtException">The data is malformed.</exception>
+    /// <summary>Advances the reader to the next token.</summary>
+    /// <returns><see langword="true"/> if a token was read; <see langword="false"/> once the root tag is exhausted.</returns>
+    /// <exception cref="NbtException">The data is malformed or a value was left unread.</exception>
     public bool Read()
     {
-        EnsureInitialized();
+        ObjectDisposedException.ThrowIf(_disposed, this);
 
-        if (HasPendingValue)
+        if (_valuePending)
         {
-            throw new InvalidOperationException("The current value has not been read. Call the matching getter or Skip first.");
+            throw new NbtException("The current value has not been read. Call the matching getter or Skip first.");
         }
 
-        HasPendingContainer = false;
+        _containerPending = false;
 
         if (!_rootRead)
         {
             return ReadRootStart();
         }
 
-        if (_rootComplete)
+        if (_containers.Count == 0)
         {
-            return false;
-        }
-
-        if (_containers is null || _containers.Count == 0)
-        {
-            _rootComplete = true;
             return false;
         }
 
@@ -197,49 +106,42 @@ public ref struct NbtReader
 
             PopContainer();
             SetToken(NbtTokenType.EndList, NbtTagType.End, null);
-            FinishRootIfClosed();
             return true;
         }
 
-        var position = BytesConsumed;
         var tagType = ReadTagType();
         if (tagType == NbtTagType.End)
         {
             PopContainer();
             SetToken(NbtTokenType.EndCompound, NbtTagType.End, null);
-            FinishRootIfClosed();
             return true;
         }
 
-        var name = ReadString();
-        StartTag(tagType, name, position);
+        var name = _reader.ReadString();
+        StartTag(tagType, name);
         return true;
     }
 
-    /// <summary>Skips the current value or complete container.</summary>
-    /// <exception cref="InvalidOperationException">The reader is not positioned on a value or container.</exception>
-    /// <exception cref="NbtException">The data is malformed.</exception>
+    /// <summary>Skips the value or container at the current position.</summary>
+    /// <exception cref="NbtException">The reader is not positioned on a value or container start.</exception>
     public void Skip()
     {
-        EnsureInitialized();
+        ObjectDisposedException.ThrowIf(_disposed, this);
 
-        if (HasPendingValue)
+        if (_valuePending)
         {
-            var tagType = TagType;
-            SkipValue(tagType);
-            HasPendingValue = false;
-            FinishRootIfClosed();
+            SkipValue(TagType);
+            _valuePending = false;
             return;
         }
 
-        if (!HasPendingContainer)
+        if (!_containerPending)
         {
-            throw new InvalidOperationException("The reader is not positioned on a value or container.");
+            throw new NbtException("The reader is not positioned on a value or container.");
         }
 
-        HasPendingContainer = false;
-        var skippedList = Top.IsList;
-        var targetDepth = _containers!.Count - 1;
+        _containerPending = false;
+        var targetDepth = _containers.Count - 1;
         while (_containers.Count > targetDepth)
         {
             if (Top.IsList)
@@ -248,7 +150,7 @@ public ref struct NbtReader
                 {
                     var elementType = Top.ElementType;
                     Top.Remaining--;
-                    SkipValue(elementType);
+                    SkipListElement(elementType);
                 }
                 else
                 {
@@ -265,32 +167,29 @@ public ref struct NbtReader
             }
             else
             {
-                _ = ReadString();
+                _ = _reader.ReadString();
                 SkipValue(tagType);
             }
         }
-
-        SetToken(skippedList ? NbtTokenType.EndList : NbtTokenType.EndCompound, NbtTagType.End, null);
-        FinishRootIfClosed();
     }
 
     /// <summary>Reads the current value as a signed 8-bit integer.</summary>
-    public sbyte GetSByte() => Expect(NbtTagType.Byte) ? ReadSByte() : default;
+    public sbyte GetSByte() => Expect(NbtTagType.Byte) ? _reader.ReadSByte() : default;
 
     /// <summary>Reads the current value as a signed 16-bit integer.</summary>
-    public short GetInt16() => Expect(NbtTagType.Short) ? ReadInt16() : default;
+    public short GetInt16() => Expect(NbtTagType.Short) ? _reader.ReadInt16() : default;
 
     /// <summary>Reads the current value as a signed 32-bit integer.</summary>
-    public int GetInt32() => Expect(NbtTagType.Int) ? ReadInt32() : 0;
+    public int GetInt32() => Expect(NbtTagType.Int) ? _reader.ReadInt32() : default;
 
     /// <summary>Reads the current value as a signed 64-bit integer.</summary>
-    public long GetInt64() => Expect(NbtTagType.Long) ? ReadInt64() : 0;
+    public long GetInt64() => Expect(NbtTagType.Long) ? _reader.ReadInt64() : default;
 
     /// <summary>Reads the current value as a 32-bit IEEE 754 number.</summary>
-    public float GetSingle() => Expect(NbtTagType.Float) ? ReadSingle() : 0;
+    public float GetSingle() => Expect(NbtTagType.Float) ? _reader.ReadSingle() : default;
 
     /// <summary>Reads the current value as a 64-bit IEEE 754 number.</summary>
-    public double GetDouble() => Expect(NbtTagType.Double) ? ReadDouble() : 0;
+    public double GetDouble() => Expect(NbtTagType.Double) ? _reader.ReadDouble() : default;
 
     /// <summary>Reads the current value as a string.</summary>
     /// <remarks>
@@ -298,308 +197,153 @@ public ref struct NbtReader
     /// of 0xF0 or greater are rejected, while raw null bytes and overlong three-byte forms are
     /// accepted and normalized when the value is written again.
     /// </remarks>
-    public string GetString() => Expect(NbtTagType.String) ? ReadString() : string.Empty;
+    public string GetString() => Expect(NbtTagType.String) ? _reader.ReadString() : string.Empty;
 
     /// <summary>Reads the current value as a byte array.</summary>
-    public byte[] GetByteArray()
+    public sbyte[] GetByteArray()
     {
         if (!Expect(NbtTagType.ByteArray))
         {
             return [];
         }
 
-        var length = ReadArrayLength();
-        return ReadBytes(length);
+        var bytes = _reader.ReadBytes(ReadArrayLength());
+        return Array.ConvertAll(bytes, static b => (sbyte)b);
     }
 
     /// <summary>Reads the current value as an integer array.</summary>
-    public int[] GetInt32Array()
+    public int[] GetIntArray()
     {
         if (!Expect(NbtTagType.IntArray))
         {
             return [];
         }
 
-        var length = ReadArrayLength();
-        EnsurePayloadFits((long)length * sizeof(int));
-        var values = new int[GetInitialArrayCapacity(length, sizeof(int))];
-        var totalBytes = (long)length * sizeof(int);
-        var filled = 0L;
-        while (filled < totalBytes)
+        var values = new int[ReadArrayLength()];
+        for (var i = 0; i < values.Length; i++)
         {
-            var capacityBytes = (long)values.Length * sizeof(int);
-            if (filled == capacityBytes)
-            {
-                var newCapacity = (int)Math.Min(
-                    length,
-                    Math.Max((long)values.Length * 2, values.Length + 1));
-                Array.Resize(ref values, newCapacity);
-                capacityBytes = (long)values.Length * sizeof(int);
-            }
-
-            var take = (int)Math.Min(capacityBytes - filled, totalBytes - filled);
-            ReadExactly(MemoryMarshal.AsBytes(values.AsSpan()).Slice((int)filled, take));
-            filled += take;
-        }
-
-        if (BitConverter.IsLittleEndian)
-        {
-            BinaryPrimitives.ReverseEndianness(values.AsSpan(), values.AsSpan());
+            values[i] = _reader.ReadInt32();
         }
 
         return values;
     }
 
     /// <summary>Reads the current value as a long array.</summary>
-    public long[] GetInt64Array()
+    public long[] GetLongArray()
     {
         if (!Expect(NbtTagType.LongArray))
         {
             return [];
         }
 
-        var length = ReadArrayLength();
-        EnsurePayloadFits((long)length * sizeof(long));
-        var values = new long[GetInitialArrayCapacity(length, sizeof(long))];
-        var totalBytes = (long)length * sizeof(long);
-        var filled = 0L;
-        while (filled < totalBytes)
+        var values = new long[ReadArrayLength()];
+        for (var i = 0; i < values.Length; i++)
         {
-            var capacityBytes = (long)values.Length * sizeof(long);
-            if (filled == capacityBytes)
-            {
-                var newCapacity = (int)Math.Min(
-                    length,
-                    Math.Max((long)values.Length * 2, values.Length + 1));
-                Array.Resize(ref values, newCapacity);
-                capacityBytes = (long)values.Length * sizeof(long);
-            }
-
-            var take = (int)Math.Min(capacityBytes - filled, totalBytes - filled);
-            ReadExactly(MemoryMarshal.AsBytes(values.AsSpan()).Slice((int)filled, take));
-            filled += take;
-        }
-
-        if (BitConverter.IsLittleEndian)
-        {
-            BinaryPrimitives.ReverseEndianness(values.AsSpan(), values.AsSpan());
+            values[i] = _reader.ReadInt64();
         }
 
         return values;
     }
 
-    private readonly void EnsureInitialized()
+    /// <inheritdoc/>
+    public void Dispose()
     {
-        if (_maxDepth == 0)
+        if (_disposed)
         {
-            throw new InvalidOperationException("The reader was not initialized with NBT data.");
+            return;
         }
 
-        ThrowIfDisposed();
-    }
-
-    private static void ValidateOptions(NbtReaderOptions options)
-    {
-        if (options.RootFormat is not NbtRootFormat.Named and not NbtRootFormat.Unnamed)
-        {
-            throw new ArgumentOutOfRangeException(nameof(options), "Unknown root format.");
-        }
-
-        ArgumentOutOfRangeException.ThrowIfNegative(options.MaxDepth);
-        ArgumentOutOfRangeException.ThrowIfNegative(options.MaxCollectionLength);
-        ArgumentOutOfRangeException.ThrowIfNegative(options.MaxDocumentBytes);
+        _disposed = true;
+        _streamToDispose?.Dispose();
     }
 
     private bool ReadRootStart()
     {
-        var position = BytesConsumed;
         var tagType = ReadTagType();
-        if (tagType == NbtTagType.End)
-        {
-            throw new NbtException("The root tag cannot be TAG_End.")
-            {
-                BytePosition = position,
-                ActualTagType = NbtTagType.End,
-            };
-        }
-
-        var name = _rootFormat == NbtRootFormat.Named ? ReadString() : null;
+        var name = RootFormat == NbtRootFormat.Named ? _reader.ReadString() : null;
         _rootRead = true;
-        StartTag(tagType, name, position);
+        StartTag(tagType, name);
         return true;
     }
 
-    private void StartTag(NbtTagType tagType, string? name, long position)
+    private void StartTag(NbtTagType tagType, string? name)
     {
-        if (tagType == NbtTagType.End)
-        {
-            throw new NbtException("Unexpected TAG_End.")
-            {
-                BytePosition = position,
-                ActualTagType = NbtTagType.End,
-            };
-        }
-
-        _tokenStart = position;
-        IncrementValuesReadAtDepth(_containers?.Count ?? 0);
         switch (tagType)
         {
+            case NbtTagType.End:
+                throw new NbtException("The root tag cannot be TAG_End.");
             case NbtTagType.Compound:
-                PushContainer(isList: false, NbtTagType.End, remaining: 0);
+                PushCompound();
                 SetToken(NbtTokenType.StartCompound, tagType, name);
-                HasPendingContainer = true;
+                _containerPending = true;
                 break;
             case NbtTagType.List:
                 SetToken(NbtTokenType.StartList, tagType, name);
                 ReadListHeader();
-                HasPendingContainer = true;
+                _containerPending = true;
                 break;
             default:
-                _valueStart = BytesConsumed;
                 SetToken(NbtTokenType.Value, tagType, name);
-                HasPendingValue = true;
+                _valuePending = true;
                 break;
         }
     }
 
     private void StartListElement(NbtTagType elementType)
     {
-        if (elementType == NbtTagType.End)
-        {
-            throw new NbtException("A list of TAG_End cannot contain elements.");
-        }
-
-        _tokenStart = BytesConsumed;
-        IncrementValuesReadAtDepth(_containers?.Count ?? 0);
         switch (elementType)
         {
             case NbtTagType.Compound:
-                PushContainer(isList: false, NbtTagType.End, remaining: 0);
+                PushCompound();
                 SetToken(NbtTokenType.StartCompound, elementType, null);
-                HasPendingContainer = true;
+                _containerPending = true;
                 break;
             case NbtTagType.List:
                 SetToken(NbtTokenType.StartList, elementType, null);
                 ReadListHeader();
-                HasPendingContainer = true;
+                _containerPending = true;
                 break;
             default:
-                _valueStart = BytesConsumed;
                 SetToken(NbtTokenType.Value, elementType, null);
-                HasPendingValue = true;
+                _valuePending = true;
                 break;
         }
-    }
-
-    private void IncrementValuesReadAtDepth(int depth)
-    {
-        if (_valuesReadAtDepth is null)
-        {
-            _valuesReadAtDepth = new long[8];
-        }
-        else if (depth >= _valuesReadAtDepth.Length)
-        {
-            Array.Resize(ref _valuesReadAtDepth, Math.Max(depth + 1, _valuesReadAtDepth.Length * 2));
-        }
-
-        _valuesReadAtDepth[depth]++;
     }
 
     private void ReadListHeader()
     {
-        var position = BytesConsumed;
         var elementType = ReadTagType();
-        var count = ReadInt32();
+        var count = _reader.ReadInt32();
         if (count < 0)
         {
-            throw new NbtException($"Invalid NBT list length {count}.")
-            {
-                BytePosition = position,
-            };
+            throw new NbtException($"Invalid NBT list length {count}.");
         }
 
-        if (count > _maxCollectionLength)
+        if (elementType == NbtTagType.End)
         {
-            throw new NbtException(
-                $"The NBT list length {count} exceeds the configured limit of {_maxCollectionLength}.")
+            if (count != 0)
             {
-                BytePosition = position,
-            };
+                throw new NbtException("A list of TAG_End must have length zero.");
+            }
         }
-
-        if (elementType == NbtTagType.End && count != 0)
-        {
-            throw new NbtException("A list of TAG_End must have length zero.")
-            {
-                BytePosition = position,
-            };
-        }
-
-        EnsureListElementsFit(elementType, count, position);
 
         ListElementType = elementType;
-        ListLength = count;
+        ListCount = count;
         EnterContainer(isList: true, elementType, count);
     }
 
-    private void EnsureListElementsFit(NbtTagType elementType, int count, long position)
-    {
-        var minimumSize = elementType switch
-        {
-            NbtTagType.Byte => 1,
-            NbtTagType.Short => 2,
-            NbtTagType.Int or NbtTagType.Float or NbtTagType.ByteArray or NbtTagType.IntArray or NbtTagType.LongArray => 4,
-            NbtTagType.Long or NbtTagType.Double => 8,
-            NbtTagType.String => 2,
-            NbtTagType.List => 5,
-            NbtTagType.Compound => 1,
-            _ => 0,
-        };
+    private void PushCompound() => EnterContainer(isList: false, NbtTagType.End, remaining: 0);
 
-        if (minimumSize == 0)
-        {
-            return;
-        }
-
-        var required = (long)count * minimumSize;
-        EnsureDocumentSize(required);
-        if (TryGetRemainingBytes(out var remaining) && required > remaining)
-        {
-            throw new NbtException(
-                $"The NBT list declares {count} elements but the remaining data is too short.")
-            {
-                IsTruncated = true,
-                BytePosition = position,
-            };
-        }
-    }
-
-    private void PushContainer(bool isList, NbtTagType elementType, int remaining) =>
-        EnterContainer(isList, elementType, remaining);
+    private void PopContainer() => _containers.RemoveAt(_containers.Count - 1);
 
     private void EnterContainer(bool isList, NbtTagType elementType, int remaining)
     {
-        _containers ??= [];
-
-        if (_containers.Count >= _maxDepth)
+        if (_containers.Count >= MaxDepth)
         {
-            throw new NbtException($"The NBT nesting depth exceeds the limit of {_maxDepth}.")
-            {
-                BytePosition = BytesConsumed,
-            };
+            throw new NbtException($"The NBT nesting depth exceeds the limit of {MaxDepth}.");
         }
 
         _containers.Add(new ContainerState(isList, elementType, remaining));
-    }
-
-    private void PopContainer() => _containers!.RemoveAt(_containers.Count - 1);
-
-    private void FinishRootIfClosed()
-    {
-        if (_containers is null || _containers.Count == 0)
-        {
-            _rootComplete = true;
-        }
     }
 
     private void SetToken(NbtTokenType tokenType, NbtTagType tagType, string? name)
@@ -611,469 +355,90 @@ public ref struct NbtReader
 
     private NbtTagType ReadTagType()
     {
-        var position = BytesConsumed;
-        if (!TryReadByte(out var value))
-        {
-            throw new NbtException("Unexpected end of NBT data.")
-            {
-                IsTruncated = true,
-                BytePosition = position,
-            };
-        }
-
+        var value = _reader.ReadByte();
         if (value > (byte)NbtTagType.LongArray)
         {
-            throw new NbtException($"Unknown NBT tag type {value}.")
-            {
-                BytePosition = position,
-            };
+            throw new NbtException($"Unknown NBT tag type {value}.");
         }
 
         return (NbtTagType)value;
     }
 
-    private bool Expect(NbtTagType expected)
-    {
-        ThrowIfDisposed();
-
-        if (!HasPendingValue)
-        {
-            if (TokenType is NbtTokenType.StartCompound or NbtTokenType.StartList)
-            {
-                throw new NbtException(
-                    $"Expected a {expected} value but the current token is {TokenType} ({TagType}).")
-                {
-                    BytePosition = _tokenStart,
-                    ExpectedTagType = expected,
-                    ActualTagType = TagType,
-                };
-            }
-
-            throw new InvalidOperationException("The reader is not positioned on a value.");
-        }
-
-        if (TagType != expected)
-        {
-            throw new NbtException(
-                $"Expected a {expected} value but the current token is {TokenType} ({TagType}).")
-            {
-                BytePosition = _valueStart,
-                ExpectedTagType = expected,
-                ActualTagType = TagType,
-            };
-        }
-
-        HasPendingValue = false;
-        if (_containers is null || _containers.Count == 0)
-        {
-            _rootComplete = true;
-        }
-
-        return true;
-    }
-
     private int ReadArrayLength()
     {
-        var position = BytesConsumed;
-        var length = ReadInt32();
-        if (length < 0 || length > _maxCollectionLength)
+        var length = _reader.ReadInt32();
+        if (length < 0 || length > MaxArrayLength)
         {
-            throw new NbtException(
-                $"Invalid NBT array length {length} (limit {_maxCollectionLength}).")
-            {
-                BytePosition = position,
-            };
+            throw new NbtException($"Invalid NBT array length {length}.");
         }
 
         return length;
     }
+
+    private void SkipArray(int elementSize)
+    {
+        int length = ReadArrayLength();
+        long byteCount = (long)length * elementSize;
+        if (byteCount > int.MaxValue)
+        {
+            throw new NbtException($"The NBT array is too large to skip ({length} elements).");
+        }
+
+        _reader.Skip((int)byteCount);
+    }
+
+    private bool Expect(NbtTagType expected)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_valuePending || TagType != expected)
+        {
+            throw new NbtException($"Expected a {expected} value but the current token is {TokenType} ({TagType}).");
+        }
+
+        _valuePending = false;
+        return true;
+    }
+
+    private void SkipListElement(NbtTagType elementType) => SkipValue(elementType);
 
     private void SkipValue(NbtTagType tagType)
     {
         switch (tagType)
         {
             case NbtTagType.Byte:
-                SkipBytes(1);
+                _reader.Skip(1);
                 break;
             case NbtTagType.Short:
-                SkipBytes(sizeof(short));
+                _reader.Skip(2);
                 break;
             case NbtTagType.Int:
             case NbtTagType.Float:
-                SkipBytes(sizeof(int));
+                _reader.Skip(4);
                 break;
             case NbtTagType.Long:
             case NbtTagType.Double:
-                SkipBytes(sizeof(long));
+                _reader.Skip(8);
                 break;
             case NbtTagType.ByteArray:
-                SkipBytes(ReadArrayLength());
+                _reader.Skip(ReadArrayLength());
                 break;
             case NbtTagType.String:
-                SkipBytes(ReadUInt16());
+                _reader.Skip(_reader.ReadUInt16());
                 break;
             case NbtTagType.List:
                 ReadListHeader();
                 break;
             case NbtTagType.Compound:
-                PushContainer(isList: false, NbtTagType.End, remaining: 0);
+                PushCompound();
                 break;
             case NbtTagType.IntArray:
-                SkipBytes((long)ReadArrayLength() * sizeof(int));
+                SkipArray(sizeof(int));
                 break;
             case NbtTagType.LongArray:
-                SkipBytes((long)ReadArrayLength() * sizeof(long));
+                SkipArray(sizeof(long));
                 break;
             default:
                 throw new NbtException($"Cannot skip a value of type {tagType}.");
-        }
-    }
-
-    private byte ReadByte()
-    {
-        var position = BytesConsumed;
-        if (!TryReadByte(out var value))
-        {
-            throw new NbtException("Unexpected end of NBT data.")
-            {
-                IsTruncated = true,
-                BytePosition = position,
-            };
-        }
-
-        return value;
-    }
-
-    private sbyte ReadSByte() => (sbyte)ReadByte();
-
-    private short ReadInt16()
-    {
-        Span<byte> buffer = stackalloc byte[sizeof(short)];
-        ReadExactly(buffer);
-        return BinaryPrimitives.ReadInt16BigEndian(buffer);
-    }
-
-    private ushort ReadUInt16()
-    {
-        Span<byte> buffer = stackalloc byte[sizeof(ushort)];
-        ReadExactly(buffer);
-        return BinaryPrimitives.ReadUInt16BigEndian(buffer);
-    }
-
-    private int ReadInt32()
-    {
-        Span<byte> buffer = stackalloc byte[sizeof(int)];
-        ReadExactly(buffer);
-        return BinaryPrimitives.ReadInt32BigEndian(buffer);
-    }
-
-    private long ReadInt64()
-    {
-        Span<byte> buffer = stackalloc byte[sizeof(long)];
-        ReadExactly(buffer);
-        return BinaryPrimitives.ReadInt64BigEndian(buffer);
-    }
-
-    private float ReadSingle()
-    {
-        Span<byte> buffer = stackalloc byte[sizeof(float)];
-        ReadExactly(buffer);
-        return BinaryPrimitives.ReadSingleBigEndian(buffer);
-    }
-
-    private double ReadDouble()
-    {
-        Span<byte> buffer = stackalloc byte[sizeof(double)];
-        ReadExactly(buffer);
-        return BinaryPrimitives.ReadDoubleBigEndian(buffer);
-    }
-
-    private string ReadString()
-    {
-        var position = BytesConsumed;
-        var length = ReadUInt16();
-        if (length == 0)
-        {
-            return string.Empty;
-        }
-
-        EnsurePayloadFits(length);
-        if (_span.Length >= length)
-        {
-            var bytes = _span[..length];
-            var value = DecodeString(bytes, position);
-            _span = _span[length..];
-            BytesConsumed += length;
-            return value;
-
-        }
-
-        var buffer = new byte[length];
-        ReadExactly(buffer);
-        return DecodeString(buffer, position);
-    }
-
-    private static string DecodeString(ReadOnlySpan<byte> bytes, long position)
-    {
-        foreach (var value in bytes)
-        {
-            if (value >= 0xF0)
-            {
-                throw new NbtException(
-                    "Invalid modified UTF-8 string: lead bytes of 0xF0 or greater are not allowed.")
-                {
-                    BytePosition = position,
-                };
-            }
-        }
-
-        try
-        {
-            return StringEncoding.GetString(bytes);
-        }
-        catch (DecoderFallbackException ex)
-        {
-            throw new NbtException("Invalid modified UTF-8 string.", ex)
-            {
-                BytePosition = position,
-            };
-        }
-    }
-
-    private byte[] ReadBytes(int count)
-    {
-        if (count == 0)
-        {
-            return [];
-        }
-
-        EnsurePayloadFits(count);
-        if (_stream is null)
-        {
-            var bytes = new byte[count];
-            ReadExactly(bytes);
-            return bytes;
-        }
-
-        var buffer = new byte[GetInitialArrayCapacity(count, sizeof(byte))];
-        var offset = 0;
-        while (offset < count)
-        {
-            if (offset == buffer.Length)
-            {
-                var newCapacity = (int)Math.Min(
-                    count,
-                    Math.Max((long)buffer.Length * 2, buffer.Length + 1));
-                Array.Resize(ref buffer, newCapacity);
-            }
-
-            var take = Math.Min(buffer.Length - offset, count - offset);
-            ReadExactly(buffer.AsSpan(offset, take));
-            offset += take;
-        }
-
-        return buffer;
-    }
-
-    private void ReadExactly(scoped Span<byte> destination)
-    {
-        if (destination.Length == 0)
-        {
-            return;
-        }
-
-        EnsureDocumentSize(destination.Length);
-        var offset = 0;
-        while (offset < destination.Length)
-        {
-            if (!EnsureData())
-            {
-                throw new NbtException("Unexpected end of NBT data.")
-                {
-                    IsTruncated = true,
-                    BytePosition = BytesConsumed,
-                };
-            }
-
-            var take = Math.Min(_span.Length, destination.Length - offset);
-            _span[..take].CopyTo(destination[offset..]);
-            _span = _span[take..];
-            BytesConsumed += take;
-            offset += take;
-        }
-    }
-
-    private void SkipBytes(long count)
-    {
-        if (count < 0)
-        {
-            throw new NbtException($"Invalid NBT length {count}.")
-            {
-                BytePosition = BytesConsumed,
-            };
-        }
-
-        if (count == 0)
-        {
-            return;
-        }
-
-        EnsureDocumentSize(count);
-        while (count > 0)
-        {
-            if (!EnsureData())
-            {
-                throw new NbtException("Unexpected end of NBT data.")
-                {
-                    IsTruncated = true,
-                    BytePosition = BytesConsumed,
-                };
-            }
-
-            var take = Math.Min(count, _span.Length);
-            _span = _span[(int)take..];
-            BytesConsumed += take;
-            count -= take;
-        }
-    }
-
-    private bool TryReadByte(out byte value)
-    {
-        if (!EnsureData())
-        {
-            value = 0;
-            return false;
-        }
-
-        EnsureDocumentSize(1);
-        value = _span[0];
-        _span = _span[1..];
-        BytesConsumed++;
-        return true;
-    }
-
-    private bool EnsureData()
-    {
-        ThrowIfDisposed();
-        return !_span.IsEmpty || MoveNext();
-    }
-
-    private readonly void ThrowIfDisposed()
-    {
-        if (_streamBuffer is { IsDisposed: true })
-        {
-            throw new ObjectDisposedException(nameof(NbtReader));
-        }
-    }
-
-    private bool MoveNext()
-    {
-        if (_stream is not null)
-        {
-            if (_streamCompleted)
-            {
-                return false;
-            }
-
-            var buffer = _streamBuffer!.Buffer;
-            var read = _stream.Read(buffer);
-            if (read == 0)
-            {
-                _streamCompleted = true;
-                return false;
-            }
-
-            _span = buffer.AsSpan(0, read);
-            return true;
-        }
-
-        return TryGetNextSegment();
-    }
-
-    private bool TryGetNextSegment()
-    {
-        while (_buffer.TryGet(ref _nextSegmentPosition, out var memory, advance: true))
-        {
-            if (!memory.IsEmpty)
-            {
-                _span = memory.Span;
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private bool TryGetRemainingBytes(out long remaining)
-    {
-        if (_stream is not null)
-        {
-            remaining = 0;
-            return false;
-        }
-
-        remaining = _buffer.IsEmpty ? _span.Length : _buffer.Length - BytesConsumed;
-        return true;
-    }
-
-    private void EnsurePayloadFits(long byteCount)
-    {
-        EnsureDocumentSize(byteCount);
-        if (TryGetRemainingBytes(out var remaining) && byteCount > remaining)
-        {
-            throw new NbtException(
-                $"The NBT payload declares {byteCount} bytes but only {remaining} are available.")
-            {
-                IsTruncated = true,
-                BytePosition = BytesConsumed,
-            };
-        }
-    }
-
-    private int GetInitialArrayCapacity(int length, int elementSize)
-    {
-        if (length == 0)
-        {
-            return 0;
-        }
-
-        if (_stream is null)
-        {
-            return length;
-        }
-
-        var segmentElements = Math.Max(1, DefaultStreamBufferSize / elementSize);
-        return Math.Min(length, segmentElements);
-    }
-
-    private void EnsureDocumentSize(long count)
-    {
-        if (_maxDocumentBytes > 0 && count > _maxDocumentBytes - BytesConsumed)
-        {
-            throw new NbtException(
-                $"The NBT document exceeds the configured limit of {_maxDocumentBytes} bytes.")
-            {
-                BytePosition = BytesConsumed,
-            };
-        }
-    }
-
-    private sealed class StreamBuffer(int size) : IDisposable
-    {
-        private byte[]? _buffer = ArrayPool<byte>.Shared.Rent(size);
-
-        public bool IsDisposed => _buffer is null;
-
-        public byte[] Buffer => _buffer ?? throw new ObjectDisposedException(nameof(StreamBuffer));
-
-        public void Dispose()
-        {
-            var buffer = _buffer;
-            _buffer = null;
-            if (buffer is not null)
-            {
-                ArrayPool<byte>.Shared.Return(buffer);
-            }
         }
     }
 
