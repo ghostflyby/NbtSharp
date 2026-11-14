@@ -91,9 +91,9 @@ public sealed class NbtLimitTests
             _ = new NbtSerializerOptions { NullValueHandling = (NbtNullValueHandling)42 });
 
         Assert.Throws<ArgumentOutOfRangeException>(() =>
-            new NbtReader([0x00], new NbtReaderOptions { RootFormat = (NbtRootFormat)42 }));
+            _ = new NbtReader([0x00], new NbtReaderOptions { RootFormat = (NbtRootFormat)42 }));
         Assert.Throws<ArgumentOutOfRangeException>(() =>
-            new NbtWriter(
+            _ = new NbtWriter(
                 new ArrayBufferWriter<byte>(),
                 new NbtWriterOptions { RootFormat = (NbtRootFormat)42 }));
     }
