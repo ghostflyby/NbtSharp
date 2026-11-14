@@ -46,7 +46,7 @@ public sealed class NbtWriterTests
         var buffer = new ArrayBufferWriter<byte>();
         var writer = new NbtWriter(buffer);
 
-        Throws<ArgumentNullException>(ref writer, static (ref NbtWriter value) => value.WriteString((string)null!));
+        Throws<ArgumentNullException>(ref writer, static (ref value) => value.WriteString(null!));
     }
 
     [Fact]
@@ -99,8 +99,8 @@ public sealed class NbtWriterTests
         writer.WriteStartCompound("root");
         writer.WriteStartList("Numbers", NbtTagType.Int, 2);
 
-        Throws<NbtException>(ref writer, static (ref NbtWriter value) => value.WriteEndList());
-        Throws<InvalidOperationException>(ref writer, static (ref NbtWriter value) => value.Complete());
+        Throws<NbtException>(ref writer, static (ref value) => value.WriteEndList());
+        Throws<InvalidOperationException>(ref writer, static (ref value) => value.Complete());
     }
 
     [Fact]
@@ -111,8 +111,8 @@ public sealed class NbtWriterTests
         writer.WriteStartCompound("root");
         writer.WriteStartList("Numbers", NbtTagType.Int, 1);
 
-        Throws<NbtException>(ref writer, static (ref NbtWriter value) => value.WriteString("wrong"));
-        Throws<InvalidOperationException>(ref writer, static (ref NbtWriter value) => value.Complete());
+        Throws<NbtException>(ref writer, static (ref value) => value.WriteString("wrong"));
+        Throws<InvalidOperationException>(ref writer, static (ref value) => value.Complete());
     }
 
     [Fact]
@@ -124,8 +124,8 @@ public sealed class NbtWriterTests
         writer.WriteStartList("Numbers", NbtTagType.Int, 1);
         writer.WriteInt32(1);
 
-        Throws<NbtException>(ref writer, static (ref NbtWriter value) => value.WriteInt32(2));
-        Throws<InvalidOperationException>(ref writer, static (ref NbtWriter value) => value.Complete());
+        Throws<NbtException>(ref writer, static (ref value) => value.WriteInt32(2));
+        Throws<InvalidOperationException>(ref writer, static (ref value) => value.Complete());
     }
 
     [Fact]
@@ -135,7 +135,7 @@ public sealed class NbtWriterTests
         var writer = new NbtWriter(buffer);
         writer.WriteStartCompound("root");
 
-        Throws<InvalidOperationException>(ref writer, static (ref NbtWriter value) => value.Complete());
+        Throws<InvalidOperationException>(ref writer, static (ref value) => value.Complete());
     }
 
     [Fact]
@@ -146,8 +146,8 @@ public sealed class NbtWriterTests
         writer.WriteStartCompound("root");
         writer.WriteStartCompound("nested");
 
-        Throws<NbtException>(ref writer, static (ref NbtWriter value) => value.WriteStartCompound("tooDeep"));
-        Throws<InvalidOperationException>(ref writer, static (ref NbtWriter value) => value.Complete());
+        Throws<NbtException>(ref writer, static (ref value) => value.WriteStartCompound("tooDeep"));
+        Throws<InvalidOperationException>(ref writer, static (ref value) => value.Complete());
     }
 
     [Fact]
@@ -157,7 +157,7 @@ public sealed class NbtWriterTests
         var writer = new NbtWriter(buffer);
         var name = new string('a', ushort.MaxValue + 1);
 
-        Throws<NbtException>(ref writer, (ref NbtWriter value) => value.WriteStartCompound(name));
+        Throws<NbtException>(ref writer, (ref value) => value.WriteStartCompound(name));
         Assert.Equal(0, buffer.WrittenCount);
     }
 
@@ -170,9 +170,9 @@ public sealed class NbtWriterTests
         var headerLength = buffer.WrittenCount;
         var value = new string('中', 21846); // 65538 bytes
 
-        Throws<NbtException>(ref writer, (ref NbtWriter inner) => inner.WriteString("v", value));
+        Throws<NbtException>(ref writer, (ref inner) => inner.WriteString("v", value));
         Assert.Equal(headerLength, buffer.WrittenCount);
-        Throws<InvalidOperationException>(ref writer, static (ref NbtWriter inner) => inner.Complete());
+        Throws<InvalidOperationException>(ref writer, static (ref inner) => inner.Complete());
     }
 
     [Fact]
@@ -207,7 +207,7 @@ public sealed class NbtWriterTests
         Assert.Equal(11, writer.BytesWritten);
         writer.Complete();
 
-        Throws<InvalidOperationException>(ref writer, static (ref NbtWriter value) => value.Complete());
+        Throws<InvalidOperationException>(ref writer, static (ref value) => value.Complete());
     }
 
     [Fact]
@@ -217,7 +217,7 @@ public sealed class NbtWriterTests
         var writer = new NbtWriter(buffer);
         writer.WriteStartCompound("root");
 
-        Throws<NbtException>(ref writer, static (ref NbtWriter value) =>
+        Throws<NbtException>(ref writer, static (ref value) =>
             value.WriteStartList("Empty", NbtTagType.End, 1));
     }
 
@@ -227,7 +227,7 @@ public sealed class NbtWriterTests
         var buffer = new ArrayBufferWriter<byte>();
         var writer = new NbtWriter(buffer);
 
-        Throws<InvalidOperationException>(ref writer, static (ref NbtWriter value) => value.WriteInt32(1));
+        Throws<InvalidOperationException>(ref writer, static (ref value) => value.WriteInt32(1));
     }
 
     [Fact]
@@ -238,7 +238,7 @@ public sealed class NbtWriterTests
         writer.WriteStartCompound("root");
         writer.WriteStartList("Values", NbtTagType.Int, 1);
 
-        Throws<InvalidOperationException>(ref writer, static (ref NbtWriter value) =>
+        Throws<InvalidOperationException>(ref writer, static (ref value) =>
             value.WriteInt32("element", 1));
     }
 
@@ -247,7 +247,7 @@ public sealed class NbtWriterTests
     {
         var writer = new NbtWriter();
 
-        Throws<InvalidOperationException>(ref writer, static (ref NbtWriter value) => value.WriteInt32("x", 1));
+        Throws<InvalidOperationException>(ref writer, static (ref value) => value.WriteInt32("x", 1));
     }
 
     [Fact]
@@ -256,21 +256,21 @@ public sealed class NbtWriterTests
         var buffer = new ArrayBufferWriter<byte>();
         var writer = new NbtWriter(buffer);
 
-        Throws<InvalidOperationException>(ref writer, static (ref NbtWriter value) => value.Complete());
+        Throws<InvalidOperationException>(ref writer, static (ref value) => value.Complete());
     }
 
     private delegate void NbtWriterAction(ref NbtWriter writer);
 
-    private static TException Throws<TException>(ref NbtWriter writer, NbtWriterAction action)
+    private static void Throws<TException>(ref NbtWriter writer, NbtWriterAction action)
         where TException : Exception
     {
         try
         {
             action(ref writer);
         }
-        catch (TException exception)
+        catch (TException)
         {
-            return exception;
+            return;
         }
         catch (Exception exception)
         {

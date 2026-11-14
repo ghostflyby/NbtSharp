@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Diagnostics.CodeAnalysis;
 
 namespace NbtSharp.Tests;
 
@@ -189,6 +190,7 @@ public sealed class NbtObjectMappingTests
         public int Count { get; init; }
     }
 
+    [SuppressMessage("ReSharper", "UnusedAutoPropertyAccessor.Local")]
     private sealed class RenamedDto
     {
         [NbtPropertyName("n")]
@@ -221,6 +223,7 @@ public sealed class NbtObjectMappingTests
 
     private sealed record RenamedRecord([property: NbtPropertyName("v")] int Value);
 
+    [SuppressMessage("ReSharper", "UnusedAutoPropertyAccessor.Local")]
     private sealed class SimpleDto
     {
         public int Health { get; set; }

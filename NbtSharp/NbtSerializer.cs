@@ -302,7 +302,6 @@ public static class NbtSerializer
                     }
 
                     reader.AdvanceTo(result.Buffer.Start, result.Buffer.End);
-                    continue;
                 }
             }
             catch

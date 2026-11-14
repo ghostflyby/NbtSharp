@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Diagnostics.CodeAnalysis;
 
 namespace NbtSharp.Tests;
 
@@ -111,6 +112,8 @@ public sealed class NbtErrorPathTests
         RejectDuplicateCompoundNames = rejectDuplicateCompoundNames,
     };
 
+    [SuppressMessage("ReSharper", "UnusedMember.Local")]
+    [SuppressMessage("ReSharper", "UnusedAutoPropertyAccessor.Local")]
     private sealed class PlayerDto
     {
         public string Name { get; set; } = "";
@@ -118,6 +121,8 @@ public sealed class NbtErrorPathTests
         public List<ItemDto> Items { get; set; } = [];
     }
 
+    [SuppressMessage("ReSharper", "UnusedMember.Local")]
+    [SuppressMessage("ReSharper", "UnusedAutoPropertyAccessor.Local")]
     private sealed class ItemDto
     {
         public string Id { get; set; } = "";
@@ -125,6 +130,8 @@ public sealed class NbtErrorPathTests
         public int Count { get; set; }
     }
 
+    [SuppressMessage("ReSharper", "UnusedMember.Local")]
+    [SuppressMessage("ReSharper", "UnusedAutoPropertyAccessor.Local")]
     private sealed class SimpleDto
     {
         public int X { get; set; }

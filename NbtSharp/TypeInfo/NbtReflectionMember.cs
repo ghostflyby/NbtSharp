@@ -1,6 +1,8 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 
+// The public NbtSharp namespace is intentional; the folder groups internal implementation.
+// ReSharper disable once CheckNamespace
 namespace NbtSharp;
 
 [RequiresUnreferencedCode("Reflection-based member access is not trimming-safe.")]

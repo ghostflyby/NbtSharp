@@ -1,6 +1,8 @@
 using System.Diagnostics.CodeAnalysis;
 using NbtSharp.Converters;
 
+// The public NbtSharp namespace is intentional; the folder groups internal implementation.
+// ReSharper disable once CheckNamespace
 namespace NbtSharp;
 
 internal static class NbtBuiltInConverters

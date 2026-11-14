@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace NbtSharp.Tests;
 
 public sealed class NbtConverterTests
@@ -421,6 +423,7 @@ public sealed class NbtConverterTests
 
     private sealed class IntHolder
     {
+        [SuppressMessage("ReSharper", "UnusedAutoPropertyAccessor.Local")]
         public int Value { get; set; }
     }
 

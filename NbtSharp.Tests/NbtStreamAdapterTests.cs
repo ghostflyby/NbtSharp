@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Diagnostics.CodeAnalysis;
 using System.IO.Pipelines;
 using Xunit.Sdk;
 
@@ -169,7 +170,7 @@ public sealed class NbtStreamAdapterTests
         Assert.Equal(42, reader.GetInt32());
         reader.Dispose();
 
-        Throws<ObjectDisposedException>(ref reader, static (ref NbtReader value) => value.Read());
+        Throws<ObjectDisposedException>(ref reader, static (ref value) => value.Read());
     }
 
     [Fact]
@@ -183,7 +184,7 @@ public sealed class NbtStreamAdapterTests
         reader.Dispose();
         reader.Dispose();
 
-        Throws<ObjectDisposedException>(ref reader, static (ref NbtReader value) => value.GetInt32());
+        Throws<ObjectDisposedException>(ref reader, static (ref value) => value.GetInt32());
     }
 
     [Fact]
@@ -482,16 +483,16 @@ public sealed class NbtStreamAdapterTests
 
     private delegate void NbtReaderAction(ref NbtReader reader);
 
-    private static TException Throws<TException>(ref NbtReader reader, NbtReaderAction action)
+    private static void Throws<TException>(ref NbtReader reader, NbtReaderAction action)
         where TException : Exception
     {
         try
         {
             action(ref reader);
         }
-        catch (TException exception)
+        catch (TException)
         {
-            return exception;
+            return;
         }
         catch (Exception exception)
         {
@@ -505,6 +506,7 @@ public sealed class NbtStreamAdapterTests
 
     private sealed class KnownMemberDto
     {
+        [SuppressMessage("ReSharper", "UnusedAutoPropertyAccessor.Local")]
         public int Known { get; set; }
     }
 

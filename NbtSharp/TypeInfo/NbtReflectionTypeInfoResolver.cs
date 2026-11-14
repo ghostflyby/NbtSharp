@@ -2,6 +2,8 @@ using System.Collections;
 using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 
+// The public NbtSharp namespace is intentional; the folder groups internal implementation.
+// ReSharper disable once CheckNamespace
 namespace NbtSharp;
 
 /// <summary>

@@ -86,9 +86,9 @@ public sealed class NbtLimitTests
     public void InvalidEnumOptionsAreRejected()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() =>
-            new NbtSerializerOptions { RootFormat = (NbtRootFormat)42 });
+            _ = new NbtSerializerOptions { RootFormat = (NbtRootFormat)42 });
         Assert.Throws<ArgumentOutOfRangeException>(() =>
-            new NbtSerializerOptions { NullValueHandling = (NbtNullValueHandling)42 });
+            _ = new NbtSerializerOptions { NullValueHandling = (NbtNullValueHandling)42 });
 
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             new NbtReader([0x00], new NbtReaderOptions { RootFormat = (NbtRootFormat)42 }));
@@ -101,9 +101,9 @@ public sealed class NbtLimitTests
     [Fact]
     public void NegativeLimitsAreRejected()
     {
-        Assert.Throws<ArgumentOutOfRangeException>(() => new NbtSerializerOptions { MaxDepth = -1 });
-        Assert.Throws<ArgumentOutOfRangeException>(() => new NbtSerializerOptions { MaxCollectionLength = -1 });
-        Assert.Throws<ArgumentOutOfRangeException>(() => new NbtSerializerOptions { MaxDocumentBytes = -1 });
+        Assert.Throws<ArgumentOutOfRangeException>(() => _ = new NbtSerializerOptions { MaxDepth = -1 });
+        Assert.Throws<ArgumentOutOfRangeException>(() => _ = new NbtSerializerOptions { MaxCollectionLength = -1 });
+        Assert.Throws<ArgumentOutOfRangeException>(() => _ = new NbtSerializerOptions { MaxDocumentBytes = -1 });
     }
 
     [Fact]
