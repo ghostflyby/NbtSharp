@@ -109,25 +109,30 @@ internal static class NbtCollectionReader
 
     private static bool TryGetKnownElementType(Type type, out NbtTagType tagType)
     {
+        if (type.IsEnum)
+        {
+            return TryGetKnownElementType(Enum.GetUnderlyingType(type), out tagType);
+        }
+
         if (type == typeof(sbyte) || type == typeof(byte) || type == typeof(bool))
         {
             tagType = NbtTagType.Byte;
             return true;
         }
 
-        if (type == typeof(short))
+        if (type == typeof(short) || type == typeof(ushort))
         {
             tagType = NbtTagType.Short;
             return true;
         }
 
-        if (type == typeof(int))
+        if (type == typeof(int) || type == typeof(uint))
         {
             tagType = NbtTagType.Int;
             return true;
         }
 
-        if (type == typeof(long))
+        if (type == typeof(long) || type == typeof(ulong))
         {
             tagType = NbtTagType.Long;
             return true;

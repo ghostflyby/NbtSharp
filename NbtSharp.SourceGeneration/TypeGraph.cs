@@ -230,9 +230,16 @@ internal sealed class TypeGraph
 
         if (named.TypeKind == TypeKind.Enum)
         {
+            var underlying = named.EnumUnderlyingType;
+            if (underlying is null || !IsSupportedEnumUnderlying(underlying.SpecialType))
+            {
+                ReportUnsupported(type, "has an unsupported enum underlying type", location);
+                return null;
+            }
+
             var enumEntry = new TypeEntry(type, TypeEntryKind.Enum)
             {
-                UnderlyingType = named.EnumUnderlyingType,
+                UnderlyingType = underlying,
             };
             Register(enumEntry);
             return enumEntry;
@@ -699,6 +706,17 @@ internal sealed class TypeGraph
             "global::NbtSharp.NbtCompound";
     }
 
+    private static bool IsSupportedEnumUnderlying(SpecialType type) =>
+        type is
+            SpecialType.System_SByte or
+            SpecialType.System_Byte or
+            SpecialType.System_Int16 or
+            SpecialType.System_UInt16 or
+            SpecialType.System_Int32 or
+            SpecialType.System_UInt32 or
+            SpecialType.System_Int64 or
+            SpecialType.System_UInt64;
+
     private static bool IsUnsupported(ITypeSymbol type, out string reason)
     {
         if (type.SpecialType is
@@ -727,12 +745,11 @@ internal sealed class TypeGraph
             return true;
         }
 
-        if (type.TypeKind is TypeKind.Interface or TypeKind.Enum or TypeKind.Delegate)
+        if (type.TypeKind is TypeKind.Interface or TypeKind.Delegate)
         {
             reason = type.TypeKind switch
             {
                 TypeKind.Interface => "is an interface",
-                TypeKind.Enum => "is an enum",
                 TypeKind.Delegate => "is a delegate",
                 _ => $"is a {type.TypeKind.ToString().ToLowerInvariant()}",
             };

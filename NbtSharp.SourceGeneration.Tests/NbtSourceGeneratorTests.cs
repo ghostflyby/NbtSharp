@@ -151,6 +151,76 @@ public sealed class NbtSourceGeneratorTests
             static reason => reason is IncrementalStepRunReason.New or IncrementalStepRunReason.Modified);
     }
 
+    [Fact]
+    public void InvalidatesPreparedContextWhenValueTypeKindChanges()
+    {
+        var parseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
+        var contextTree = CSharpSyntaxTree.ParseText(
+            """
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Dto))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+            """,
+            parseOptions,
+            cancellationToken: TestContext.Current.CancellationToken);
+        var structTree = CSharpSyntaxTree.ParseText(
+            """
+            internal record struct Dto
+            {
+                public int Value { get; init; }
+            }
+            """,
+            parseOptions,
+            cancellationToken: TestContext.Current.CancellationToken);
+        var compilation = CSharpCompilation.Create(
+            "GeneratorTests",
+            [contextTree, structTree],
+            References,
+            new CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable));
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            [new NbtSourceGenerator().AsSourceGenerator()],
+            parseOptions: parseOptions,
+            driverOptions: new GeneratorDriverOptions(
+                IncrementalGeneratorOutputKind.None,
+                trackIncrementalGeneratorSteps: true));
+
+        driver = driver.RunGenerators(compilation, TestContext.Current.CancellationToken);
+        var structSource = GetGeneratedSource(driver.GetRunResult());
+
+        var classTree = CSharpSyntaxTree.ParseText(
+            """
+            internal record class Dto
+            {
+                public int Value { get; init; }
+            }
+            """,
+            parseOptions,
+            cancellationToken: TestContext.Current.CancellationToken);
+        driver = driver.RunGenerators(
+            compilation.ReplaceSyntaxTree(structTree, classTree),
+            TestContext.Current.CancellationToken);
+
+        var result = driver.GetRunResult();
+        var classSource = GetGeneratedSource(result);
+
+        Assert.NotEqual(structSource, classSource);
+        Assert.Contains(
+            GetReasons(result, "NbtPreparedContexts"),
+            static reason => reason is IncrementalStepRunReason.New or IncrementalStepRunReason.Modified);
+    }
+
+    private static string GetGeneratedSource(GeneratorDriverRunResult result) =>
+        string.Join(
+            "\n",
+            result.Results
+                .SelectMany(static generatorResult => generatorResult.GeneratedSources)
+                .Select(static source => source.SourceText.ToString()));
+
     private static IReadOnlyList<IncrementalStepRunReason> GetReasons(
         GeneratorDriverRunResult result,
         string stepName)

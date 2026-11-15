@@ -1163,6 +1163,7 @@ internal sealed class ContextEmitter
             {
                 builder.Append((int)entry.Kind).Append('|')
                     .Append(entry.Type.ToDisplayString(FullyQualified)).Append('|')
+                    .Append(entry.Type.IsValueType).Append('|')
                     .Append(entry.AccessorName).Append('|')
                     .Append(entry.BackingFieldName).Append('|')
                     .Append(entry.ConverterName).Append('|')
@@ -1181,6 +1182,8 @@ internal sealed class ContextEmitter
                 builder.Append("ctor:")
                     .Append(objectModel.Constructor?.Symbol.OriginalDefinition.ToDisplayString(FullyQualified) ?? "")
                     .Append('|')
+                    .Append(objectModel.Type.IsValueType)
+                    .Append('|')
                     .Append(objectModel.UseConstructorAccessor)
                     .Append('\0');
                 AppendTypeParameters(builder, objectModel.Type.OriginalDefinition.TypeParameters);
@@ -1197,6 +1200,8 @@ internal sealed class ContextEmitter
                         .Append(member.ConstructorParameterIndex).Append('|')
                         .Append(member.IsRequired).Append('|')
                         .Append(member.SetterContainingType?.ToDisplayString(FullyQualified) ?? "")
+                        .Append('|')
+                        .Append(member.SetterContainingType?.IsValueType ?? false)
                         .Append('|')
                         .Append((member.Symbol as IPropertySymbol)?.OriginalDefinition.Type
                             .ToDisplayString(FullyQualified) ?? "")

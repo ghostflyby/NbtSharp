@@ -559,6 +559,12 @@ public sealed class NbtSourceGenerationTests
             UInt64 = SourceGenUInt64Enum.Max,
             Optional = SourceGenDefaultEnum.One,
             Values = [SourceGenDefaultEnum.Zero, SourceGenDefaultEnum.Two],
+            EnumArray = [SourceGenDefaultEnum.One, (SourceGenDefaultEnum)42],
+            EnumMap = new Dictionary<string, SourceGenDefaultEnum>
+            {
+                ["one"] = SourceGenDefaultEnum.One,
+            },
+            Undefined = (SourceGenDefaultEnum)42,
         };
         var reflectionOptions = new NbtSerializerOptions
         {
@@ -582,6 +588,9 @@ public sealed class NbtSourceGenerationTests
         Assert.Equal(SourceGenUInt64Enum.Max, copy.UInt64);
         Assert.Equal(SourceGenDefaultEnum.One, copy.Optional);
         Assert.Equal(value.Values, copy.Values);
+        Assert.Equal(value.EnumArray, copy.EnumArray);
+        Assert.Equal(SourceGenDefaultEnum.One, copy.EnumMap["one"]);
+        Assert.Equal((SourceGenDefaultEnum)42, copy.Undefined);
         Assert.Equal(NbtTagType.Byte, compound["SByte"].TagType);
         Assert.Equal(NbtTagType.Byte, compound["Byte"].TagType);
         Assert.Equal(NbtTagType.Short, compound["Int16"].TagType);
@@ -909,6 +918,12 @@ internal sealed class SourceGenEnumHolder
     public SourceGenDefaultEnum? Optional { get; set; }
 
     public List<SourceGenDefaultEnum> Values { get; set; } = [];
+
+    public SourceGenDefaultEnum[] EnumArray { get; set; } = [];
+
+    public Dictionary<string, SourceGenDefaultEnum> EnumMap { get; set; } = [];
+
+    public SourceGenDefaultEnum Undefined { get; set; }
 }
 #pragma warning restore IDE1006
 
