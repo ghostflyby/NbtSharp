@@ -19,6 +19,7 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
     private readonly int[] _constructorMemberIndexes;
     private readonly int[] _settableMemberIndexes;
     private readonly int[] _requiredMemberIndexes;
+    private readonly bool[] _isRequiredMember;
 
     public NbtReflectionObjectConverter(Type type)
     {
@@ -36,6 +37,12 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
 
         (_constructor, _constructorMemberIndexes) = SelectConstructor(type, _members);
         _requiredMemberIndexes = DiscoverRequiredMemberIndexes(type, _constructor);
+        _isRequiredMember = new bool[_members.Length];
+        foreach (var requiredIndex in _requiredMemberIndexes)
+        {
+            _isRequiredMember[requiredIndex] = true;
+        }
+
         var constructorBound = _constructorMemberIndexes.ToHashSet();
         _settableMemberIndexes = Enumerable.Range(0, _members.Length)
             .Where(index => !constructorBound.Contains(index) && _members[index].CanWrite)
@@ -137,12 +144,24 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
         }
 
         writer.WriteStartCompound();
-        foreach (var member in _members)
+        for (var i = 0; i < _members.Length; i++)
         {
+            var member = _members[i];
+            var memberValue = member.GetValue(value);
+            if (_isRequiredMember[i] && memberValue is null)
+            {
+                throw new NbtException(
+                    $"The required member '{member.Name}' cannot be null.")
+                {
+                    BytePosition = writer.BytesWritten,
+                    Path = "." + member.Name,
+                };
+            }
+
             NbtSerializer.SerializeMemberInternal(
                 ref writer,
                 member.Name,
-                member.GetValue(value),
+                memberValue,
                 member.Type,
                 options);
         }
@@ -276,7 +295,8 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
 
         foreach (var property in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
         {
-            if (property.GetMethod is null || property.GetIndexParameters().Length != 0)
+            if (property.GetMethod is not { IsPublic: true } ||
+                property.GetIndexParameters().Length != 0)
             {
                 continue;
             }
@@ -314,7 +334,12 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
         Type type,
         NbtReflectionMember[] members)
     {
-        var constructors = type.GetConstructors(BindingFlags.Public | BindingFlags.Instance);
+        var constructors = type
+            .GetConstructors(BindingFlags.Public | BindingFlags.Instance)
+            .Where(static constructor =>
+                constructor.GetParameters().All(static parameter =>
+                    !parameter.ParameterType.IsByRef))
+            .ToArray();
         var parameterless = constructors.FirstOrDefault(static constructor => constructor.GetParameters().Length == 0);
         if (parameterless is not null)
         {

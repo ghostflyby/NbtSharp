@@ -10,7 +10,7 @@ namespace NbtSharp;
 /// information, converters, and a <c>Default</c> singleton.
 /// </para>
 /// <para>
-/// The generated <see cref="Options"/> property binds the context as the type information resolver
+/// The inherited <see cref="Options"/> property binds the context as the type information resolver
 /// of a copy of the options passed to the constructor. When no options are passed, the context
 /// creates default options.
 /// </para>

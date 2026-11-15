@@ -185,6 +185,15 @@ public sealed class NbtObjectMappingTests
     }
 
     [Fact]
+    public void RefConstructorsAreNotUsable()
+    {
+        var options = ReflectionOptions();
+
+        Assert.Throws<NotSupportedException>(() =>
+            options.GetConverter(typeof(RefConstructorDto)));
+    }
+
+    [Fact]
     public void ReflectionResolverLeavesBuiltInTypesToTheBuiltInConverters()
     {
         var options = ReflectionOptions();
@@ -298,6 +307,16 @@ public sealed class NbtObjectMappingTests
 
         [NbtIgnore]
         public required string Ignored { get; init; }
+
+        public int Value { get; set; }
+    }
+
+    private sealed class RefConstructorDto
+    {
+        public RefConstructorDto(ref int value)
+        {
+            _ = value;
+        }
 
         public int Value { get; set; }
     }

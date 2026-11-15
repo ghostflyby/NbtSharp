@@ -87,6 +87,16 @@ internal sealed class ContextEmitter
             return false;
         }
 
+        if (contextType.IsFileLocal)
+        {
+            Report(
+                Diagnostics.ContextInvalid,
+                location,
+                contextType.ToDisplayString(),
+                "must not be file-local");
+            return false;
+        }
+
         if (!contextType.DeclaringSyntaxReferences.Any(reference =>
                 reference.GetSyntax() is TypeDeclarationSyntax declaration &&
                 declaration.Modifiers.Any(SyntaxKind.PartialKeyword)))
@@ -125,6 +135,20 @@ internal sealed class ContextEmitter
             return false;
         }
 
+        if (!contextType.InstanceConstructors.Any(static constructor =>
+                !constructor.IsStatic &&
+                (constructor.Parameters.Length == 0 ||
+                 constructor.Parameters.All(static parameter =>
+                     parameter.IsOptional || parameter.IsParams))))
+        {
+            Report(
+                Diagnostics.ContextInvalid,
+                location,
+                contextType.ToDisplayString(),
+                "must declare a parameterless constructor");
+            return false;
+        }
+
         return true;
     }
 
@@ -136,6 +160,7 @@ internal sealed class ContextEmitter
             "Default",
             "Options",
             "GetTypeInfo",
+            contextType.Name,
         };
 
         foreach (var member in contextType.GetMembers())
@@ -146,7 +171,8 @@ internal sealed class ContextEmitter
             }
         }
 
-        if (contextType.GetMembers("Default").Any(static member => !member.IsImplicitlyDeclared))
+        if (contextType.Name == "Default" ||
+            contextType.GetMembers("Default").Any(static member => !member.IsImplicitlyDeclared))
         {
             Report(
                 Diagnostics.GeneratedNameConflict,
@@ -160,8 +186,10 @@ internal sealed class ContextEmitter
         for (var index = 0; index < _graph.Entries.Count; index++)
         {
             var entry = _graph.Entries[index];
-            entry.BackingFieldName = $"__typeInfo{index}";
-            entry.ConverterName = $"Converter_{index}";
+            entry.BackingFieldName = MakeUnique($"__typeInfo{index}", used);
+            used.Add(entry.BackingFieldName);
+            entry.ConverterName = MakeUnique($"Converter_{index}", used);
+            used.Add(entry.ConverterName);
 
             if (!entry.IsRoot)
             {
@@ -172,22 +200,15 @@ internal sealed class ContextEmitter
 
             var explicitName = entry.PublicPropertyName;
             var name = explicitName ?? CreateDefaultPropertyName(entry.Type);
-            if (explicitName is not null)
+            if (!SyntaxFacts.IsValidIdentifier(name) || used.Contains(name))
             {
-                if (!SyntaxFacts.IsValidIdentifier(name) || used.Contains(name))
-                {
-                    Report(
-                        Diagnostics.GeneratedNameConflict,
-                        location,
-                        contextType.ToDisplayString(),
-                        name);
-                    _hasNameErrors = true;
-                    return;
-                }
-            }
-            else
-            {
-                name = MakeUnique(name, used);
+                Report(
+                    Diagnostics.GeneratedNameConflict,
+                    location,
+                    contextType.ToDisplayString(),
+                    name);
+                _hasNameErrors = true;
+                return;
             }
 
             entry.PublicPropertyName = name;
@@ -225,7 +246,7 @@ internal sealed class ContextEmitter
 
         for (var index = 0; index < _graph.Entries.Count; index++)
         {
-            EmitTypeInfoProperty(_graph.Entries[index], index);
+            EmitTypeInfoProperty(_graph.Entries[index], index, contextType);
         }
 
         EmitGetTypeInfo();
@@ -249,10 +270,18 @@ internal sealed class ContextEmitter
         }
     }
 
-    private void EmitTypeInfoProperty(TypeEntry entry, int index)
+    private void EmitTypeInfoProperty(
+        TypeEntry entry,
+        int index,
+        INamedTypeSymbol contextType)
     {
         var typeName = Fq(entry.Type);
-        var visibility = entry.IsRoot ? "public" : "private";
+        var visibility = !entry.IsRoot
+            ? "private"
+            : contextType.DeclaredAccessibility == Accessibility.Public &&
+              !IsPubliclyAccessible(entry.Type)
+                ? "internal"
+                : "public";
         _writer.WriteLine($"private global::NbtSharp.NbtTypeInfo<{typeName}>? {entry.BackingFieldName};");
         _writer.WriteLine(
             $"{visibility} global::NbtSharp.NbtTypeInfo<{typeName}> {entry.AccessorName} =>");
@@ -692,6 +721,17 @@ internal sealed class ContextEmitter
         {
             var nbtName = SymbolDisplay.FormatLiteral(member.NbtName, quote: true);
             var value = $"value.{EscapeIdentifier(member.ClrName)}";
+            if (member.IsRequired && CanBeNull(member.Type))
+            {
+                _writer.WriteLine($"if ({value} is null)");
+                _writer.WriteLine("{");
+                _writer.Indent();
+                _writer.WriteLine(
+                    $"throw {MetadataServices}.NullRequiredMember(writer, {nbtName});");
+                _writer.Outdent();
+                _writer.WriteLine("}");
+            }
+
             var scalarKind = GetScalarKind(member.Type);
             if (scalarKind != ScalarKind.None)
             {
@@ -810,7 +850,44 @@ internal sealed class ContextEmitter
         _ => throw new InvalidOperationException($"Unsupported scalar kind {kind}."),
     };
 
+    private static bool CanBeNull(ITypeSymbol type) =>
+        type.IsReferenceType ||
+        type is INamedTypeSymbol
+        {
+            OriginalDefinition.SpecialType: SpecialType.System_Nullable_T,
+        };
+
     private static string Fq(ITypeSymbol type) => type.ToDisplayString(FullyQualified);
+
+    private static bool IsPubliclyAccessible(ITypeSymbol type) => type switch
+    {
+        IArrayTypeSymbol array => IsPubliclyAccessible(array.ElementType),
+        INamedTypeSymbol named => IsPubliclyAccessible(named),
+        _ => false,
+    };
+
+    private static bool IsPubliclyAccessible(INamedTypeSymbol type)
+    {
+        if (type.DeclaredAccessibility != Accessibility.Public)
+        {
+            return false;
+        }
+
+        if (type.ContainingType is not null && !IsPubliclyAccessible(type.ContainingType))
+        {
+            return false;
+        }
+
+        foreach (var argument in type.TypeArguments)
+        {
+            if (!IsPubliclyAccessible(argument))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     private static string EscapeIdentifier(string name) =>
         SyntaxFacts.GetKeywordKind(name) == SyntaxKind.None ? name : "@" + name;

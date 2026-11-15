@@ -479,6 +479,48 @@ public sealed class NbtSourceGenerationTests
     }
 
     [Fact]
+    public void RequiredMembersCannotBeNull()
+    {
+        var context = SourceGenerationContext.Default;
+        var value = new SourceGenRequiredNullable { Name = null };
+        var reflectionOptions = new NbtSerializerOptions
+        {
+            TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
+        };
+
+        var generated = Assert.Throws<NbtException>(() =>
+            NbtSerializer.Serialize(value, context.SourceGenRequiredNullable, "root"));
+        var reflected = Assert.Throws<NbtException>(() =>
+            NbtSerializer.Serialize(value, "root", reflectionOptions));
+
+        Assert.Equal(reflected.Message, generated.Message);
+        Assert.Equal(reflected.Path, generated.Path);
+    }
+
+    [Fact]
+    public void PrivateGettersAreNotMapped()
+    {
+        var context = SourceGenerationContext.Default;
+        var value = new SourceGenPrivateGetter { Visible = 1, Hidden = 2 };
+        var reflectionOptions = new NbtSerializerOptions
+        {
+            TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
+        };
+
+        var generatedRoot = (NbtCompound)NbtSerializer
+            .Deserialize(NbtSerializer.Serialize(value, context.SourceGenPrivateGetter, "root"))
+            .Value.Value!;
+        var reflectedRoot = (NbtCompound)NbtSerializer
+            .Deserialize(NbtSerializer.Serialize(value, "root", reflectionOptions))
+            .Value.Value!;
+
+        Assert.True(generatedRoot.ContainsKey("Visible"));
+        Assert.False(generatedRoot.ContainsKey("Hidden"));
+        Assert.True(reflectedRoot.ContainsKey("Visible"));
+        Assert.False(reflectedRoot.ContainsKey("Hidden"));
+    }
+
+    [Fact]
     public void MissingRequiredMembersThrow()
     {
         var context = SourceGenerationContext.Default;
@@ -580,6 +622,8 @@ public sealed class NbtSourceGenerationTests
 [NbtSerializable(typeof(SourceGenDerived))]
 [NbtSerializable(typeof(SourceGenItem[]))]
 [NbtSerializable(typeof(SourceGenScalars))]
+[NbtSerializable(typeof(SourceGenPrivateGetter))]
+[NbtSerializable(typeof(SourceGenRequiredNullable))]
 internal partial class SourceGenerationContext : NbtSerializerContext
 {
     public SourceGenerationContext()
@@ -735,6 +779,18 @@ internal sealed class SourceGenScalars
     public bool Boolean { get; set; }
 
     public string Text { get; set; } = "";
+}
+
+internal sealed class SourceGenPrivateGetter
+{
+    public int Visible { get; set; }
+
+    public int Hidden { private get; set; }
+}
+
+internal sealed class SourceGenRequiredNullable
+{
+    public required string? Name { get; init; }
 }
 
 internal sealed class PlusOneInt32Converter : NbtConverter<int>

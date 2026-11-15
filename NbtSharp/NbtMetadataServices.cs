@@ -127,6 +127,17 @@ public static class NbtMetadataServices
     public static void PrependPath(NbtException exception, string? segment) =>
         NbtSerializer.PrependPath(exception, segment);
 
+    /// <summary>Creates the exception for a required compound member whose value is null.</summary>
+    /// <param name="writer">The writer at the current compound member.</param>
+    /// <param name="name">The required member name.</param>
+    /// <returns>The exception.</returns>
+    public static NbtException NullRequiredMember(NbtWriter writer, string name) =>
+        new($"The required member '{name}' cannot be null.")
+        {
+            BytePosition = writer.BytesWritten,
+            Path = "." + name,
+        };
+
     /// <summary>Creates the exception for an unexpected tag.</summary>
     /// <param name="reader">The reader at the unexpected token.</param>
     /// <param name="expected">The expected tag type.</param>

@@ -119,10 +119,11 @@ fast path for the operation. Generated source and diagnostics are cached per con
 compilation changes do not re-add unchanged sources.
 
 Required members are strict: every required member that is part of the mapping must be present in
-the compound, otherwise deserialization throws `NbtException`. A required member that is excluded
-from the mapping requires the selected constructor to be marked with `[SetsRequiredMembers]`;
-otherwise the source generator reports `NBTSG015` and the reflection resolver throws
-`NotSupportedException`.
+the compound, otherwise deserialization throws `NbtException`. A required mapped member whose value
+is null cannot be serialized and throws regardless of `NullValueHandling`. A required member that is
+excluded from the mapping requires the selected constructor to be marked with
+`[SetsRequiredMembers]`; otherwise the source generator reports `NBTSG015` and the reflection
+resolver throws `NotSupportedException`.
 
 ## Streaming
 

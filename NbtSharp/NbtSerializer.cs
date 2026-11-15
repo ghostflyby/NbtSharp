@@ -258,7 +258,7 @@ public static class NbtSerializer
     /// </remarks>
     [RequiresUnreferencedCode("Converter resolution may use reflection or runtime generic construction.")]
     [RequiresDynamicCode("Converter resolution may use runtime generic construction.")]
-    public static Task<T> DeserializeAsync<T>(
+    public static async Task<T> DeserializeAsync<T>(
         PipeReader reader,
         NbtSerializerOptions? options = null,
         CancellationToken cancellationToken = default)
@@ -268,11 +268,11 @@ public static class NbtSerializer
         var converter = typeof(T) == typeof(NbtRoot)
             ? options.GetConverter(typeof(NbtValue))
             : options.GetConverter(typeof(T));
-        return DeserializeAsyncCore<T>(
+        return await DeserializeAsyncCore<T>(
             reader,
             converter,
             options,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -284,7 +284,7 @@ public static class NbtSerializer
     /// <param name="typeInfo">The type information that supplies the root converter and options.</param>
     /// <param name="cancellationToken">The token used to cancel the read.</param>
     /// <returns>A task that yields the decoded value.</returns>
-    public static Task<T> DeserializeAsync<T>(
+    public static async Task<T> DeserializeAsync<T>(
         PipeReader reader,
         NbtTypeInfo<T> typeInfo,
         CancellationToken cancellationToken = default)
@@ -292,11 +292,11 @@ public static class NbtSerializer
         ArgumentNullException.ThrowIfNull(reader);
         ArgumentNullException.ThrowIfNull(typeInfo);
         ValidateTypeInfo<T>(typeInfo);
-        return DeserializeAsyncCore<T>(
+        return await DeserializeAsyncCore<T>(
             reader,
             GetEffectiveConverter(typeInfo),
             typeInfo.Options,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task<T> DeserializeAsyncCore<T>(

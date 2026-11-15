@@ -506,7 +506,8 @@ internal sealed class TypeGraph
         var constructors = type.InstanceConstructors
             .Where(static ctor =>
                 !ctor.IsStatic &&
-                ctor.DeclaredAccessibility == Accessibility.Public)
+                ctor.DeclaredAccessibility == Accessibility.Public &&
+                ctor.Parameters.All(static parameter => parameter.RefKind == RefKind.None))
             .ToArray();
 
         var parameterless = constructors.FirstOrDefault(static ctor => ctor.Parameters.Length == 0);
@@ -717,7 +718,13 @@ internal sealed class TypeGraph
 
         if (type.TypeKind is TypeKind.Interface or TypeKind.Enum or TypeKind.Delegate)
         {
-            reason = $"is a {type.TypeKind.ToString().ToLowerInvariant()}";
+            reason = type.TypeKind switch
+            {
+                TypeKind.Interface => "is an interface",
+                TypeKind.Enum => "is an enum",
+                TypeKind.Delegate => "is a delegate",
+                _ => $"is a {type.TypeKind.ToString().ToLowerInvariant()}",
+            };
             return true;
         }
 
@@ -803,6 +810,11 @@ internal sealed class TypeGraph
 
     private bool IsAccessible(INamedTypeSymbol named)
     {
+        if (named.IsFileLocal)
+        {
+            return false;
+        }
+
         switch (named.DeclaredAccessibility)
         {
             case Accessibility.Public:

@@ -153,6 +153,171 @@ public sealed class NbtSourceGeneratorTests
     }
 
     [Fact]
+    public void SupportsPublicContextWithInternalRootTypes()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(InternalDto))]
+            public partial class PublicContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class InternalDto
+            {
+                public int Value { get; set; }
+            }
+            """);
+
+        AssertNoErrors(result);
+        Assert.Contains(
+            "internal global::NbtSharp.NbtTypeInfo<global::InternalDto> InternalDto",
+            result.GeneratedSource,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ReportsDefaultPropertyNameConflicts()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(First.Player))]
+            [NbtSerializable(typeof(Second.Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            namespace First
+            {
+                internal sealed class Player
+                {
+                    public int Value { get; set; }
+                }
+            }
+
+            namespace Second
+            {
+                internal sealed class Player
+                {
+                    public int Value { get; set; }
+                }
+            }
+            """);
+
+        Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG008");
+    }
+
+    [Fact]
+    public void ReportsReservedGeneratedNameConflicts()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Dto), TypeInfoPropertyName = "__typeInfo0")]
+            public partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            public sealed class Dto
+            {
+                public int Value { get; set; }
+            }
+            """);
+
+        Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG008");
+    }
+
+    [Fact]
+    public void ReportsDefaultContextNameConflict()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Dto))]
+            public partial class Default : NbtSerializerContext
+            {
+            }
+
+            public sealed class Dto
+            {
+                public int Value { get; set; }
+            }
+            """);
+
+        Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG008");
+    }
+
+    [Fact]
+    public void ReportsFileLocalRootTypes()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(FileDto))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            file sealed class FileDto
+            {
+                public int Value { get; set; }
+            }
+            """);
+
+        Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG006");
+    }
+
+    [Fact]
+    public void ReportsContextWithoutParameterlessConstructor()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Dto))]
+            public partial class TestContext : NbtSerializerContext
+            {
+                public TestContext(NbtSerializerOptions options)
+                    : base(options)
+                {
+                }
+            }
+
+            public sealed class Dto
+            {
+                public int Value { get; set; }
+            }
+            """);
+
+        Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG002");
+    }
+
+    [Fact]
+    public void ReportsRefConstructorAsUnusable()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Dto))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Dto
+            {
+                public Dto(ref int value)
+                {
+                    _ = value;
+                }
+
+                public int Value { get; set; }
+            }
+            """);
+
+        Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG004");
+    }
+
+    [Fact]
     public void GeneratesCompilableCodeForASupportedType()
     {
         var result = Run("""
