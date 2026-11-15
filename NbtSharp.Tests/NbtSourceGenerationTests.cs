@@ -337,7 +337,8 @@ public sealed class NbtSourceGenerationTests
     }
 
     [Fact]
-    public async Task SupportsAsyncTypeInfoOverloads()    {
+    public async Task SupportsAsyncTypeInfoOverloads()
+    {
         var context = SourceGenerationContext.Default;
         var value = new SourceGenItem { Id = "async", Count = 9 };
         var data = NbtSerializer.Serialize(value, context.SourceGenItem, "root");
@@ -708,10 +709,12 @@ internal sealed class SourceGenExplicit
     public int Value { get; set; }
 }
 
+#pragma warning disable IDE1006 // Intentionally tests a C# keyword member name.
 internal sealed class SourceGenKeywords
 {
     public int @class { get; set; }
 }
+#pragma warning restore IDE1006
 
 internal sealed class SourceGenScalars
 {

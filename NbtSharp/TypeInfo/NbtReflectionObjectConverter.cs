@@ -221,7 +221,7 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
 
     private static List<MemberInfo> DiscoverRequiredMembers(Type type)
     {
-        const BindingFlags Flags =
+        const BindingFlags flags =
             BindingFlags.Public |
             BindingFlags.NonPublic |
             BindingFlags.Instance |
@@ -231,7 +231,7 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
         var seen = new HashSet<string>(StringComparer.Ordinal);
         for (var current = type; current is not null; current = current.BaseType)
         {
-            foreach (var property in current.GetProperties(Flags))
+            foreach (var property in current.GetProperties(flags))
             {
                 if (!property.IsDefined(
                         typeof(System.Runtime.CompilerServices.RequiredMemberAttribute),
@@ -247,7 +247,7 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
                 }
             }
 
-            foreach (var field in current.GetFields(Flags))
+            foreach (var field in current.GetFields(flags))
             {
                 if (!field.IsDefined(
                         typeof(System.Runtime.CompilerServices.RequiredMemberAttribute),
