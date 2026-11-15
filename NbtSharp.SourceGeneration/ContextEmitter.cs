@@ -12,33 +12,34 @@ internal sealed class ContextEmitter
 
     private static readonly SymbolDisplayFormat FullyQualified = SymbolDisplayFormat.FullyQualifiedFormat;
 
-    private readonly SourceProductionContext _context;
+    private readonly Action<Diagnostic> _reportDiagnostic;
     private readonly ContextModel _model;
     private readonly CodeWriter _writer = new();
     private TypeGraph _graph = null!;
     private bool _hasNameErrors;
 
-    public ContextEmitter(SourceProductionContext context, ContextModel model)
+    public ContextEmitter(ContextModel model, Action<Diagnostic> reportDiagnostic)
     {
-        _context = context;
         _model = model;
+        _reportDiagnostic = reportDiagnostic;
     }
 
-    public void Emit()
+    public string Emit(out string hintName)
     {
         var contextType = _model.ContextType;
+        hintName = GetHintName(contextType);
         if (!Validate(contextType))
         {
-            return;
+            return "";
         }
 
-        _graph = new TypeGraph(contextType.ContainingAssembly, _context.ReportDiagnostic);
+        _graph = new TypeGraph(contextType.ContainingAssembly, _reportDiagnostic);
         foreach (var root in _model.Roots)
         {
             var entry = _graph.AddRoot(root.Type, root.PropertyName, root.Location);
             if (entry is null && !_graph.HasErrors)
             {
-                _context.ReportDiagnostic(Diagnostic.Create(
+                _reportDiagnostic(Diagnostic.Create(
                     Diagnostics.BuiltInRoot,
                     root.Location,
                     root.Type.ToDisplayString(FullyQualified)));
@@ -47,18 +48,17 @@ internal sealed class ContextEmitter
 
         if (_graph.HasErrors)
         {
-            return;
+            return "";
         }
 
         AssignNames(contextType);
         if (_hasNameErrors || _graph.HasErrors)
         {
-            return;
+            return "";
         }
 
         WriteSource(contextType);
-        var hintName = GetHintName(contextType);
-        _context.AddSource(hintName, _writer.ToString());
+        return _writer.ToString();
     }
 
     private bool Validate(INamedTypeSymbol contextType)
@@ -461,10 +461,23 @@ internal sealed class ContextEmitter
             _writer.WriteLine($"var __p{member.Index} = false;");
         }
 
+        var hasDirectMembers = model.Members.Any(
+            static member => GetScalarKind(member.Type) != ScalarKind.None);
+        if (hasDirectMembers)
+        {
+            _writer.WriteLine("var __direct = options.Converters.Count == 0;");
+            _writer.WriteLine("string? __path = null;");
+        }
+
         _writer.WriteLine();
         _writer.WriteLine("while (reader.Read())");
         _writer.WriteLine("{");
         _writer.Indent();
+        if (hasDirectMembers)
+        {
+            _writer.WriteLine("__path = null;");
+        }
+
         _writer.WriteLine("if (reader.TokenType == global::NbtSharp.NbtTokenType.EndCompound)");
         _writer.WriteLine("{");
         _writer.Indent();
@@ -483,12 +496,21 @@ internal sealed class ContextEmitter
         _writer.WriteLine("}");
         _writer.WriteLine();
 
+        if (hasDirectMembers)
+        {
+            _writer.WriteLine("try");
+            _writer.WriteLine("{");
+            _writer.Indent();
+        }
+
         _writer.WriteLine("switch (__name)");
         _writer.WriteLine("{");
         _writer.Indent();
         foreach (var member in model.Members)
         {
             var nbtName = SymbolDisplay.FormatLiteral(member.NbtName, quote: true);
+            var path = SymbolDisplay.FormatLiteral("." + member.NbtName, quote: true);
+            var scalarKind = GetScalarKind(member.Type);
             _writer.WriteLine($"case {nbtName}:");
             _writer.Indent();
             _writer.WriteLine(
@@ -499,9 +521,32 @@ internal sealed class ContextEmitter
                 $"throw global::NbtSharp.NbtMetadataServices.DuplicateMember(reader, {nbtName});");
             _writer.Outdent();
             _writer.WriteLine("}");
+
+            if (scalarKind != ScalarKind.None)
+            {
+                _writer.WriteLine("if (__direct)");
+                _writer.WriteLine("{");
+                _writer.Indent();
+                _writer.WriteLine($"__path = {path};");
+                _writer.WriteLine($"__v{member.Index} = {GetReadExpression(scalarKind)};");
+                _writer.WriteLine("__path = null;");
+                _writer.Outdent();
+                _writer.WriteLine("}");
+                _writer.WriteLine("else");
+                _writer.WriteLine("{");
+                _writer.Indent();
+            }
+
             _writer.WriteLine(
                 $"__v{member.Index} = global::NbtSharp.NbtMetadataServices.ReadValue<{Fq(member.Type)}>(" +
-                $"ref reader, options, {SymbolDisplay.FormatLiteral("." + member.NbtName, quote: true)});");
+                $"ref reader, options, {path});");
+
+            if (scalarKind != ScalarKind.None)
+            {
+                _writer.Outdent();
+                _writer.WriteLine("}");
+            }
+
             _writer.WriteLine($"__p{member.Index} = true;");
             _writer.WriteLine("break;");
             _writer.Outdent();
@@ -514,6 +559,20 @@ internal sealed class ContextEmitter
         _writer.Outdent();
         _writer.Outdent();
         _writer.WriteLine("}");
+
+        if (hasDirectMembers)
+        {
+            _writer.Outdent();
+            _writer.WriteLine("}");
+            _writer.WriteLine("catch (global::NbtSharp.NbtException __ex)");
+            _writer.WriteLine("{");
+            _writer.Indent();
+            _writer.WriteLine(
+                "global::NbtSharp.NbtMetadataServices.PrependPath(__ex, __path);");
+            _writer.WriteLine("throw;");
+            _writer.Outdent();
+            _writer.WriteLine("}");
+        }
 
         _writer.Outdent();
         _writer.WriteLine("}");
@@ -599,13 +658,67 @@ internal sealed class ContextEmitter
             "global::NbtSharp.NbtSerializerOptions options)");
         _writer.WriteLine("{");
         _writer.Indent();
+        var hasDirectMembers = model.Members.Any(
+            static member => GetScalarKind(member.Type) != ScalarKind.None);
         _writer.WriteLine("writer.WriteStartCompound();");
+        if (hasDirectMembers)
+        {
+            _writer.WriteLine("var __direct = options.Converters.Count == 0;");
+            _writer.WriteLine("string? __path = null;");
+            _writer.WriteLine("try");
+            _writer.WriteLine("{");
+            _writer.Indent();
+        }
+
         foreach (var member in model.Members)
         {
             var nbtName = SymbolDisplay.FormatLiteral(member.NbtName, quote: true);
+            var value = $"value.{EscapeIdentifier(member.ClrName)}";
+            var scalarKind = GetScalarKind(member.Type);
+            if (scalarKind != ScalarKind.None)
+            {
+                var path = SymbolDisplay.FormatLiteral("." + member.NbtName, quote: true);
+                _writer.WriteLine("if (__direct)");
+                _writer.WriteLine("{");
+                _writer.Indent();
+                _writer.WriteLine($"__path = {path};");
+                _writer.WriteLine(GetWriteStatement(scalarKind, nbtName, value));
+                _writer.WriteLine("__path = null;");
+                _writer.Outdent();
+                _writer.WriteLine("}");
+                _writer.WriteLine("else");
+                _writer.WriteLine("{");
+                _writer.Indent();
+                _writer.WriteLine("__path = null;");
+                _writer.WriteLine(
+                    $"{MetadataServices}.WriteMember(ref writer, {nbtName}, {value}, options);");
+                _writer.Outdent();
+                _writer.WriteLine("}");
+            }
+            else
+            {
+                if (hasDirectMembers)
+                {
+                    _writer.WriteLine("__path = null;");
+                }
+
+                _writer.WriteLine(
+                    $"{MetadataServices}.WriteMember(ref writer, {nbtName}, {value}, options);");
+            }
+        }
+
+        if (hasDirectMembers)
+        {
+            _writer.Outdent();
+            _writer.WriteLine("}");
+            _writer.WriteLine("catch (global::NbtSharp.NbtException __ex)");
+            _writer.WriteLine("{");
+            _writer.Indent();
             _writer.WriteLine(
-                $"{MetadataServices}.WriteMember(ref writer, {nbtName}, " +
-                $"value.{EscapeIdentifier(member.ClrName)}, options);");
+                "global::NbtSharp.NbtMetadataServices.PrependPath(__ex, __path);");
+            _writer.WriteLine("throw;");
+            _writer.Outdent();
+            _writer.WriteLine("}");
         }
 
         _writer.WriteLine("writer.WriteEndCompound();");
@@ -629,7 +742,55 @@ internal sealed class ContextEmitter
     }
 
     private void Report(DiagnosticDescriptor descriptor, Location? location, params object[] arguments) =>
-        _context.ReportDiagnostic(Diagnostic.Create(descriptor, location, arguments));
+        _reportDiagnostic(Diagnostic.Create(descriptor, location, arguments));
+
+    private enum ScalarKind
+    {
+        None,
+        SByte,
+        Byte,
+        Int16,
+        Int32,
+        Int64,
+        Single,
+        Double,
+    }
+
+    private static ScalarKind GetScalarKind(ITypeSymbol type) => type.SpecialType switch
+    {
+        SpecialType.System_SByte => ScalarKind.SByte,
+        SpecialType.System_Byte => ScalarKind.Byte,
+        SpecialType.System_Int16 => ScalarKind.Int16,
+        SpecialType.System_Int32 => ScalarKind.Int32,
+        SpecialType.System_Int64 => ScalarKind.Int64,
+        SpecialType.System_Single => ScalarKind.Single,
+        SpecialType.System_Double => ScalarKind.Double,
+        _ => ScalarKind.None,
+    };
+
+    private static string GetReadExpression(ScalarKind kind) => kind switch
+    {
+        ScalarKind.SByte => "reader.GetSByte()",
+        ScalarKind.Byte => "unchecked((byte)reader.GetSByte())",
+        ScalarKind.Int16 => "reader.GetInt16()",
+        ScalarKind.Int32 => "reader.GetInt32()",
+        ScalarKind.Int64 => "reader.GetInt64()",
+        ScalarKind.Single => "reader.GetSingle()",
+        ScalarKind.Double => "reader.GetDouble()",
+        _ => throw new InvalidOperationException($"Unsupported scalar kind {kind}."),
+    };
+
+    private static string GetWriteStatement(ScalarKind kind, string name, string value) => kind switch
+    {
+        ScalarKind.SByte => $"writer.WriteSByte({name}, {value});",
+        ScalarKind.Byte => $"writer.WriteSByte({name}, unchecked((sbyte){value}));",
+        ScalarKind.Int16 => $"writer.WriteInt16({name}, {value});",
+        ScalarKind.Int32 => $"writer.WriteInt32({name}, {value});",
+        ScalarKind.Int64 => $"writer.WriteInt64({name}, {value});",
+        ScalarKind.Single => $"writer.WriteSingle({name}, {value});",
+        ScalarKind.Double => $"writer.WriteDouble({name}, {value});",
+        _ => throw new InvalidOperationException($"Unsupported scalar kind {kind}."),
+    };
 
     private static string Fq(ITypeSymbol type) => type.ToDisplayString(FullyQualified);
 

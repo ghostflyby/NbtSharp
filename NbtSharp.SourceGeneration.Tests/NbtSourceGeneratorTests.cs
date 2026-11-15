@@ -9,6 +9,150 @@ public sealed class NbtSourceGeneratorTests
     private static readonly ImmutableArray<MetadataReference> References = GetReferences();
 
     [Fact]
+    public void CachedContextsKeepDiagnostics()
+    {
+        var parseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
+        var tree = CSharpSyntaxTree.ParseText(
+            """
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Player
+            {
+                public decimal Amount { get; set; }
+            }
+            """,
+            parseOptions,
+            cancellationToken: TestContext.Current.CancellationToken);
+        var compilation = CSharpCompilation.Create(
+            "GeneratorTests",
+            [tree],
+            References,
+            new CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable));
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            [new NbtSourceGenerator().AsSourceGenerator()],
+            parseOptions: parseOptions,
+            driverOptions: new GeneratorDriverOptions(
+                IncrementalGeneratorOutputKind.None,
+                trackIncrementalGeneratorSteps: true));
+
+        driver = driver.RunGenerators(compilation, TestContext.Current.CancellationToken);
+        Assert.Contains(
+            driver.GetRunResult().Diagnostics,
+            static diagnostic => diagnostic.Id == "NBTSG003");
+
+        var unrelatedTree = CSharpSyntaxTree.ParseText(
+            "internal sealed class Unrelated { public int Value { get; set; } }",
+            parseOptions,
+            cancellationToken: TestContext.Current.CancellationToken);
+        driver = driver.RunGenerators(
+            compilation.AddSyntaxTrees(unrelatedTree),
+            TestContext.Current.CancellationToken);
+
+        Assert.Contains(
+            driver.GetRunResult().Diagnostics,
+            static diagnostic => diagnostic.Id == "NBTSG003");
+    }
+
+    [Fact]
+    public void CachesGeneratedContextsForUnrelatedChanges()
+    {
+        var parseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
+        var sourceTree = CSharpSyntaxTree.ParseText(
+            """
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Player
+            {
+                public int Health { get; set; }
+            }
+            """,
+            parseOptions,
+            cancellationToken: TestContext.Current.CancellationToken);
+        var compilation = CSharpCompilation.Create(
+            "GeneratorTests",
+            [sourceTree],
+            References,
+            new CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable));
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            [new NbtSourceGenerator().AsSourceGenerator()],
+            parseOptions: parseOptions,
+            driverOptions: new GeneratorDriverOptions(
+                IncrementalGeneratorOutputKind.None,
+                trackIncrementalGeneratorSteps: true));
+
+        driver = driver.RunGenerators(compilation, TestContext.Current.CancellationToken);
+
+        var unrelatedTree = CSharpSyntaxTree.ParseText(
+            "internal sealed class Unrelated { public int Value { get; set; } }",
+            parseOptions,
+            cancellationToken: TestContext.Current.CancellationToken);
+        driver = driver.RunGenerators(
+            compilation.AddSyntaxTrees(unrelatedTree),
+            TestContext.Current.CancellationToken);
+
+        var reasons = GetReasons(driver.GetRunResult(), "NbtGeneratedContexts");
+        Assert.All(
+            reasons,
+            static reason => Assert.True(
+                reason is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged,
+                $"Unrelated changes must reuse generated contexts, but found {reason}."));
+
+        var changedTree = CSharpSyntaxTree.ParseText(
+            """
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Player
+            {
+                public int Health { get; set; }
+
+                public int Armor { get; set; }
+            }
+            """,
+            parseOptions,
+            cancellationToken: TestContext.Current.CancellationToken);
+        driver = driver.RunGenerators(
+            compilation.ReplaceSyntaxTree(sourceTree, changedTree),
+            TestContext.Current.CancellationToken);
+
+        var changedReasons = GetReasons(driver.GetRunResult(), "NbtGeneratedContexts");
+        Assert.Contains(
+            changedReasons,
+            static reason => reason is IncrementalStepRunReason.New or IncrementalStepRunReason.Modified);
+    }
+
+    private static IReadOnlyList<IncrementalStepRunReason> GetReasons(
+        GeneratorDriverRunResult result,
+        string stepName)
+    {
+        Assert.True(
+            result.Results[0].TrackedSteps.TryGetValue(stepName, out var steps),
+            $"The generator did not track the step '{stepName}'.");
+        return steps
+            .SelectMany(static step => step.Outputs)
+            .Select(static output => output.Reason)
+            .ToArray();
+    }
+
+    [Fact]
     public void GeneratesCompilableCodeForASupportedType()
     {
         var result = Run("""

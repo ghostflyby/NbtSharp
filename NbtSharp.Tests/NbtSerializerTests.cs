@@ -278,6 +278,28 @@ public sealed class NbtSerializerTests
         Assert.Equal(2, compound["X"] is int value ? value : 0);
     }
 
+    [Fact]
+    public void ConverterCacheSupportsConcurrentReads()
+    {
+        var options = new NbtSerializerOptions();
+        var expected = options.GetConverter(typeof(int));
+        var mismatch = 0;
+
+        Parallel.For(
+            0,
+            100_000,
+            new ParallelOptions { CancellationToken = TestContext.Current.CancellationToken },
+            _ =>
+            {
+                if (!ReferenceEquals(expected, options.GetConverter(typeof(int))))
+                {
+                    Interlocked.Increment(ref mismatch);
+                }
+            });
+
+        Assert.Equal(0, mismatch);
+    }
+
     private static NbtRoot RoundTrip(NbtRoot root, NbtSerializerOptions? options = null)
     {
         using var stream = new MemoryStream();

@@ -861,43 +861,84 @@ public static class NbtSerializer
     {
         try
         {
-            var startToken = reader.TokenType;
-            var startDepth = reader.CurrentDepth;
-            var parentDepth = startToken is NbtTokenType.StartCompound or NbtTokenType.StartList
-                ? startDepth - 1
-                : startDepth;
-            var beforePosition = reader.BytesConsumed;
-            var beforeValues = reader.ValuesReadAtDepth(parentDepth);
+            var frame = new ReadFrame(ref reader);
             var value = converter.ReadValue(ref reader, type, options);
-
-            var expectedDepth = startToken is NbtTokenType.StartCompound or NbtTokenType.StartList
-                ? startDepth - 1
-                : startDepth;
-            var expectedEndToken = startToken switch
-            {
-                NbtTokenType.StartCompound => NbtTokenType.EndCompound,
-                NbtTokenType.StartList => NbtTokenType.EndList,
-                _ => reader.TokenType,
-            };
-
-            if (reader.CurrentDepth != expectedDepth ||
-                reader.TokenType != expectedEndToken ||
-                reader.ValuesReadAtDepth(parentDepth) != beforeValues ||
-                reader.HasPendingValue ||
-                reader.HasPendingContainer)
-            {
-                throw new NbtException($"The converter for {type} did not consume exactly one complete value.")
-                {
-                    BytePosition = beforePosition,
-                };
-            }
-
+            ValidateRead(ref reader, type, in frame);
             return value;
         }
         catch (NbtException ex)
         {
             PrependPath(ex, pathSegment);
             throw;
+        }
+    }
+
+    internal static T DeserializeValueCore<T>(
+        ref NbtReader reader,
+        NbtConverter<T> converter,
+        NbtSerializerOptions options,
+        string? pathSegment)
+    {
+        try
+        {
+            var frame = new ReadFrame(ref reader);
+            var value = converter.Read(ref reader, options);
+            ValidateRead(ref reader, typeof(T), in frame);
+            return value;
+        }
+        catch (NbtException ex)
+        {
+            PrependPath(ex, pathSegment);
+            throw;
+        }
+    }
+
+    private readonly struct ReadFrame
+    {
+        public ReadFrame(ref NbtReader reader)
+        {
+            StartToken = reader.TokenType;
+            StartDepth = reader.CurrentDepth;
+            ParentDepth = StartToken is NbtTokenType.StartCompound or NbtTokenType.StartList
+                ? StartDepth - 1
+                : StartDepth;
+            BeforePosition = reader.BytesConsumed;
+            BeforeValues = reader.ValuesReadAtDepth(ParentDepth);
+        }
+
+        public readonly NbtTokenType StartToken;
+
+        public readonly int StartDepth;
+
+        public readonly int ParentDepth;
+
+        public readonly long BeforePosition;
+
+        public readonly long BeforeValues;
+    }
+
+    private static void ValidateRead(ref NbtReader reader, Type type, in ReadFrame frame)
+    {
+        var expectedDepth = frame.StartToken is NbtTokenType.StartCompound or NbtTokenType.StartList
+            ? frame.StartDepth - 1
+            : frame.StartDepth;
+        var expectedEndToken = frame.StartToken switch
+        {
+            NbtTokenType.StartCompound => NbtTokenType.EndCompound,
+            NbtTokenType.StartList => NbtTokenType.EndList,
+            _ => reader.TokenType,
+        };
+
+        if (reader.CurrentDepth != expectedDepth ||
+            reader.TokenType != expectedEndToken ||
+            reader.ValuesReadAtDepth(frame.ParentDepth) != frame.BeforeValues ||
+            reader.HasPendingValue ||
+            reader.HasPendingContainer)
+        {
+            throw new NbtException($"The converter for {type} did not consume exactly one complete value.")
+            {
+                BytePosition = frame.BeforePosition,
+            };
         }
     }
 
@@ -985,37 +1026,119 @@ public static class NbtSerializer
                 return;
             }
 
-            var beforeDepth = writer.CurrentDepth;
-            var beforeValuesAtDepth = writer.ValuesWrittenAtDepth(beforeDepth);
-            var payloadWasPrepared = headerWritten || writer.IsPayloadExpected;
+            var frame = new WriteFrame(ref writer, headerWritten);
             converter.WriteValue(ref writer, value, type, options);
-
-            if (payloadWasPrepared)
-            {
-                if (writer.IsPayloadExpected ||
-                    writer.CurrentDepth != beforeDepth ||
-                    writer.ValuesWrittenAtDepth(beforeDepth) != beforeValuesAtDepth)
-                {
-                    throw new NbtException(
-                        $"The converter for {type} did not complete the prepared value.")
-                    {
-                        BytePosition = writer.BytesWritten,
-                    };
-                }
-            }
-            else if (writer.CurrentDepth != beforeDepth ||
-                     writer.ValuesWrittenAtDepth(beforeDepth) != beforeValuesAtDepth + 1)
-            {
-                throw new NbtException($"The converter for {type} must write exactly one value.")
-                {
-                    BytePosition = writer.BytesWritten,
-                };
-            }
+            ValidateWrite(ref writer, type, in frame);
         }
         catch (NbtException ex)
         {
             PrependPath(ex, pathSegment);
             throw;
+        }
+    }
+
+    internal static void SerializeMemberCore<T>(
+        ref NbtWriter writer,
+        string name,
+        T value,
+        NbtConverter<T> converter,
+        NbtSerializerOptions options)
+    {
+        if (writer.IsPayloadExpected)
+        {
+            throw new InvalidOperationException("A value payload is already expected.");
+        }
+
+        try
+        {
+            if (value is null)
+            {
+                HandleNullMember(ref writer, options);
+                return;
+            }
+
+            if (!converter.TryGetTagType(value, options, out var tagType))
+            {
+                throw new NotSupportedException(
+                    $"The converter for {typeof(T)} must implement TryGetTagType to write a named member.");
+            }
+
+            writer.WriteMemberHeader(tagType, name);
+        }
+        catch (NbtException ex)
+        {
+            PrependPath(ex, "." + name);
+            throw;
+        }
+
+        SerializeValueCore(ref writer, value, converter, options, "." + name, headerWritten: true);
+    }
+
+    internal static void SerializeValueCore<T>(
+        ref NbtWriter writer,
+        T value,
+        NbtConverter<T> converter,
+        NbtSerializerOptions options,
+        string? pathSegment,
+        bool headerWritten)
+    {
+        try
+        {
+            if (value is null)
+            {
+                HandleNullValue(ref writer);
+                return;
+            }
+
+            var frame = new WriteFrame(ref writer, headerWritten);
+            converter.Write(ref writer, value, options);
+            ValidateWrite(ref writer, typeof(T), in frame);
+        }
+        catch (NbtException ex)
+        {
+            PrependPath(ex, pathSegment);
+            throw;
+        }
+    }
+
+    private readonly struct WriteFrame
+    {
+        public WriteFrame(ref NbtWriter writer, bool headerWritten)
+        {
+            Depth = writer.CurrentDepth;
+            ValuesAtDepth = writer.ValuesWrittenAtDepth(Depth);
+            PayloadWasPrepared = headerWritten || writer.IsPayloadExpected;
+        }
+
+        public readonly int Depth;
+
+        public readonly long ValuesAtDepth;
+
+        public readonly bool PayloadWasPrepared;
+    }
+
+    private static void ValidateWrite(ref NbtWriter writer, Type type, in WriteFrame frame)
+    {
+        if (frame.PayloadWasPrepared)
+        {
+            if (writer.IsPayloadExpected ||
+                writer.CurrentDepth != frame.Depth ||
+                writer.ValuesWrittenAtDepth(frame.Depth) != frame.ValuesAtDepth)
+            {
+                throw new NbtException(
+                    $"The converter for {type} did not complete the prepared value.")
+                {
+                    BytePosition = writer.BytesWritten,
+                };
+            }
+        }
+        else if (writer.CurrentDepth != frame.Depth ||
+                 writer.ValuesWrittenAtDepth(frame.Depth) != frame.ValuesAtDepth + 1)
+        {
+            throw new NbtException($"The converter for {type} must write exactly one value.")
+            {
+                BytePosition = writer.BytesWritten,
+            };
         }
     }
 

@@ -403,6 +403,81 @@ public sealed class NbtSourceGenerationTests
     }
 
     [Fact]
+    public void SupportsScalarFastPaths()
+    {
+        var context = SourceGenerationContext.Default;
+        var value = new SourceGenScalars
+        {
+            SByte = -12,
+            Byte = 250,
+            Int16 = -32000,
+            Int32 = -123456,
+            Int64 = long.MinValue + 1,
+            Single = 1.25f,
+            Double = -2.5,
+            Boolean = true,
+            Text = "text",
+        };
+        var reflectionOptions = new NbtSerializerOptions
+        {
+            TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
+        };
+
+        var data = NbtSerializer.Serialize(value, context.SourceGenScalars, "root");
+        var reflected = NbtSerializer.Serialize(value, "root", reflectionOptions);
+        var copy = NbtSerializer.Deserialize(data, context.SourceGenScalars);
+
+        Assert.Equal(reflected, data);
+        Assert.Equal(-12, copy.SByte);
+        Assert.Equal(250, copy.Byte);
+        Assert.Equal(-32000, copy.Int16);
+        Assert.Equal(-123456, copy.Int32);
+        Assert.Equal(long.MinValue + 1, copy.Int64);
+        Assert.Equal(1.25f, copy.Single);
+        Assert.Equal(-2.5, copy.Double);
+        Assert.True(copy.Boolean);
+        Assert.Equal("text", copy.Text);
+    }
+
+    [Fact]
+    public void CustomScalarConvertersDisableGeneratedFastPath()
+    {
+        var options = new NbtSerializerOptions();
+        options.Converters.Add(new PlusOneInt32Converter());
+        var context = new SourceGenerationContext(options);
+        var value = new SourceGenDefaults { Health = 5 };
+
+        var data = NbtSerializer.Serialize(value, context.SourceGenDefaults, "root");
+        var root = (NbtCompound)NbtSerializer.Deserialize(data).Value.Value!;
+        var copy = NbtSerializer.Deserialize(data, context.SourceGenDefaults);
+
+        Assert.Equal(6, root["Health"] is int stored ? stored : 0);
+        Assert.Equal(5, copy.Health);
+    }
+
+    [Fact]
+    public void DirectScalarReadsKeepMemberErrorPaths()
+    {
+        var context = SourceGenerationContext.Default;
+        var data = NbtSerializer.Serialize(new NbtRoot(
+            "root",
+            new NbtCompound { ["Health"] = "wrong" }));
+        var reflectionOptions = new NbtSerializerOptions
+        {
+            TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
+        };
+
+        var generated = Assert.Throws<NbtException>(() =>
+            NbtSerializer.Deserialize(data, context.SourceGenDefaults));
+        var reflected = Assert.Throws<NbtException>(() =>
+            NbtSerializer.Deserialize<SourceGenDefaults>(data, reflectionOptions));
+
+        Assert.Equal(reflected.Path, generated.Path);
+        Assert.Equal(reflected.ExpectedTagType, generated.ExpectedTagType);
+        Assert.Equal(reflected.ActualTagType, generated.ActualTagType);
+    }
+
+    [Fact]
     public void SupportsExplicitTypeInfoPropertyNames()
     {
         var context = SourceGenerationContext.Default;
@@ -481,6 +556,7 @@ public sealed class NbtSourceGenerationTests
 [NbtSerializable(typeof(SourceGenKeywords))]
 [NbtSerializable(typeof(SourceGenDerived))]
 [NbtSerializable(typeof(SourceGenItem[]))]
+[NbtSerializable(typeof(SourceGenScalars))]
 internal partial class SourceGenerationContext : NbtSerializerContext
 {
     public SourceGenerationContext()
@@ -613,6 +689,48 @@ internal sealed class SourceGenExplicit
 internal sealed class SourceGenKeywords
 {
     public int @class { get; set; }
+}
+
+internal sealed class SourceGenScalars
+{
+    public sbyte SByte { get; set; }
+
+    public byte Byte { get; set; }
+
+    public short Int16 { get; set; }
+
+    public int Int32 { get; set; }
+
+    public long Int64 { get; set; }
+
+    public float Single { get; set; }
+
+    public double Double { get; set; }
+
+    public bool Boolean { get; set; }
+
+    public string Text { get; set; } = "";
+}
+
+internal sealed class PlusOneInt32Converter : NbtConverter<int>
+{
+    public override int Read(ref NbtReader reader, NbtSerializerOptions options) =>
+        reader.GetInt32() - 1;
+
+    public override void Write(
+        ref NbtWriter writer,
+        int value,
+        NbtSerializerOptions options) =>
+        writer.WriteInt32(value + 1);
+
+    public override bool TryGetTagType(
+        int value,
+        NbtSerializerOptions options,
+        out NbtTagType tagType)
+    {
+        tagType = NbtTagType.Int;
+        return true;
+    }
 }
 
 internal class SourceGenBase

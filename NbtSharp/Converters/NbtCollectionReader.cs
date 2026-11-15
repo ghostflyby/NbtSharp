@@ -41,6 +41,14 @@ internal static class NbtCollectionReader
         }
 
         var list = new List<TElement>(count <= 4096 ? count : 0);
+        NbtConverter? converter = null;
+        NbtConverter<TElement>? typedConverter = null;
+        if (count > 0)
+        {
+            converter = options.GetConverter(typeof(TElement));
+            typedConverter = converter as NbtConverter<TElement>;
+        }
+
         for (var i = 0; i < count; i++)
         {
             if (!reader.Read())
@@ -52,11 +60,15 @@ internal static class NbtCollectionReader
                 };
             }
 
-            list.Add((TElement)NbtSerializer.DeserializeValueInternal(
-                ref reader,
-                typeof(TElement),
-                options,
-                $"[{i}]")!);
+            var path = $"[{i}]";
+            list.Add(typedConverter is not null
+                ? NbtSerializer.DeserializeValueCore(ref reader, typedConverter, options, path)
+                : (TElement)NbtSerializer.DeserializeValueCore(
+                    ref reader,
+                    typeof(TElement),
+                    converter!,
+                    options,
+                    path)!);
         }
 
         if (!reader.Read() || reader.TokenType != NbtTokenType.EndList)

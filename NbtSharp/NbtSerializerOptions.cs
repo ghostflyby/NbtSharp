@@ -13,7 +13,7 @@ namespace NbtSharp;
 public sealed class NbtSerializerOptions
 {
     private readonly NbtConverterCollection _converters;
-    private readonly Dictionary<Type, NbtConverter> _cache = [];
+    private volatile Dictionary<Type, NbtConverter> _cache = [];
     private readonly Lock _cacheLock = new();
 
     /// <summary>Initializes the options with the default limits.</summary>
@@ -165,9 +165,16 @@ public sealed class NbtSerializerOptions
     {
         ArgumentNullException.ThrowIfNull(typeToConvert);
 
+        var cache = _cache;
+        if (cache.TryGetValue(typeToConvert, out converter!))
+        {
+            return true;
+        }
+
         lock (_cacheLock)
         {
-            if (_cache.TryGetValue(typeToConvert, out converter!))
+            cache = _cache;
+            if (cache.TryGetValue(typeToConvert, out converter!))
             {
                 return true;
             }
@@ -178,7 +185,11 @@ public sealed class NbtSerializerOptions
                 return false;
             }
 
-            _cache[typeToConvert] = converter;
+            var updated = new Dictionary<Type, NbtConverter>(_cache)
+            {
+                [typeToConvert] = converter,
+            };
+            _cache = updated;
             return true;
         }
     }
@@ -187,7 +198,7 @@ public sealed class NbtSerializerOptions
     {
         lock (_cacheLock)
         {
-            _cache.Clear();
+            _cache = [];
         }
     }
 

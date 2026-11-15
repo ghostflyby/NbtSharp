@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Globalization;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
@@ -18,13 +19,25 @@ public sealed class NbtSourceGenerator : IIncrementalGenerator
                 static (syntaxContext, _) => ContextModel.Create(syntaxContext))
             .Where(static model => model is not null)
             .Select(static (model, _) => model!)
-            .Collect();
+            .Collect()
+            .SelectMany(static (allModels, _) => Merge(allModels))
+            .WithTrackingName("NbtContextModels");
 
-        context.RegisterSourceOutput(models, static (productionContext, allModels) =>
+        var generated = models
+            .Select(static (model, _) => GeneratedContext.Create(model))
+            .WithComparer(GeneratedContextComparer.Instance)
+            .WithTrackingName("NbtGeneratedContexts");
+
+        context.RegisterSourceOutput(generated, static (productionContext, generatedContext) =>
         {
-            foreach (var model in Merge(allModels))
+            foreach (var diagnostic in generatedContext.Diagnostics)
             {
-                new ContextEmitter(productionContext, model).Emit();
+                productionContext.ReportDiagnostic(diagnostic);
+            }
+
+            if (generatedContext.Source.Length != 0)
+            {
+                productionContext.AddSource(generatedContext.HintName, generatedContext.Source);
             }
         });
     }
@@ -53,6 +66,92 @@ public sealed class NbtSourceGenerator : IIncrementalGenerator
             yield return new ContextModel(contextType, groups[contextType].ToImmutableArray(), sources[contextType]);
         }
     }
+}
+
+internal sealed class GeneratedContext : IEquatable<GeneratedContext>
+{
+    public GeneratedContext(
+        string hintName,
+        string source,
+        ImmutableArray<Diagnostic> diagnostics)
+    {
+        HintName = hintName;
+        Source = source;
+        Diagnostics = diagnostics;
+    }
+
+    public string HintName { get; }
+
+    public string Source { get; }
+
+    public ImmutableArray<Diagnostic> Diagnostics { get; }
+
+    public static GeneratedContext Create(ContextModel model)
+    {
+        var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
+        var emitter = new ContextEmitter(model, diagnostics.Add);
+        var source = emitter.Emit(out var hintName);
+        return new GeneratedContext(hintName, source, diagnostics.ToImmutable());
+    }
+
+    public bool Equals(GeneratedContext? other)
+    {
+        if (other is null)
+        {
+            return false;
+        }
+
+        if (ReferenceEquals(this, other))
+        {
+            return true;
+        }
+
+        return HintName == other.HintName &&
+               Source == other.Source &&
+               DiagnosticsEqual(Diagnostics, other.Diagnostics);
+    }
+
+    public override bool Equals(object? obj) => obj is GeneratedContext other && Equals(other);
+
+    public override int GetHashCode() =>
+        (StringComparer.Ordinal.GetHashCode(HintName) * 397) ^
+        StringComparer.Ordinal.GetHashCode(Source);
+
+    private static bool DiagnosticsEqual(
+        ImmutableArray<Diagnostic> left,
+        ImmutableArray<Diagnostic> right)
+    {
+        if (left.Length != right.Length)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < left.Length; i++)
+        {
+            var leftDiagnostic = left[i];
+            var rightDiagnostic = right[i];
+            if (leftDiagnostic.Id != rightDiagnostic.Id ||
+                leftDiagnostic.Severity != rightDiagnostic.Severity ||
+                leftDiagnostic.GetMessage(CultureInfo.InvariantCulture) !=
+                rightDiagnostic.GetMessage(CultureInfo.InvariantCulture) ||
+                (leftDiagnostic.Location?.ToString() ?? "") !=
+                (rightDiagnostic.Location?.ToString() ?? ""))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+}
+
+internal sealed class GeneratedContextComparer : IEqualityComparer<GeneratedContext>
+{
+    public static readonly GeneratedContextComparer Instance = new();
+
+    public bool Equals(GeneratedContext? x, GeneratedContext? y) => x?.Equals(y) ?? y is null;
+
+    public int GetHashCode(GeneratedContext obj) => obj.GetHashCode();
 }
 
 internal sealed class ContextModel

@@ -113,7 +113,10 @@ Unsupported shapes are reported as `NBTSG` diagnostics at compile time.
 The analyzer ships inside the `NbtSharp` package. The type-information overloads do not carry
 `RequiresUnreferencedCode` or `RequiresDynamicCode`; Native AOT works when every reachable type is
 generated. Reflection remains available through `NbtReflectionTypeInfoResolver` for types that are
-not part of a generated context.
+not part of a generated context. When no custom converters are registered, generated object
+converters read and write scalar members directly; registering a custom converter disables that
+fast path for the operation. Generated source and diagnostics are cached per context, so unrelated
+compilation changes do not re-add unchanged sources.
 
 ## Streaming
 

@@ -24,6 +24,8 @@ internal sealed class NbtDictionaryConverter<TDictionary, TValue> : NbtConverter
         }
 
         var dictionary = new Dictionary<string, TValue>(StringComparer.Ordinal);
+        NbtConverter? converter = null;
+        NbtConverter<TValue>? typedConverter = null;
         while (reader.Read())
         {
             if (reader.TokenType == NbtTokenType.EndCompound)
@@ -49,11 +51,21 @@ internal sealed class NbtDictionaryConverter<TDictionary, TValue> : NbtConverter
                 };
             }
 
-            dictionary[name] = (TValue)NbtSerializer.DeserializeValueInternal(
-                ref reader,
-                typeof(TValue),
-                options,
-                "." + name)!;
+            if (converter is null)
+            {
+                converter = options.GetConverter(typeof(TValue));
+                typedConverter = converter as NbtConverter<TValue>;
+            }
+
+            var path = "." + name;
+            dictionary[name] = typedConverter is not null
+                ? NbtSerializer.DeserializeValueCore(ref reader, typedConverter, options, path)
+                : (TValue)NbtSerializer.DeserializeValueCore(
+                    ref reader,
+                    typeof(TValue),
+                    converter!,
+                    options,
+                    path)!;
         }
 
         throw new NbtException("The compound was not terminated.")
@@ -68,14 +80,34 @@ internal sealed class NbtDictionaryConverter<TDictionary, TValue> : NbtConverter
         ArgumentNullException.ThrowIfNull(value);
 
         writer.WriteStartCompound();
+        NbtConverter? converter = null;
+        NbtConverter<TValue>? typedConverter = null;
         foreach (var pair in value)
         {
-            NbtSerializer.SerializeMemberInternal(
-                ref writer,
-                pair.Key,
-                pair.Value,
-                typeof(TValue),
-                options);
+            if (converter is null)
+            {
+                converter = options.GetConverter(typeof(TValue));
+                typedConverter = converter as NbtConverter<TValue>;
+            }
+
+            if (typedConverter is not null)
+            {
+                NbtSerializer.SerializeMemberCore(
+                    ref writer,
+                    pair.Key,
+                    pair.Value,
+                    typedConverter,
+                    options);
+            }
+            else
+            {
+                NbtSerializer.SerializeMemberInternal(
+                    ref writer,
+                    pair.Key,
+                    pair.Value,
+                    typeof(TValue),
+                    options);
+            }
         }
 
         writer.WriteEndCompound();

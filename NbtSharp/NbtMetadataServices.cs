@@ -78,7 +78,15 @@ public static class NbtMetadataServices
         string? pathSegment)
     {
         ArgumentNullException.ThrowIfNull(options);
-        return (T)NbtSerializer.DeserializeValueInternal(ref reader, typeof(T), options, pathSegment)!;
+        var converter = options.GetConverter(typeof(T));
+        return converter is NbtConverter<T> typed
+            ? NbtSerializer.DeserializeValueCore(ref reader, typed, options, pathSegment)
+            : (T)NbtSerializer.DeserializeValueCore(
+                ref reader,
+                typeof(T),
+                converter,
+                options,
+                pathSegment)!;
     }
 
     /// <summary>Writes one named compound member.</summary>
@@ -97,8 +105,27 @@ public static class NbtMetadataServices
     {
         ArgumentNullException.ThrowIfNull(name);
         ArgumentNullException.ThrowIfNull(options);
+        if (value is null)
+        {
+            NbtSerializer.SerializeMemberInternal(ref writer, name, value, typeof(T), options);
+            return;
+        }
+
+        var converter = options.GetConverter(typeof(T));
+        if (converter is NbtConverter<T> typed)
+        {
+            NbtSerializer.SerializeMemberCore(ref writer, name, value, typed, options);
+            return;
+        }
+
         NbtSerializer.SerializeMemberInternal(ref writer, name, value, typeof(T), options);
     }
+
+    /// <summary>Prepends a path segment to an exception.</summary>
+    /// <param name="exception">The exception to update.</param>
+    /// <param name="segment">The path segment to prepend, or <see langword="null"/>.</param>
+    public static void PrependPath(NbtException exception, string? segment) =>
+        NbtSerializer.PrependPath(exception, segment);
 
     /// <summary>Creates the exception for an unexpected tag.</summary>
     /// <param name="reader">The reader at the unexpected token.</param>

@@ -269,6 +269,7 @@ static NbtSharp.NbtMetadataServices.CreateReadOnlyListConverter<TElement>() -> N
 static NbtSharp.NbtMetadataServices.DuplicateMember(NbtSharp.NbtReader reader, string! name) -> NbtSharp.NbtException!
 static NbtSharp.NbtMetadataServices.ExpectedTag(NbtSharp.NbtReader reader, NbtSharp.NbtTagType expected) -> NbtSharp.NbtException!
 static NbtSharp.NbtMetadataServices.MissingMemberName(NbtSharp.NbtReader reader) -> NbtSharp.NbtException!
+static NbtSharp.NbtMetadataServices.PrependPath(NbtSharp.NbtException! exception, string? segment) -> void
 static NbtSharp.NbtMetadataServices.ReadValue<T>(ref NbtSharp.NbtReader reader, NbtSharp.NbtSerializerOptions! options, string? pathSegment) -> T
 static NbtSharp.NbtMetadataServices.WriteMember<T>(ref NbtSharp.NbtWriter writer, string! name, T value, NbtSharp.NbtSerializerOptions! options) -> void
 static NbtSharp.NbtSerializer.Deserialize<T>(System.Buffers.ReadOnlySequence<byte> data, NbtSharp.NbtTypeInfo<T>! typeInfo, out string? rootName) -> T
