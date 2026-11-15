@@ -14,6 +14,7 @@ internal enum TypeEntryKind
     Dictionary,
     IDictionary,
     IReadOnlyDictionary,
+    Enum,
 }
 
 internal sealed class TypeEntry
@@ -225,6 +226,16 @@ internal sealed class TypeGraph
         {
             ReportUnsupported(type, "is a nested generic type", location);
             return null;
+        }
+
+        if (named.TypeKind == TypeKind.Enum)
+        {
+            var enumEntry = new TypeEntry(type, TypeEntryKind.Enum)
+            {
+                UnderlyingType = named.EnumUnderlyingType,
+            };
+            Register(enumEntry);
+            return enumEntry;
         }
 
         if (named.IsGenericType)

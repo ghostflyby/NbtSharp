@@ -60,15 +60,26 @@ internal static class NbtCollectionReader
                 };
             }
 
-            var path = $"[{i}]";
-            list.Add(typedConverter is not null
-                ? NbtSerializer.DeserializeValueCore(ref reader, typedConverter, options, path)
-                : (TElement)NbtSerializer.DeserializeValueCore(
-                    ref reader,
-                    typeof(TElement),
-                    converter!,
-                    options,
-                    path)!);
+            try
+            {
+                list.Add(typedConverter is not null
+                    ? NbtSerializer.DeserializeValueCore(
+                        ref reader,
+                        typedConverter,
+                        options,
+                        pathSegment: null)
+                    : (TElement)NbtSerializer.DeserializeValueCore(
+                        ref reader,
+                        typeof(TElement),
+                        converter!,
+                        options,
+                        pathSegment: null)!);
+            }
+            catch (NbtException ex)
+            {
+                NbtSerializer.PrependPath(ex, $"[{i}]");
+                throw;
+            }
         }
 
         if (!reader.Read() || reader.TokenType != NbtTokenType.EndList)

@@ -121,11 +121,20 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
                 };
             }
 
-            values[index] = NbtSerializer.DeserializeValueInternal(
-                ref reader,
-                _members[index].Type,
-                options,
-                "." + name);
+            try
+            {
+                values[index] = NbtSerializer.DeserializeValueInternal(
+                    ref reader,
+                    _members[index].Type,
+                    options,
+                    pathSegment: null);
+            }
+            catch (NbtException ex)
+            {
+                NbtSerializer.PrependPath(ex, "." + name);
+                throw;
+            }
+
             present[index] = true;
         }
 

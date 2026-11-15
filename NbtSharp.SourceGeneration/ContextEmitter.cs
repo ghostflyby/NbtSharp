@@ -1,4 +1,6 @@
 using System.Collections.Immutable;
+using System.Globalization;
+using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -24,41 +26,71 @@ internal sealed class ContextEmitter
         _reportDiagnostic = reportDiagnostic;
     }
 
-    public string Emit(out string hintName)
+    internal ContextEmitter(PreparedContext prepared)
     {
-        var contextType = _model.ContextType;
-        hintName = GetHintName(contextType);
-        if (!Validate(contextType))
+        _model = prepared.Model;
+        _graph = prepared.Graph!;
+        _reportDiagnostic = static _ => { };
+    }
+
+    public static PreparedContext Prepare(ContextModel model)
+    {
+        var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
+        var emitter = new ContextEmitter(model, diagnostics.Add);
+        var contextType = model.ContextType;
+        var hintName = GetHintName(contextType);
+
+        if (!emitter.Validate(contextType))
         {
-            return "";
+            return CreatePrepared(model, graph: null, hintName, diagnostics);
         }
 
-        _graph = new TypeGraph(contextType.ContainingAssembly, _reportDiagnostic);
-        foreach (var root in _model.Roots)
+        emitter._graph = new TypeGraph(contextType.ContainingAssembly, emitter._reportDiagnostic);
+        foreach (var root in model.Roots)
         {
-            var entry = _graph.AddRoot(root.Type, root.PropertyName, root.Location);
-            if (entry is null && !_graph.HasErrors)
+            var entry = emitter._graph.AddRoot(root.Type, root.PropertyName, root.Location);
+            if (entry is null && !emitter._graph.HasErrors)
             {
-                _reportDiagnostic(Diagnostic.Create(
+                emitter._reportDiagnostic(Diagnostic.Create(
                     Diagnostics.BuiltInRoot,
                     root.Location,
                     root.Type.ToDisplayString(FullyQualified)));
             }
         }
 
-        if (_graph.HasErrors)
+        if (emitter._graph.HasErrors)
         {
-            return "";
+            return CreatePrepared(model, graph: null, hintName, diagnostics);
         }
 
-        AssignNames(contextType);
-        if (_hasNameErrors || _graph.HasErrors)
+        emitter.AssignNames(contextType);
+        if (emitter._hasNameErrors || emitter._graph.HasErrors)
         {
-            return "";
+            return CreatePrepared(model, graph: null, hintName, diagnostics);
         }
 
-        WriteSource(contextType);
+        return CreatePrepared(model, emitter._graph, hintName, diagnostics);
+    }
+
+    public string EmitSource()
+    {
+        WriteSource(_model.ContextType);
         return _writer.ToString();
+    }
+
+    private static PreparedContext CreatePrepared(
+        ContextModel model,
+        TypeGraph? graph,
+        string hintName,
+        ImmutableArray<Diagnostic>.Builder diagnostics)
+    {
+        var immutableDiagnostics = diagnostics.ToImmutable();
+        return new PreparedContext(
+            model,
+            graph,
+            hintName,
+            immutableDiagnostics,
+            ComputeFingerprint(model, graph, hintName, immutableDiagnostics));
     }
 
     private bool Validate(INamedTypeSymbol contextType)
@@ -258,6 +290,11 @@ internal sealed class ContextEmitter
                 _writer.WriteLine();
                 EmitObjectConverter(entry, entry.Object);
             }
+            else if (entry.Kind == TypeEntryKind.Enum)
+            {
+                _writer.WriteLine();
+                EmitEnumConverter(entry);
+            }
         }
 
         _writer.Outdent();
@@ -324,6 +361,7 @@ internal sealed class ContextEmitter
     private string GetFactory(TypeEntry entry) => entry.Kind switch
     {
         TypeEntryKind.Object => $"new {entry.ConverterName}()",
+        TypeEntryKind.Enum => $"new {entry.ConverterName}()",
         TypeEntryKind.Array =>
             $"{MetadataServices}.CreateArrayConverter<{Fq(entry.ElementType!)}>()",
         TypeEntryKind.List =>
@@ -802,6 +840,103 @@ internal sealed class ContextEmitter
     private void Report(DiagnosticDescriptor descriptor, Location? location, params object[] arguments) =>
         _reportDiagnostic(Diagnostic.Create(descriptor, location, arguments));
 
+    private void EmitEnumConverter(TypeEntry entry)
+    {
+        var typeName = Fq(entry.Type);
+        var mapping = GetEnumMapping(typeName, entry.UnderlyingType!);
+
+        _writer.WriteLine(
+            $"private sealed class {entry.ConverterName} : " +
+            $"global::NbtSharp.NbtConverter<{typeName}>");
+        _writer.WriteLine("{");
+        _writer.Indent();
+        _writer.WriteLine(
+            $"public override {typeName} Read(" +
+            "ref global::NbtSharp.NbtReader reader, " +
+            "global::NbtSharp.NbtSerializerOptions options) =>");
+        _writer.Indent();
+        _writer.WriteLine(mapping.ReadExpression);
+        _writer.Outdent();
+        _writer.WriteLine();
+        _writer.WriteLine(
+            "public override void Write(" +
+            "ref global::NbtSharp.NbtWriter writer, " +
+            $"{typeName} value, " +
+            "global::NbtSharp.NbtSerializerOptions options) =>");
+        _writer.Indent();
+        _writer.WriteLine(mapping.WriteStatement);
+        _writer.Outdent();
+        _writer.WriteLine();
+        _writer.WriteLine(
+            "public override bool TryGetTagType(" +
+            $"{typeName} value, " +
+            "global::NbtSharp.NbtSerializerOptions options, " +
+            "out global::NbtSharp.NbtTagType tagType)");
+        _writer.WriteLine("{");
+        _writer.Indent();
+        _writer.WriteLine($"tagType = global::NbtSharp.NbtTagType.{mapping.Tag};");
+        _writer.WriteLine("return true;");
+        _writer.Outdent();
+        _writer.WriteLine("}");
+        _writer.Outdent();
+        _writer.WriteLine("}");
+    }
+
+    private static EnumMapping GetEnumMapping(string typeName, ITypeSymbol underlying) =>
+        underlying.SpecialType switch
+        {
+            SpecialType.System_SByte => new EnumMapping(
+                "Byte",
+                $"({typeName})reader.GetSByte();",
+                "writer.WriteSByte((sbyte)value);"),
+            SpecialType.System_Byte => new EnumMapping(
+                "Byte",
+                $"({typeName})unchecked((byte)reader.GetSByte());",
+                "writer.WriteSByte(unchecked((sbyte)(byte)value));"),
+            SpecialType.System_Int16 => new EnumMapping(
+                "Short",
+                $"({typeName})reader.GetInt16();",
+                "writer.WriteInt16((short)value);"),
+            SpecialType.System_UInt16 => new EnumMapping(
+                "Short",
+                $"({typeName})unchecked((ushort)reader.GetInt16());",
+                "writer.WriteInt16(unchecked((short)(ushort)value));"),
+            SpecialType.System_Int32 => new EnumMapping(
+                "Int",
+                $"({typeName})reader.GetInt32();",
+                "writer.WriteInt32((int)value);"),
+            SpecialType.System_UInt32 => new EnumMapping(
+                "Int",
+                $"({typeName})unchecked((uint)reader.GetInt32());",
+                "writer.WriteInt32(unchecked((int)(uint)value));"),
+            SpecialType.System_Int64 => new EnumMapping(
+                "Long",
+                $"({typeName})reader.GetInt64();",
+                "writer.WriteInt64((long)value);"),
+            SpecialType.System_UInt64 => new EnumMapping(
+                "Long",
+                $"({typeName})unchecked((ulong)reader.GetInt64());",
+                "writer.WriteInt64(unchecked((long)(ulong)value));"),
+            _ => throw new InvalidOperationException(
+                $"Unsupported enum underlying type {underlying}."),
+        };
+
+    private readonly struct EnumMapping
+    {
+        public EnumMapping(string tag, string readExpression, string writeStatement)
+        {
+            Tag = tag;
+            ReadExpression = readExpression;
+            WriteStatement = writeStatement;
+        }
+
+        public string Tag { get; }
+
+        public string ReadExpression { get; }
+
+        public string WriteStatement { get; }
+    }
+
     private enum ScalarKind
     {
         None,
@@ -999,6 +1134,113 @@ internal sealed class ContextEmitter
             {
                 return candidate;
             }
+        }
+    }
+
+    private static string ComputeFingerprint(
+        ContextModel model,
+        TypeGraph? graph,
+        string hintName,
+        ImmutableArray<Diagnostic> diagnostics)
+    {
+        var builder = new StringBuilder();
+        builder.Append(hintName).Append('\0')
+            .Append(model.ContextType.ToDisplayString(FullyQualified)).Append('|')
+            .Append(model.ContextType.DeclaredAccessibility).Append('|')
+            .Append(model.ContextType.IsRecord)
+            .Append('\0');
+
+        foreach (var root in model.Roots)
+        {
+            builder.Append(root.Type.ToDisplayString(FullyQualified)).Append('|')
+                .Append(root.PropertyName ?? "")
+                .Append('\0');
+        }
+
+        if (graph is not null)
+        {
+            foreach (var entry in graph.Entries)
+            {
+                builder.Append((int)entry.Kind).Append('|')
+                    .Append(entry.Type.ToDisplayString(FullyQualified)).Append('|')
+                    .Append(entry.AccessorName).Append('|')
+                    .Append(entry.BackingFieldName).Append('|')
+                    .Append(entry.ConverterName).Append('|')
+                    .Append(entry.PublicPropertyName ?? "").Append('|')
+                    .Append(entry.ElementType?.ToDisplayString(FullyQualified) ?? "").Append('|')
+                    .Append(entry.ValueType?.ToDisplayString(FullyQualified) ?? "").Append('|')
+                    .Append(entry.UnderlyingType?.ToDisplayString(FullyQualified) ?? "").Append('|')
+                    .Append(entry.IsRoot && IsPubliclyAccessible(entry.Type))
+                    .Append('\0');
+
+                if (entry.Object is not { } objectModel)
+                {
+                    continue;
+                }
+
+                builder.Append("ctor:")
+                    .Append(objectModel.Constructor?.Symbol.OriginalDefinition.ToDisplayString(FullyQualified) ?? "")
+                    .Append('|')
+                    .Append(objectModel.UseConstructorAccessor)
+                    .Append('\0');
+                AppendTypeParameters(builder, objectModel.Type.OriginalDefinition.TypeParameters);
+
+                foreach (var member in objectModel.Members)
+                {
+                    builder.Append(member.ClrName).Append('|')
+                        .Append(member.NbtName).Append('|')
+                        .Append(member.Type.ToDisplayString(FullyQualified)).Append('|')
+                        .Append(member.IsField).Append('|')
+                        .Append(member.CanWrite).Append('|')
+                        .Append(member.IsInitOnly).Append('|')
+                        .Append(member.NeedsSetterAccessor).Append('|')
+                        .Append(member.ConstructorParameterIndex).Append('|')
+                        .Append(member.IsRequired).Append('|')
+                        .Append(member.SetterContainingType?.ToDisplayString(FullyQualified) ?? "")
+                        .Append('|')
+                        .Append((member.Symbol as IPropertySymbol)?.OriginalDefinition.Type
+                            .ToDisplayString(FullyQualified) ?? "")
+                        .Append('\0');
+
+                    if (member.SetterContainingType is INamedTypeSymbol setterType)
+                    {
+                        AppendTypeParameters(builder, setterType.OriginalDefinition.TypeParameters);
+                    }
+                }
+            }
+        }
+
+        foreach (var diagnostic in diagnostics)
+        {
+            builder.Append(diagnostic.Id).Append('|')
+                .Append(diagnostic.Severity).Append('|')
+                .Append(diagnostic.GetMessage(CultureInfo.InvariantCulture)).Append('|')
+                .Append(diagnostic.Location?.ToString() ?? "")
+                .Append('\0');
+        }
+
+        return builder.ToString();
+    }
+
+    private static void AppendTypeParameters(
+        StringBuilder builder,
+        ImmutableArray<ITypeParameterSymbol> parameters)
+    {
+        foreach (var parameter in parameters)
+        {
+            builder.Append("tp:").Append(parameter.Name).Append('|')
+                .Append(parameter.HasUnmanagedTypeConstraint).Append('|')
+                .Append(parameter.HasValueTypeConstraint).Append('|')
+                .Append(parameter.HasReferenceTypeConstraint).Append('|')
+                .Append(parameter.HasNotNullConstraint).Append('|')
+                .Append(parameter.HasConstructorConstraint).Append('|');
+
+            foreach (var constraint in parameter.ConstraintTypes)
+            {
+                builder.Append(constraint.ToDisplayString(FullyQualified)).Append('|');
+            }
+
+            builder.Append('\0');
         }
     }
 

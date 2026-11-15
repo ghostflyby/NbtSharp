@@ -145,11 +145,19 @@ internal static class NbtDomConverters
                     };
                 }
 
-                compound[name] = (NbtValue)NbtSerializer.DeserializeValueInternal(
-                    ref reader,
-                    typeof(NbtValue),
-                    options,
-                    "." + name)!;
+                try
+                {
+                    compound[name] = (NbtValue)NbtSerializer.DeserializeValueInternal(
+                        ref reader,
+                        typeof(NbtValue),
+                        options,
+                        pathSegment: null)!;
+                }
+                catch (NbtException ex)
+                {
+                    NbtSerializer.PrependPath(ex, "." + name);
+                    throw;
+                }
             }
 
             throw new NbtException("The compound was not terminated.")
@@ -299,13 +307,21 @@ internal static class NbtDomConverters
         {
             for (var i = 0; i < elements.Count; i++)
             {
-                NbtSerializer.SerializeValueInternal(
-                    ref writer,
-                    elements[i],
-                    typeof(TElement),
-                    options,
-                    $"[{i}]",
-                    headerWritten: false);
+                try
+                {
+                    NbtSerializer.SerializeValueInternal(
+                        ref writer,
+                        elements[i],
+                        typeof(TElement),
+                        options,
+                        pathSegment: null,
+                        headerWritten: false);
+                }
+                catch (NbtException ex)
+                {
+                    NbtSerializer.PrependPath(ex, $"[{i}]");
+                    throw;
+                }
             }
         }
     }

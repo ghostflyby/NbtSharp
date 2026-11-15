@@ -43,50 +43,65 @@ internal static class NbtCollectionWriter
         }
 
         writer.WriteStartList(elementType, count);
-        if (typedConverter is not null)
+        try
         {
-            NbtSerializer.SerializeValueCore(
-                ref writer,
-                first,
-                typedConverter,
-                options,
-                "[0]",
-                headerWritten: false);
-        }
-        else
-        {
-            NbtSerializer.SerializeValueInternal(
-                ref writer,
-                first,
-                typeof(TElement),
-                options,
-                "[0]",
-                headerWritten: false);
-        }
-
-        var written = 1;
-        while (enumerator.MoveNext())
-        {
-            var path = $"[{written}]";
             if (typedConverter is not null)
             {
                 NbtSerializer.SerializeValueCore(
                     ref writer,
-                    enumerator.Current,
+                    first,
                     typedConverter,
                     options,
-                    path,
+                    pathSegment: null,
                     headerWritten: false);
             }
             else
             {
                 NbtSerializer.SerializeValueInternal(
                     ref writer,
-                    enumerator.Current,
+                    first,
                     typeof(TElement),
                     options,
-                    path,
+                    pathSegment: null,
                     headerWritten: false);
+            }
+        }
+        catch (NbtException ex)
+        {
+            NbtSerializer.PrependPath(ex, "[0]");
+            throw;
+        }
+
+        var written = 1;
+        while (enumerator.MoveNext())
+        {
+            try
+            {
+                if (typedConverter is not null)
+                {
+                    NbtSerializer.SerializeValueCore(
+                        ref writer,
+                        enumerator.Current,
+                        typedConverter,
+                        options,
+                        pathSegment: null,
+                        headerWritten: false);
+                }
+                else
+                {
+                    NbtSerializer.SerializeValueInternal(
+                        ref writer,
+                        enumerator.Current,
+                        typeof(TElement),
+                        options,
+                        pathSegment: null,
+                        headerWritten: false);
+                }
+            }
+            catch (NbtException ex)
+            {
+                NbtSerializer.PrependPath(ex, $"[{written}]");
+                throw;
             }
 
             written++;

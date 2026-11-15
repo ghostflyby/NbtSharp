@@ -111,6 +111,13 @@ public sealed class NbtSourceGeneratorTests
                 reason is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged,
                 $"Unrelated changes must reuse generated contexts, but found {reason}."));
 
+        var preparedReasons = GetReasons(driver.GetRunResult(), "NbtPreparedContexts");
+        Assert.All(
+            preparedReasons,
+            static reason => Assert.True(
+                reason is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged,
+                $"Unrelated changes must reuse prepared contexts, but found {reason}."));
+
         var changedTree = CSharpSyntaxTree.ParseText(
             """
             using NbtSharp;
@@ -136,6 +143,11 @@ public sealed class NbtSourceGeneratorTests
         var changedReasons = GetReasons(driver.GetRunResult(), "NbtGeneratedContexts");
         Assert.Contains(
             changedReasons,
+            static reason => reason is IncrementalStepRunReason.New or IncrementalStepRunReason.Modified);
+
+        var changedPreparedReasons = GetReasons(driver.GetRunResult(), "NbtPreparedContexts");
+        Assert.Contains(
+            changedPreparedReasons,
             static reason => reason is IncrementalStepRunReason.New or IncrementalStepRunReason.Modified);
     }
 

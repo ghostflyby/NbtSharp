@@ -543,6 +543,76 @@ public sealed class NbtSourceGenerationTests
     }
 
     [Fact]
+    public void SupportsEnumsWithUnderlyingWidth()
+    {
+        var context = SourceGenerationContext.Default;
+        var value = new SourceGenEnumHolder
+        {
+            Default = SourceGenDefaultEnum.Two,
+            SByte = SourceGenSByteEnum.Max,
+            Byte = SourceGenByteEnum.Max,
+            Int16 = SourceGenInt16Enum.Minus,
+            UInt16 = SourceGenUInt16Enum.Max,
+            Int32 = SourceGenInt32Enum.Minus,
+            UInt32 = SourceGenUInt32Enum.Max,
+            Int64 = SourceGenInt64Enum.Minus,
+            UInt64 = SourceGenUInt64Enum.Max,
+            Optional = SourceGenDefaultEnum.One,
+            Values = [SourceGenDefaultEnum.Zero, SourceGenDefaultEnum.Two],
+        };
+        var reflectionOptions = new NbtSerializerOptions
+        {
+            TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
+        };
+
+        var data = NbtSerializer.Serialize(value, context.SourceGenEnumHolder, "root");
+        var reflected = NbtSerializer.Serialize(value, "root", reflectionOptions);
+        var copy = NbtSerializer.Deserialize(data, context.SourceGenEnumHolder);
+        var compound = (NbtCompound)NbtSerializer.Deserialize(data).Value.Value!;
+
+        Assert.Equal(reflected, data);
+        Assert.Equal(SourceGenDefaultEnum.Two, copy.Default);
+        Assert.Equal(SourceGenSByteEnum.Max, copy.SByte);
+        Assert.Equal(SourceGenByteEnum.Max, copy.Byte);
+        Assert.Equal(SourceGenInt16Enum.Minus, copy.Int16);
+        Assert.Equal(SourceGenUInt16Enum.Max, copy.UInt16);
+        Assert.Equal(SourceGenInt32Enum.Minus, copy.Int32);
+        Assert.Equal(SourceGenUInt32Enum.Max, copy.UInt32);
+        Assert.Equal(SourceGenInt64Enum.Minus, copy.Int64);
+        Assert.Equal(SourceGenUInt64Enum.Max, copy.UInt64);
+        Assert.Equal(SourceGenDefaultEnum.One, copy.Optional);
+        Assert.Equal(value.Values, copy.Values);
+        Assert.Equal(NbtTagType.Byte, compound["SByte"].TagType);
+        Assert.Equal(NbtTagType.Byte, compound["Byte"].TagType);
+        Assert.Equal(NbtTagType.Short, compound["Int16"].TagType);
+        Assert.Equal(NbtTagType.Short, compound["UInt16"].TagType);
+        Assert.Equal(NbtTagType.Int, compound["Int32"].TagType);
+        Assert.Equal(NbtTagType.Int, compound["UInt32"].TagType);
+        Assert.Equal(NbtTagType.Long, compound["Int64"].TagType);
+        Assert.Equal(NbtTagType.Long, compound["UInt64"].TagType);
+    }
+
+    [Fact]
+    public void SupportsEnumRootTypes()
+    {
+        var context = SourceGenerationContext.Default;
+        var value = SourceGenDefaultEnum.Two;
+        var reflectionOptions = new NbtSerializerOptions
+        {
+            TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
+        };
+
+        var data = NbtSerializer.Serialize(value, context.SourceGenDefaultEnum, "root");
+        var reflected = NbtSerializer.Serialize(value, "root", reflectionOptions);
+        var copy = NbtSerializer.Deserialize(data, context.SourceGenDefaultEnum);
+        var root = NbtSerializer.Deserialize(data);
+
+        Assert.Equal(reflected, data);
+        Assert.Equal(value, copy);
+        Assert.Equal(NbtTagType.Int, root.Value.TagType);
+    }
+
+    [Fact]
     public void SupportsExplicitTypeInfoPropertyNames()
     {
         var context = SourceGenerationContext.Default;
@@ -624,6 +694,8 @@ public sealed class NbtSourceGenerationTests
 [NbtSerializable(typeof(SourceGenScalars))]
 [NbtSerializable(typeof(SourceGenPrivateGetter))]
 [NbtSerializable(typeof(SourceGenRequiredNullable))]
+[NbtSerializable(typeof(SourceGenDefaultEnum))]
+[NbtSerializable(typeof(SourceGenEnumHolder))]
 internal partial class SourceGenerationContext : NbtSerializerContext
 {
     public SourceGenerationContext()
@@ -757,6 +829,86 @@ internal sealed class SourceGenExplicit
 internal sealed class SourceGenKeywords
 {
     public int @class { get; set; }
+}
+
+internal enum SourceGenDefaultEnum
+{
+    Zero,
+    One,
+    Two,
+}
+
+internal enum SourceGenSByteEnum : sbyte
+{
+    Minus = -1,
+    Max = sbyte.MaxValue,
+}
+
+internal enum SourceGenByteEnum : byte
+{
+    One = 1,
+    Max = byte.MaxValue,
+}
+
+internal enum SourceGenInt16Enum : short
+{
+    Minus = -1,
+    Max = short.MaxValue,
+}
+
+internal enum SourceGenUInt16Enum : ushort
+{
+    One = 1,
+    Max = ushort.MaxValue,
+}
+
+internal enum SourceGenInt32Enum : int
+{
+    Minus = -1,
+    Max = int.MaxValue,
+}
+
+internal enum SourceGenUInt32Enum : uint
+{
+    One = 1,
+    Max = uint.MaxValue,
+}
+
+internal enum SourceGenInt64Enum : long
+{
+    Minus = -1,
+    Max = long.MaxValue,
+}
+
+internal enum SourceGenUInt64Enum : ulong
+{
+    One = 1,
+    Max = ulong.MaxValue,
+}
+
+internal sealed class SourceGenEnumHolder
+{
+    public SourceGenDefaultEnum Default { get; set; }
+
+    public SourceGenSByteEnum SByte { get; set; }
+
+    public SourceGenByteEnum Byte { get; set; }
+
+    public SourceGenInt16Enum Int16 { get; set; }
+
+    public SourceGenUInt16Enum UInt16 { get; set; }
+
+    public SourceGenInt32Enum Int32 { get; set; }
+
+    public SourceGenUInt32Enum UInt32 { get; set; }
+
+    public SourceGenInt64Enum Int64 { get; set; }
+
+    public SourceGenUInt64Enum UInt64 { get; set; }
+
+    public SourceGenDefaultEnum? Optional { get; set; }
+
+    public List<SourceGenDefaultEnum> Values { get; set; } = [];
 }
 #pragma warning restore IDE1006
 

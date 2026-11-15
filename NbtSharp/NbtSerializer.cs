@@ -980,7 +980,22 @@ public static class NbtSerializer
             throw;
         }
 
-        SerializeValueCore(ref writer, value, type, converter, options, "." + name, headerWritten: true);
+        try
+        {
+            SerializeValueCore(
+                ref writer,
+                value,
+                type,
+                converter,
+                options,
+                pathSegment: null,
+                headerWritten: true);
+        }
+        catch (NbtException ex)
+        {
+            PrependPath(ex, "." + name);
+            throw;
+        }
     }
 
     [RequiresUnreferencedCode("Converter resolution may use reflection or runtime generic construction.")]
@@ -1071,7 +1086,21 @@ public static class NbtSerializer
             throw;
         }
 
-        SerializeValueCore(ref writer, value, converter, options, "." + name, headerWritten: true);
+        try
+        {
+            SerializeValueCore(
+                ref writer,
+                value,
+                converter,
+                options,
+                pathSegment: null,
+                headerWritten: true);
+        }
+        catch (NbtException ex)
+        {
+            PrependPath(ex, "." + name);
+            throw;
+        }
     }
 
     internal static void SerializeValueCore<T>(

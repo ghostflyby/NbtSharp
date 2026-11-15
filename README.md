@@ -104,19 +104,24 @@ Player copy = NbtSerializer.Deserialize(data, context.Player);
 ```
 
 The generator emits a converter for every reachable class or struct and type information for arrays,
-lists, read-only collections, string-keyed dictionaries, and nullable value types. It follows the
-same mapping rules as the reflection resolver: public instance properties, `[NbtInclude]` fields,
-`[NbtIgnore]`, `[NbtPropertyName]`, constructor binding, unknown-member skipping, and null and
-duplicate handling. `init`-only and `required` members are supported through `UnsafeAccessor`.
-Unsupported shapes are reported as `NBTSG` diagnostics at compile time.
+lists, read-only collections, string-keyed dictionaries, and nullable value types. Enums are
+serialized as the signed NBT integer tag that matches their underlying type width (`byte`/`sbyte`
+use `TAG_Byte`, `short`/`ushort` use `TAG_Short`, `int`/`uint` use `TAG_Int`, and `long`/`ulong`
+use `TAG_Long`); unsigned values preserve their bit pattern. The generator follows the same mapping
+rules as the reflection resolver: public instance properties, `[NbtInclude]` fields, `[NbtIgnore]`,
+`[NbtPropertyName]`, constructor binding, unknown-member skipping, and null and duplicate handling.
+`init`-only and `required` members are supported through `UnsafeAccessor`. Unsupported shapes are
+reported as `NBTSG` diagnostics at compile time.
 
 The analyzer ships inside the `NbtSharp` package. The type-information overloads do not carry
 `RequiresUnreferencedCode` or `RequiresDynamicCode`; Native AOT works when every reachable type is
 generated. Reflection remains available through `NbtReflectionTypeInfoResolver` for types that are
-not part of a generated context. When no custom converters are registered, generated object
-converters read and write scalar members directly; registering a custom converter disables that
-fast path for the operation. Generated source and diagnostics are cached per context, so unrelated
-compilation changes do not re-add unchanged sources.
+not part of a generated context, and it also supports enum members through the built-in enum
+converter. When no custom converters are registered, generated object converters read and write
+scalar members directly; registering a custom converter disables that fast path for the operation.
+Prepared context models, generated source, and diagnostics are cached per context, so unrelated
+compilation changes reuse them and skip source emission; type-graph preparation still runs when
+semantic models change.
 
 Required members are strict: every required member that is part of the mapping must be present in
 the compound, otherwise deserialization throws `NbtException`. A required mapped member whose value

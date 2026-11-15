@@ -23,8 +23,13 @@ public sealed class NbtSourceGenerator : IIncrementalGenerator
             .SelectMany(static (allModels, _) => Merge(allModels))
             .WithTrackingName("NbtContextModels");
 
-        var generated = models
-            .Select(static (model, _) => GeneratedContext.Create(model))
+        var prepared = models
+            .Select(static (model, _) => ContextEmitter.Prepare(model))
+            .WithComparer(PreparedContextComparer.Instance)
+            .WithTrackingName("NbtPreparedContexts");
+
+        var generated = prepared
+            .Select(static (preparedContext, _) => GeneratedContext.Create(preparedContext))
             .WithComparer(GeneratedContextComparer.Instance)
             .WithTrackingName("NbtGeneratedContexts");
 
@@ -86,12 +91,12 @@ internal sealed class GeneratedContext : IEquatable<GeneratedContext>
 
     public ImmutableArray<Diagnostic> Diagnostics { get; }
 
-    public static GeneratedContext Create(ContextModel model)
+    public static GeneratedContext Create(PreparedContext prepared)
     {
-        var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
-        var emitter = new ContextEmitter(model, diagnostics.Add);
-        var source = emitter.Emit(out var hintName);
-        return new GeneratedContext(hintName, source, diagnostics.ToImmutable());
+        var source = prepared.HasSource
+            ? new ContextEmitter(prepared).EmitSource()
+            : "";
+        return new GeneratedContext(prepared.HintName, source, prepared.Diagnostics);
     }
 
     public bool Equals(GeneratedContext? other)

@@ -57,15 +57,26 @@ internal sealed class NbtDictionaryConverter<TDictionary, TValue> : NbtConverter
                 typedConverter = converter as NbtConverter<TValue>;
             }
 
-            var path = "." + name;
-            dictionary[name] = typedConverter is not null
-                ? NbtSerializer.DeserializeValueCore(ref reader, typedConverter, options, path)
-                : (TValue)NbtSerializer.DeserializeValueCore(
-                    ref reader,
-                    typeof(TValue),
-                    converter!,
-                    options,
-                    path)!;
+            try
+            {
+                dictionary[name] = typedConverter is not null
+                    ? NbtSerializer.DeserializeValueCore(
+                        ref reader,
+                        typedConverter,
+                        options,
+                        pathSegment: null)
+                    : (TValue)NbtSerializer.DeserializeValueCore(
+                        ref reader,
+                        typeof(TValue),
+                        converter!,
+                        options,
+                        pathSegment: null)!;
+            }
+            catch (NbtException ex)
+            {
+                NbtSerializer.PrependPath(ex, "." + name);
+                throw;
+            }
         }
 
         throw new NbtException("The compound was not terminated.")
