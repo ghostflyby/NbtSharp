@@ -242,3 +242,44 @@ NbtSharp.NbtReader.NbtReader(System.IO.Stream! stream, NbtSharp.NbtReaderOptions
 static NbtSharp.NbtSerializer.DeserializeAsync<T>(System.Buffers.ReadOnlySequence<byte> data, NbtSharp.NbtSerializerOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T>!
 static NbtSharp.NbtSerializer.DeserializeAsync<T>(System.IO.Pipelines.PipeReader! reader, NbtSharp.NbtSerializerOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T>!
 static NbtSharp.NbtSerializer.DeserializeAsync<T>(System.IO.Stream! stream, NbtSharp.NbtSerializerOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T>!
+NbtSharp.NbtMetadataServices
+NbtSharp.NbtSerializableAttribute
+NbtSharp.NbtSerializableAttribute.NbtSerializableAttribute(System.Type! type) -> void
+NbtSharp.NbtSerializableAttribute.Type.get -> System.Type!
+NbtSharp.NbtSerializableAttribute.TypeInfoPropertyName.get -> string?
+NbtSharp.NbtSerializableAttribute.TypeInfoPropertyName.init -> void
+NbtSharp.NbtSerializerContext
+NbtSharp.NbtSerializerContext.NbtSerializerContext() -> void
+NbtSharp.NbtSerializerContext.NbtSerializerContext(NbtSharp.NbtSerializerOptions? options) -> void
+NbtSharp.NbtSerializerContext.Options.get -> NbtSharp.NbtSerializerOptions!
+abstract NbtSharp.NbtSerializerContext.GetTypeInfo(System.Type! type, NbtSharp.NbtSerializerOptions! options) -> NbtSharp.NbtTypeInfo?
+NbtSharp.NbtSerializerOptions.WithTypeInfoResolver(NbtSharp.INbtTypeInfoResolver! resolver) -> NbtSharp.NbtSerializerOptions!
+NbtSharp.NbtTypeInfo.NbtTypeInfo(System.Type! type, NbtSharp.NbtSerializerOptions? options) -> void
+NbtSharp.NbtTypeInfo.Options.get -> NbtSharp.NbtSerializerOptions!
+NbtSharp.NbtTypeInfo<T>.NbtTypeInfo(NbtSharp.NbtConverter<T>! converter, NbtSharp.NbtSerializerOptions? options) -> void
+static NbtSharp.NbtMetadataServices.CompoundNotTerminated(NbtSharp.NbtReader reader) -> NbtSharp.NbtException!
+static NbtSharp.NbtMetadataServices.CreateArrayConverter<TElement>() -> NbtSharp.NbtConverter<TElement[]!>!
+static NbtSharp.NbtMetadataServices.CreateDictionaryConverter<TValue>() -> NbtSharp.NbtConverter<System.Collections.Generic.Dictionary<string!, TValue>!>!
+static NbtSharp.NbtMetadataServices.CreateIDictionaryConverter<TValue>() -> NbtSharp.NbtConverter<System.Collections.Generic.IDictionary<string!, TValue>!>!
+static NbtSharp.NbtMetadataServices.CreateIReadOnlyDictionaryConverter<TValue>() -> NbtSharp.NbtConverter<System.Collections.Generic.IReadOnlyDictionary<string!, TValue>!>!
+static NbtSharp.NbtMetadataServices.CreateListConverter<TElement>() -> NbtSharp.NbtConverter<System.Collections.Generic.List<TElement>!>!
+static NbtSharp.NbtMetadataServices.CreateNullableConverter<T>() -> NbtSharp.NbtConverter<T?>!
+static NbtSharp.NbtMetadataServices.CreateReadOnlyCollectionConverter<TElement>() -> NbtSharp.NbtConverter<System.Collections.Generic.IReadOnlyCollection<TElement>!>!
+static NbtSharp.NbtMetadataServices.CreateReadOnlyListConverter<TElement>() -> NbtSharp.NbtConverter<System.Collections.Generic.IReadOnlyList<TElement>!>!
+static NbtSharp.NbtMetadataServices.DuplicateMember(NbtSharp.NbtReader reader, string! name) -> NbtSharp.NbtException!
+static NbtSharp.NbtMetadataServices.ExpectedTag(NbtSharp.NbtReader reader, NbtSharp.NbtTagType expected) -> NbtSharp.NbtException!
+static NbtSharp.NbtMetadataServices.MissingMemberName(NbtSharp.NbtReader reader) -> NbtSharp.NbtException!
+static NbtSharp.NbtMetadataServices.ReadValue<T>(ref NbtSharp.NbtReader reader, NbtSharp.NbtSerializerOptions! options, string? pathSegment) -> T
+static NbtSharp.NbtMetadataServices.WriteMember<T>(ref NbtSharp.NbtWriter writer, string! name, T value, NbtSharp.NbtSerializerOptions! options) -> void
+static NbtSharp.NbtSerializer.Deserialize<T>(System.Buffers.ReadOnlySequence<byte> data, NbtSharp.NbtTypeInfo<T>! typeInfo, out string? rootName) -> T
+static NbtSharp.NbtSerializer.Deserialize<T>(System.Buffers.ReadOnlySequence<byte> data, NbtSharp.NbtTypeInfo<T>! typeInfo) -> T
+static NbtSharp.NbtSerializer.Deserialize<T>(System.IO.Stream! stream, NbtSharp.NbtTypeInfo<T>! typeInfo, out string? rootName) -> T
+static NbtSharp.NbtSerializer.Deserialize<T>(System.IO.Stream! stream, NbtSharp.NbtTypeInfo<T>! typeInfo) -> T
+static NbtSharp.NbtSerializer.Deserialize<T>(System.ReadOnlySpan<byte> data, NbtSharp.NbtTypeInfo<T>! typeInfo, out string? rootName) -> T
+static NbtSharp.NbtSerializer.Deserialize<T>(System.ReadOnlySpan<byte> data, NbtSharp.NbtTypeInfo<T>! typeInfo) -> T
+static NbtSharp.NbtSerializer.Serialize<T>(System.Buffers.IBufferWriter<byte>! destination, T value, NbtSharp.NbtTypeInfo<T>! typeInfo, string! rootName = "") -> void
+static NbtSharp.NbtSerializer.Serialize<T>(System.IO.Stream! destination, T value, NbtSharp.NbtTypeInfo<T>! typeInfo, string! rootName = "") -> void
+static NbtSharp.NbtSerializer.Serialize<T>(T value, NbtSharp.NbtTypeInfo<T>! typeInfo, string! rootName = "") -> byte[]!
+static NbtSharp.NbtSerializer.DeserializeAsync<T>(System.Buffers.ReadOnlySequence<byte> data, NbtSharp.NbtTypeInfo<T>! typeInfo, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T>!
+static NbtSharp.NbtSerializer.DeserializeAsync<T>(System.IO.Pipelines.PipeReader! reader, NbtSharp.NbtTypeInfo<T>! typeInfo, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T>!
+static NbtSharp.NbtSerializer.DeserializeAsync<T>(System.IO.Stream! stream, NbtSharp.NbtTypeInfo<T>! typeInfo, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T>!

@@ -25,7 +25,39 @@ public sealed class NbtSerializerOptions
     /// <summary>Gets the custom converters, checked in order before the built-in converters.</summary>
     public IList<NbtConverter> Converters => _converters;
 
-    /// <summary>Gets or initializes the resolver that supplies type information for CLR types.</summary>
+    /// <summary>
+    /// Creates a copy of these options that uses <paramref name="resolver"/> as its type information
+    /// resolver. The current instance is not modified.
+    /// </summary>
+    /// <param name="resolver">The resolver for the copied options.</param>
+    /// <returns>A copy of these options bound to <paramref name="resolver"/>.</returns>
+    public NbtSerializerOptions WithTypeInfoResolver(INbtTypeInfoResolver resolver)
+    {
+        ArgumentNullException.ThrowIfNull(resolver);
+
+        var copy = new NbtSerializerOptions
+        {
+            TypeInfoResolver = resolver,
+            RootFormat = RootFormat,
+            NullValueHandling = NullValueHandling,
+            RejectDuplicateCompoundNames = RejectDuplicateCompoundNames,
+            MaxDepth = MaxDepth,
+            MaxCollectionLength = MaxCollectionLength,
+            MaxDocumentBytes = MaxDocumentBytes,
+        };
+
+        foreach (var converter in _converters)
+        {
+            copy.Converters.Add(converter);
+        }
+
+        return copy;
+    }
+
+    /// <summary>
+    /// Gets or initializes the resolver that supplies type information for CLR types. The resolver
+    /// is consulted after <see cref="Converters"/> and before the built-in converters.
+    /// </summary>
     public INbtTypeInfoResolver? TypeInfoResolver { get; init; }
 
     /// <summary>Gets or initializes whether the root tag carries a name. The default is named.</summary>
@@ -117,18 +149,37 @@ public sealed class NbtSerializerOptions
     [RequiresDynamicCode("Converter resolution may construct converters for generic types.")]
     internal NbtConverter GetConverter(Type typeToConvert)
     {
+        if (TryGetConverter(typeToConvert, out var converter))
+        {
+            return converter;
+        }
+
+        throw new NotSupportedException(
+            $"No NBT converter or type information is available for {typeToConvert}. " +
+            "Add a converter to NbtSerializerOptions.Converters or configure a TypeInfoResolver.");
+    }
+
+    [RequiresUnreferencedCode("Converter resolution may construct converters for generic types.")]
+    [RequiresDynamicCode("Converter resolution may construct converters for generic types.")]
+    internal bool TryGetConverter(Type typeToConvert, out NbtConverter converter)
+    {
         ArgumentNullException.ThrowIfNull(typeToConvert);
 
         lock (_cacheLock)
         {
-            if (_cache.TryGetValue(typeToConvert, out var cached))
+            if (_cache.TryGetValue(typeToConvert, out converter!))
             {
-                return cached;
+                return true;
             }
 
-            var converter = ResolveConverter(typeToConvert);
+            if (!TryResolveConverter(typeToConvert, out converter))
+            {
+                converter = null!;
+                return false;
+            }
+
             _cache[typeToConvert] = converter;
-            return converter;
+            return true;
         }
     }
 
@@ -140,10 +191,10 @@ public sealed class NbtSerializerOptions
         }
     }
 
-    [RequiresUnreferencedCode("Converter resolution may construct converters for generic types.")]
-    [RequiresDynamicCode("Converter resolution may construct converters for generic types.")]
-    private NbtConverter ResolveConverter(Type typeToConvert)
+    internal NbtConverter? GetCustomConverter(Type typeToConvert)
     {
+        ArgumentNullException.ThrowIfNull(typeToConvert);
+
         foreach (var converter in _converters)
         {
             if (!converter.CanConvert(typeToConvert))
@@ -156,21 +207,35 @@ public sealed class NbtSerializerOptions
                 : converter;
         }
 
-        if (NbtBuiltInConverters.TryCreate(typeToConvert, out var builtIn))
+        return null;
+    }
+
+    [RequiresUnreferencedCode("Converter resolution may construct converters for generic types.")]
+    [RequiresDynamicCode("Converter resolution may construct converters for generic types.")]
+    private bool TryResolveConverter(Type typeToConvert, out NbtConverter converter)
+    {
+        var custom = GetCustomConverter(typeToConvert);
+        if (custom is not null)
         {
-            return builtIn;
+            converter = custom;
+            return true;
         }
 
         var typeInfo = TypeInfoResolver?.GetTypeInfo(typeToConvert, this);
         if (typeInfo is not null)
         {
-            return typeInfo.Converter is NbtConverterFactory factory
-                ? factory.CreateConverter(typeToConvert, this)
+            converter = typeInfo.Converter is NbtConverterFactory typeInfoFactory
+                ? typeInfoFactory.CreateConverter(typeToConvert, this)
                 : typeInfo.Converter;
+            return true;
         }
 
-        throw new NotSupportedException(
-            $"No NBT converter or type information is available for {typeToConvert}. " +
-            "Add a converter to NbtSerializerOptions.Converters or configure a TypeInfoResolver.");
+        if (NbtBuiltInConverters.TryCreate(typeToConvert, out converter))
+        {
+            return true;
+        }
+
+        converter = null!;
+        return false;
     }
 }

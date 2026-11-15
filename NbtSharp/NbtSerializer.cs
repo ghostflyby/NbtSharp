@@ -258,13 +258,53 @@ public static class NbtSerializer
     /// </remarks>
     [RequiresUnreferencedCode("Converter resolution may use reflection or runtime generic construction.")]
     [RequiresDynamicCode("Converter resolution may use runtime generic construction.")]
-    public static async Task<T> DeserializeAsync<T>(
+    public static Task<T> DeserializeAsync<T>(
         PipeReader reader,
         NbtSerializerOptions? options = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(reader);
         options ??= new NbtSerializerOptions();
+        var converter = typeof(T) == typeof(NbtRoot)
+            ? options.GetConverter(typeof(NbtValue))
+            : options.GetConverter(typeof(T));
+        return DeserializeAsyncCore<T>(
+            reader,
+            converter,
+            options,
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Deserializes a complete NBT document from a pipe reader asynchronously using explicit type
+    /// information.
+    /// </summary>
+    /// <typeparam name="T">The declared value type.</typeparam>
+    /// <param name="reader">The pipe reader that supplies the document.</param>
+    /// <param name="typeInfo">The type information that supplies the root converter and options.</param>
+    /// <param name="cancellationToken">The token used to cancel the read.</param>
+    /// <returns>A task that yields the decoded value.</returns>
+    public static Task<T> DeserializeAsync<T>(
+        PipeReader reader,
+        NbtTypeInfo<T> typeInfo,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(reader);
+        ArgumentNullException.ThrowIfNull(typeInfo);
+        ValidateTypeInfo<T>(typeInfo);
+        return DeserializeAsyncCore<T>(
+            reader,
+            GetEffectiveConverter(typeInfo),
+            typeInfo.Options,
+            cancellationToken);
+    }
+
+    private static async Task<T> DeserializeAsyncCore<T>(
+        PipeReader reader,
+        NbtConverter converter,
+        NbtSerializerOptions options,
+        CancellationToken cancellationToken)
+    {
         var readerOptions = options.CreateReaderOptions();
 
         while (true)
@@ -281,7 +321,7 @@ public static class NbtSerializer
                 try
                 {
                     var nbtReader = new NbtReader(result.Buffer, readerOptions);
-                    var value = DeserializeCore<T>(ref nbtReader, options, out _);
+                    var value = DeserializeCore<T>(ref nbtReader, converter, options, out _);
                     var consumed = nbtReader.BytesConsumed;
                     if (options.MaxDocumentBytes > 0 && consumed > options.MaxDocumentBytes)
                     {
@@ -380,6 +420,75 @@ public static class NbtSerializer
         }
     }
 
+    /// <summary>
+    /// Deserializes a complete NBT document from a stream asynchronously using explicit type
+    /// information.
+    /// </summary>
+    /// <typeparam name="T">The declared value type.</typeparam>
+    /// <param name="stream">The stream that supplies the document.</param>
+    /// <param name="typeInfo">The type information that supplies the root converter and options.</param>
+    /// <param name="cancellationToken">The token used to cancel the read.</param>
+    /// <returns>A task that yields the decoded value.</returns>
+    public static async Task<T> DeserializeAsync<T>(
+        Stream stream,
+        NbtTypeInfo<T> typeInfo,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        ArgumentNullException.ThrowIfNull(typeInfo);
+
+        var pipe = PipeReader.Create(stream, new StreamPipeReaderOptions(leaveOpen: true));
+        try
+        {
+            return await DeserializeAsync(pipe, typeInfo, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            try
+            {
+                await pipe.CompleteAsync().ConfigureAwait(false);
+            }
+            catch
+            {
+                // Preserve the original result or exception.
+            }
+        }
+    }
+
+    /// <summary>
+    /// Deserializes a complete NBT document from a sequence asynchronously using explicit type
+    /// information.
+    /// </summary>
+    /// <typeparam name="T">The declared value type.</typeparam>
+    /// <param name="data">The NBT document.</param>
+    /// <param name="typeInfo">The type information that supplies the root converter and options.</param>
+    /// <param name="cancellationToken">The token used to cancel the read.</param>
+    /// <returns>A task that yields the decoded value.</returns>
+    public static async Task<T> DeserializeAsync<T>(
+        ReadOnlySequence<byte> data,
+        NbtTypeInfo<T> typeInfo,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(typeInfo);
+
+        var pipe = PipeReader.Create(data);
+        try
+        {
+            return await DeserializeAsync(pipe, typeInfo, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            try
+            {
+                await pipe.CompleteAsync().ConfigureAwait(false);
+            }
+            catch
+            {
+                // Preserve the original result or exception.
+            }
+        }
+    }
+
     /// <summary>Writes one unnamed value using <paramref name="writer"/>.</summary>
     /// <typeparam name="T">The declared value type.</typeparam>
     /// <param name="writer">The writer that receives the value.</param>
@@ -395,6 +504,205 @@ public static class NbtSerializer
     {
         ArgumentNullException.ThrowIfNull(options);
         SerializeValueInternal(ref writer, value, typeof(T), options, pathSegment: null, headerWritten: false);
+    }
+
+    /// <summary>Serializes a value using explicit type information.</summary>
+    /// <typeparam name="T">The declared value type.</typeparam>
+    /// <param name="value">The value to serialize.</param>
+    /// <param name="typeInfo">The type information that supplies the root converter and options.</param>
+    /// <param name="rootName">The root tag name. Empty is valid.</param>
+    /// <returns>The encoded NBT document.</returns>
+    /// <remarks>
+    /// Unlike the generic overloads, this entry point does not carry trimming or AOT annotations.
+    /// Safety depends on <paramref name="typeInfo"/> covering every type reachable from
+    /// <typeparamref name="T"/>.
+    /// </remarks>
+    public static byte[] Serialize<T>(T value, NbtTypeInfo<T> typeInfo, string rootName = "")
+    {
+        var buffer = new ArrayBufferWriter<byte>();
+        Serialize(buffer, value, typeInfo, rootName);
+        return buffer.WrittenSpan.ToArray();
+    }
+
+    /// <summary>Serializes a value using explicit type information.</summary>
+    /// <typeparam name="T">The declared value type.</typeparam>
+    /// <param name="destination">The buffer writer that receives the document.</param>
+    /// <param name="value">The value to serialize.</param>
+    /// <param name="typeInfo">The type information that supplies the root converter and options.</param>
+    /// <param name="rootName">The root tag name. Empty is valid.</param>
+    public static void Serialize<T>(
+        IBufferWriter<byte> destination,
+        T value,
+        NbtTypeInfo<T> typeInfo,
+        string rootName = "")
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+        ArgumentNullException.ThrowIfNull(typeInfo);
+        ArgumentNullException.ThrowIfNull(rootName);
+        ValidateTypeInfo<T>(typeInfo);
+
+        var options = typeInfo.Options;
+        if (options.RootFormat == NbtRootFormat.Unnamed && rootName.Length != 0)
+        {
+            throw new NbtException("An unnamed root cannot carry a name. Use NbtRootFormat.Named.");
+        }
+
+        var writer = new NbtWriter(destination, options.CreateWriterOptions());
+        try
+        {
+            SerializeRootValue(
+            ref writer,
+            value,
+            typeof(T),
+            rootName,
+            options,
+            GetEffectiveConverter(typeInfo));
+            writer.Complete();
+        }
+        catch (NbtException ex)
+        {
+            EnsureRootPath(ex);
+            throw;
+        }
+    }
+
+    /// <summary>Serializes a value to a stream using explicit type information.</summary>
+    /// <typeparam name="T">The declared value type.</typeparam>
+    /// <param name="destination">The stream that receives the document.</param>
+    /// <param name="value">The value to serialize.</param>
+    /// <param name="typeInfo">The type information that supplies the root converter and options.</param>
+    /// <param name="rootName">The root tag name. Empty is valid.</param>
+    public static void Serialize<T>(
+        Stream destination,
+        T value,
+        NbtTypeInfo<T> typeInfo,
+        string rootName = "")
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+
+        var pipeWriter = PipeWriter.Create(
+            destination,
+            new StreamPipeWriterOptions(leaveOpen: true));
+        try
+        {
+            Serialize(pipeWriter, value, typeInfo, rootName);
+        }
+        catch (Exception ex)
+        {
+            try
+            {
+                pipeWriter.Complete(ex);
+            }
+            catch
+            {
+                // Preserve the original serialization failure.
+            }
+
+            throw;
+        }
+
+        pipeWriter.Complete();
+    }
+
+    /// <summary>Deserializes a document from a span using explicit type information.</summary>
+    /// <typeparam name="T">The declared value type.</typeparam>
+    /// <param name="data">The NBT document.</param>
+    /// <param name="typeInfo">The type information that supplies the root converter and options.</param>
+    /// <returns>The decoded value.</returns>
+    public static T Deserialize<T>(ReadOnlySpan<byte> data, NbtTypeInfo<T> typeInfo) =>
+        Deserialize(data, typeInfo, out _);
+
+    /// <summary>Deserializes a document from a span using explicit type information.</summary>
+    /// <typeparam name="T">The declared value type.</typeparam>
+    /// <param name="data">The NBT document.</param>
+    /// <param name="typeInfo">The type information that supplies the root converter and options.</param>
+    /// <param name="rootName">The root name, or <see langword="null"/> for an unnamed root.</param>
+    /// <returns>The decoded value.</returns>
+    public static T Deserialize<T>(
+        ReadOnlySpan<byte> data,
+        NbtTypeInfo<T> typeInfo,
+        out string? rootName)
+    {
+        ArgumentNullException.ThrowIfNull(typeInfo);
+        ValidateTypeInfo<T>(typeInfo);
+
+        var options = typeInfo.Options;
+        var reader = new NbtReader(data, options.CreateReaderOptions());
+        return DeserializeCore<T>(ref reader, GetEffectiveConverter(typeInfo), options, out rootName);
+    }
+
+    /// <summary>Deserializes a document from a sequence using explicit type information.</summary>
+    /// <typeparam name="T">The declared value type.</typeparam>
+    /// <param name="data">The NBT document.</param>
+    /// <param name="typeInfo">The type information that supplies the root converter and options.</param>
+    /// <returns>The decoded value.</returns>
+    public static T Deserialize<T>(ReadOnlySequence<byte> data, NbtTypeInfo<T> typeInfo) =>
+        Deserialize(data, typeInfo, out _);
+
+    /// <summary>Deserializes a document from a sequence using explicit type information.</summary>
+    /// <typeparam name="T">The declared value type.</typeparam>
+    /// <param name="data">The NBT document.</param>
+    /// <param name="typeInfo">The type information that supplies the root converter and options.</param>
+    /// <param name="rootName">The root name, or <see langword="null"/> for an unnamed root.</param>
+    /// <returns>The decoded value.</returns>
+    public static T Deserialize<T>(
+        ReadOnlySequence<byte> data,
+        NbtTypeInfo<T> typeInfo,
+        out string? rootName)
+    {
+        ArgumentNullException.ThrowIfNull(typeInfo);
+        ValidateTypeInfo<T>(typeInfo);
+
+        var options = typeInfo.Options;
+        var reader = new NbtReader(data, options.CreateReaderOptions());
+        return DeserializeCore<T>(ref reader, GetEffectiveConverter(typeInfo), options, out rootName);
+    }
+
+    /// <summary>Deserializes a document from a stream using explicit type information.</summary>
+    /// <typeparam name="T">The declared value type.</typeparam>
+    /// <param name="stream">The stream that supplies the document.</param>
+    /// <param name="typeInfo">The type information that supplies the root converter and options.</param>
+    /// <returns>The decoded value.</returns>
+    public static T Deserialize<T>(Stream stream, NbtTypeInfo<T> typeInfo) =>
+        Deserialize(stream, typeInfo, out _);
+
+    /// <summary>Deserializes a document from a stream using explicit type information.</summary>
+    /// <typeparam name="T">The declared value type.</typeparam>
+    /// <param name="stream">The stream that supplies the document.</param>
+    /// <param name="typeInfo">The type information that supplies the root converter and options.</param>
+    /// <param name="rootName">The root name, or <see langword="null"/> for an unnamed root.</param>
+    /// <returns>The decoded value.</returns>
+    public static T Deserialize<T>(
+        Stream stream,
+        NbtTypeInfo<T> typeInfo,
+        out string? rootName)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        ArgumentNullException.ThrowIfNull(typeInfo);
+        ValidateTypeInfo<T>(typeInfo);
+
+        var options = typeInfo.Options;
+        var reader = new NbtReader(stream, options.CreateReaderOptions());
+        try
+        {
+            return DeserializeCore<T>(ref reader, GetEffectiveConverter(typeInfo), options, out rootName);
+        }
+        finally
+        {
+            reader.Dispose();
+        }
+    }
+
+    private static NbtConverter GetEffectiveConverter<T>(NbtTypeInfo<T> typeInfo) =>
+        typeInfo.Options.GetCustomConverter(typeof(T)) ?? typeInfo.Converter;
+
+    private static void ValidateTypeInfo<T>(NbtTypeInfo<T> typeInfo)
+    {
+        if (typeof(T) == typeof(NbtRoot))
+        {
+            throw new NotSupportedException(
+                "NbtRoot is handled by the DOM overloads, not by type information.");
+        }
     }
 
     /// <summary>Writes one named compound member using <paramref name="writer"/>.</summary>
@@ -541,9 +849,18 @@ public static class NbtSerializer
         NbtSerializerOptions options,
         string? pathSegment)
     {
+        return DeserializeValueCore(ref reader, type, options.GetConverter(type), options, pathSegment);
+    }
+
+    internal static object? DeserializeValueCore(
+        ref NbtReader reader,
+        Type type,
+        NbtConverter converter,
+        NbtSerializerOptions options,
+        string? pathSegment)
+    {
         try
         {
-            var converter = options.GetConverter(type);
             var startToken = reader.TokenType;
             var startDepth = reader.CurrentDepth;
             var parentDepth = startToken is NbtTokenType.StartCompound or NbtTokenType.StartList
@@ -598,6 +915,7 @@ public static class NbtSerializer
             throw new InvalidOperationException("A value payload is already expected.");
         }
 
+        NbtConverter? converter = null;
         try
         {
             if (value is null)
@@ -606,7 +924,7 @@ public static class NbtSerializer
                 return;
             }
 
-            var converter = options.GetConverter(type);
+            converter = options.GetConverter(type);
             if (!converter.TryGetTagType(value, type, options, out var tagType))
             {
                 throw new NotSupportedException(
@@ -621,7 +939,7 @@ public static class NbtSerializer
             throw;
         }
 
-        SerializeValueInternal(ref writer, value, type, options, "." + name, headerWritten: true);
+        SerializeValueCore(ref writer, value, type, converter, options, "." + name, headerWritten: true);
     }
 
     [RequiresUnreferencedCode("Converter resolution may use reflection or runtime generic construction.")]
@@ -634,6 +952,31 @@ public static class NbtSerializer
         string? pathSegment,
         bool headerWritten)
     {
+        if (value is null)
+        {
+            HandleNullValue(ref writer);
+            return;
+        }
+
+        SerializeValueCore(
+            ref writer,
+            value,
+            type,
+            options.GetConverter(type),
+            options,
+            pathSegment,
+            headerWritten);
+    }
+
+    internal static void SerializeValueCore(
+        ref NbtWriter writer,
+        object? value,
+        Type type,
+        NbtConverter converter,
+        NbtSerializerOptions options,
+        string? pathSegment,
+        bool headerWritten)
+    {
         try
         {
             if (value is null)
@@ -642,7 +985,6 @@ public static class NbtSerializer
                 return;
             }
 
-            var converter = options.GetConverter(type);
             var beforeDepth = writer.CurrentDepth;
             var beforeValuesAtDepth = writer.ValuesWrittenAtDepth(beforeDepth);
             var payloadWasPrepared = headerWritten || writer.IsPayloadExpected;
@@ -677,6 +1019,29 @@ public static class NbtSerializer
         }
     }
 
+    private static void SerializeRootValue(
+        ref NbtWriter writer,
+        object? value,
+        Type type,
+        string rootName,
+        NbtSerializerOptions options,
+        NbtConverter converter)
+    {
+        if (value is null)
+        {
+            throw new NbtException("The root value cannot be null.");
+        }
+
+        if (!converter.TryGetTagType(value, type, options, out var tagType))
+        {
+            throw new NotSupportedException(
+                $"The converter for {type} must implement TryGetTagType to write a root value.");
+        }
+
+        writer.WriteRootHeader(tagType, rootName);
+        SerializeValueCore(ref writer, value, type, converter, options, pathSegment: null, headerWritten: true);
+    }
+
     [RequiresUnreferencedCode("Converter resolution may use reflection or runtime generic construction.")]
     [RequiresDynamicCode("Converter resolution may use runtime generic construction.")]
     private static void SerializeRootValue(
@@ -686,20 +1051,7 @@ public static class NbtSerializer
         string rootName,
         NbtSerializerOptions options)
     {
-        if (value is null)
-        {
-            throw new NbtException("The root value cannot be null.");
-        }
-
-        var converter = options.GetConverter(type);
-        if (!converter.TryGetTagType(value, type, options, out var tagType))
-        {
-            throw new NotSupportedException(
-                $"The converter for {type} must implement TryGetTagType to write a root value.");
-        }
-
-        writer.WriteRootHeader(tagType, rootName);
-        SerializeValueInternal(ref writer, value, type, options, pathSegment: null, headerWritten: true);
+        SerializeRootValue(ref writer, value, type, rootName, options, options.GetConverter(type));
     }
 
     internal static void PrependPath(NbtException exception, string? segment)
@@ -727,6 +1079,18 @@ public static class NbtSerializer
         NbtSerializerOptions options,
         out string? rootName)
     {
+        var converter = typeof(T) == typeof(NbtRoot)
+            ? options.GetConverter(typeof(NbtValue))
+            : options.GetConverter(typeof(T));
+        return DeserializeCore<T>(ref reader, converter, options, out rootName);
+    }
+
+    private static T DeserializeCore<T>(
+        ref NbtReader reader,
+        NbtConverter converter,
+        NbtSerializerOptions options,
+        out string? rootName)
+    {
         rootName = null;
         try
         {
@@ -739,16 +1103,25 @@ public static class NbtSerializer
             }
 
             rootName = reader.Name;
-
             object? value;
             if (typeof(T) == typeof(NbtRoot))
             {
-                var nbtValue = DeserializeValueInternal(ref reader, typeof(NbtValue), options, pathSegment: null);
+                var nbtValue = DeserializeValueCore(
+                    ref reader,
+                    typeof(NbtValue),
+                    converter,
+                    options,
+                    pathSegment: null);
                 value = new NbtRoot(rootName, (NbtValue)nbtValue!);
             }
             else
             {
-                value = DeserializeValueInternal(ref reader, typeof(T), options, pathSegment: null);
+                value = DeserializeValueCore(
+                    ref reader,
+                    typeof(T),
+                    converter,
+                    options,
+                    pathSegment: null);
             }
 
             if (reader.CurrentDepth != 0)

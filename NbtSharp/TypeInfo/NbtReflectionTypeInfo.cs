@@ -4,8 +4,8 @@ namespace NbtSharp;
 
 internal sealed class NbtReflectionTypeInfo : NbtTypeInfo
 {
-    public NbtReflectionTypeInfo(Type type, NbtConverter converter)
-        : base(type)
+    public NbtReflectionTypeInfo(Type type, NbtConverter converter, NbtSerializerOptions options)
+        : base(type, options)
     {
         ArgumentNullException.ThrowIfNull(converter);
         Converter = converter;
