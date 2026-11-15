@@ -17,7 +17,7 @@ namespace NbtSharp;
 /// </para>
 /// <para>
 /// This resolver uses reflection and runtime generic construction. It is not safe for Native AOT
-/// or aggressive trimming; source-generated type information will provide the AOT path.
+/// or aggressive trimming; source-generated type information provides the AOT path.
 /// </para>
 /// </remarks>
 [RequiresUnreferencedCode("Reflection-based object mapping is not trimming-safe.")]
@@ -28,6 +28,10 @@ public sealed class NbtReflectionTypeInfoResolver : INbtTypeInfoResolver
     [
         typeof(object),
         typeof(NbtRoot),
+        typeof(NbtValue),
+        typeof(NbtList),
+        typeof(NbtCompound),
+        typeof(NbtEndList),
         typeof(char),
         typeof(ushort),
         typeof(uint),
@@ -50,7 +54,7 @@ public sealed class NbtReflectionTypeInfoResolver : INbtTypeInfoResolver
         typeof(BigInteger),
     ];
 
-    private readonly Dictionary<Type, NbtTypeInfo> _cache = [];
+    private readonly Dictionary<Type, NbtConverter> _cache = [];
     private readonly Lock _cacheLock = new();
 
     /// <inheritdoc/>
@@ -66,15 +70,13 @@ public sealed class NbtReflectionTypeInfoResolver : INbtTypeInfoResolver
 
         lock (_cacheLock)
         {
-            if (_cache.TryGetValue(type, out var cached))
+            if (!_cache.TryGetValue(type, out var converter))
             {
-                return cached;
+                converter = new NbtReflectionObjectConverter(type);
+                _cache[type] = converter;
             }
 
-            var converter = new NbtReflectionObjectConverter(type);
-            var typeInfo = new NbtReflectionTypeInfo(type, converter);
-            _cache[type] = typeInfo;
-            return typeInfo;
+            return new NbtReflectionTypeInfo(type, converter, options);
         }
     }
 
@@ -86,6 +88,11 @@ public sealed class NbtReflectionTypeInfoResolver : INbtTypeInfoResolver
         }
 
         if (type.IsGenericTypeDefinition || type.IsEnum || type.IsPrimitive)
+        {
+            return false;
+        }
+
+        if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Nullable<>))
         {
             return false;
         }

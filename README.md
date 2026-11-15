@@ -89,6 +89,47 @@ member, `[NbtIgnore]` excludes it, and public fields are included only with `[Nb
 public parameterless constructor is preferred; otherwise a constructor whose parameter names match
 the members is used. Unknown members are skipped and missing members keep their defaults.
 
+## Source generation
+
+Source-generated type information avoids reflection and runtime generic construction:
+
+```csharp
+[NbtSerializable(typeof(Player))]
+[NbtSerializable(typeof(Item))]
+partial class GameContext : NbtSerializerContext;
+
+var context = GameContext.Default;
+byte[] data = NbtSerializer.Serialize(player, context.Player, "Player");
+Player copy = NbtSerializer.Deserialize(data, context.Player);
+```
+
+The generator emits a converter for every reachable class or struct and type information for arrays,
+lists, read-only collections, string-keyed dictionaries, and nullable value types. Enums are
+serialized as the signed NBT integer tag that matches their underlying type width (`byte`/`sbyte`
+use `TAG_Byte`, `short`/`ushort` use `TAG_Short`, `int`/`uint` use `TAG_Int`, and `long`/`ulong`
+use `TAG_Long`); unsigned values preserve their bit pattern. The generator follows the same mapping
+rules as the reflection resolver: public instance properties, `[NbtInclude]` fields, `[NbtIgnore]`,
+`[NbtPropertyName]`, constructor binding, unknown-member skipping, and null and duplicate handling.
+`init`-only and `required` members are supported through `UnsafeAccessor`. Unsupported shapes are
+reported as `NBTSG` diagnostics at compile time.
+
+The analyzer ships inside the `NbtSharp` package. The type-information overloads do not carry
+`RequiresUnreferencedCode` or `RequiresDynamicCode`; Native AOT works when every reachable type is
+generated. Reflection remains available through `NbtReflectionTypeInfoResolver` for types that are
+not part of a generated context, and it also supports enum members through the built-in enum
+converter. When no custom converters are registered, generated object converters read and write
+scalar members directly; registering a custom converter disables that fast path for the operation.
+Prepared context models, generated source, and diagnostics are cached per context, so unrelated
+compilation changes reuse them and skip source emission; type-graph preparation still runs when
+semantic models change.
+
+Required members are strict: every required member that is part of the mapping must be present in
+the compound, otherwise deserialization throws `NbtException`. A required mapped member whose value
+is null cannot be serialized and throws regardless of `NullValueHandling`. A required member that is
+excluded from the mapping requires the selected constructor to be marked with
+`[SetsRequiredMembers]`; otherwise the source generator reports `NBTSG015` and the reflection
+resolver throws `NotSupportedException`.
+
 ## Streaming
 
 The reader produces value and container tokens. Compound members carry a name; list elements do not:
@@ -193,6 +234,9 @@ the list is empty.
 `NbtSerializerOptions` controls:
 
 - `Converters`, `TypeInfoResolver`, and `RootFormat` (named or unnamed root).
+  Converter lookup checks `Converters` first, then `TypeInfoResolver`, then the built-in
+  converters, so a resolver can supply converters for collection types that the built-in
+  factories would otherwise construct dynamically.
 - `NullValueHandling`: omit a null compound member (default) or throw. Null roots and null list
   elements always throw because NBT has no null tag.
 - `RejectDuplicateCompoundNames`: while reading, keep the last duplicate (default) or throw.
@@ -213,8 +257,8 @@ follows Java's `DataInputStream.readUTF` and rejects lead bytes of 0xF0 or great
 
 Generic serializer entry points that may resolve converters or reflection are annotated with
 `RequiresUnreferencedCode` and `RequiresDynamicCode`. DOM entry points use built-in converters and
-remain AOT-clean. The reflection resolver is opt-in. A source generator for fully AOT-safe type
-information is planned.
+remain AOT-clean. The reflection resolver is opt-in. Source-generated type information and the
+type-information serializer overloads provide the fully AOT-safe path.
 
 The `Stream` overloads are synchronous. `Serialize(Stream)` flushes the document when serialization
 completes and leaves the stream open; `Deserialize(Stream)` reads the stream through a fixed-size

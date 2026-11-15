@@ -9,7 +9,15 @@ public sealed class NbtTypeInfo<T> : NbtTypeInfo
     /// <summary>Initializes a type descriptor that uses <paramref name="converter"/>.</summary>
     /// <param name="converter">The converter for <typeparamref name="T"/>.</param>
     public NbtTypeInfo(NbtConverter<T> converter)
-        : base(typeof(T))
+        : this(converter, options: null)
+    {
+    }
+
+    /// <summary>Initializes a type descriptor that uses <paramref name="converter"/>.</summary>
+    /// <param name="converter">The converter for <typeparamref name="T"/>.</param>
+    /// <param name="options">The options used by type-information serializer overloads.</param>
+    public NbtTypeInfo(NbtConverter<T> converter, NbtSerializerOptions? options)
+        : base(typeof(T), options)
     {
         ArgumentNullException.ThrowIfNull(converter);
         TypedConverter = converter;

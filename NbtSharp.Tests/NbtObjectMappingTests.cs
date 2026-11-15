@@ -165,6 +165,47 @@ public sealed class NbtObjectMappingTests
             NbtSerializer.Serialize(new UnsupportedDto(1), "root", options));
     }
 
+    [Fact]
+    public void RequiredMembersMustBeMappedOrConstructorInitialized()
+    {
+        var options = ReflectionOptions();
+
+        Assert.Throws<NotSupportedException>(() =>
+            NbtSerializer.Serialize(
+                new UnmappedRequiredDto { Ignored = "", Value = 1 },
+                "root",
+                options));
+
+        var value = new InitializedRequiredDto { Value = 2 };
+        var copy = NbtSerializer.Deserialize<InitializedRequiredDto>(
+            NbtSerializer.Serialize(value, "root", options),
+            options);
+
+        Assert.Equal(2, copy.Value);
+    }
+
+    [Fact]
+    public void RefConstructorsAreNotUsable()
+    {
+        var options = ReflectionOptions();
+
+        Assert.Throws<NotSupportedException>(() =>
+            options.GetConverter(typeof(RefConstructorDto)));
+    }
+
+    [Fact]
+    public void ReflectionResolverLeavesBuiltInTypesToTheBuiltInConverters()
+    {
+        var options = ReflectionOptions();
+        var resolver = options.TypeInfoResolver!;
+
+        Assert.Null(resolver.GetTypeInfo(typeof(int?), options));
+        Assert.Null(resolver.GetTypeInfo(typeof(NbtValue), options));
+        Assert.Null(resolver.GetTypeInfo(typeof(NbtList), options));
+        Assert.Null(resolver.GetTypeInfo(typeof(NbtCompound), options));
+        Assert.Null(resolver.GetTypeInfo(typeof(NbtEndList), options));
+    }
+
     private static NbtSerializerOptions ReflectionOptions(
         bool rejectDuplicateCompoundNames = false,
         NbtNullValueHandling nullValueHandling = NbtNullValueHandling.Omit) => new()
@@ -246,5 +287,37 @@ public sealed class NbtObjectMappingTests
         {
             _ = unrelated;
         }
+    }
+
+    private sealed class UnmappedRequiredDto
+    {
+        [NbtIgnore]
+        public required string Ignored { get; init; }
+
+        public int Value { get; set; }
+    }
+
+    private sealed class InitializedRequiredDto
+    {
+        [System.Diagnostics.CodeAnalysis.SetsRequiredMembers]
+        public InitializedRequiredDto()
+        {
+            Ignored = "";
+        }
+
+        [NbtIgnore]
+        public required string Ignored { get; init; }
+
+        public int Value { get; set; }
+    }
+
+    private sealed class RefConstructorDto
+    {
+        public RefConstructorDto(ref int value)
+        {
+            _ = value;
+        }
+
+        public int Value { get; set; }
     }
 }

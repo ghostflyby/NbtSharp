@@ -38,6 +38,12 @@ internal static class NbtBuiltInConverters
             return true;
         }
 
+        if (type.IsEnum)
+        {
+            converter = CreateGeneric(typeof(NbtEnumConverter<>), type);
+            return true;
+        }
+
         if (type.IsArray)
         {
             if (type.GetArrayRank() != 1)

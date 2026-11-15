@@ -41,6 +41,14 @@ internal static class NbtCollectionReader
         }
 
         var list = new List<TElement>(count <= 4096 ? count : 0);
+        NbtConverter? converter = null;
+        NbtConverter<TElement>? typedConverter = null;
+        if (count > 0)
+        {
+            converter = options.GetConverter(typeof(TElement));
+            typedConverter = converter as NbtConverter<TElement>;
+        }
+
         for (var i = 0; i < count; i++)
         {
             if (!reader.Read())
@@ -52,11 +60,26 @@ internal static class NbtCollectionReader
                 };
             }
 
-            list.Add((TElement)NbtSerializer.DeserializeValueInternal(
-                ref reader,
-                typeof(TElement),
-                options,
-                $"[{i}]")!);
+            try
+            {
+                list.Add(typedConverter is not null
+                    ? NbtSerializer.DeserializeValueCore(
+                        ref reader,
+                        typedConverter,
+                        options,
+                        pathSegment: null)
+                    : (TElement)NbtSerializer.DeserializeValueCore(
+                        ref reader,
+                        typeof(TElement),
+                        converter!,
+                        options,
+                        pathSegment: null)!);
+            }
+            catch (NbtException ex)
+            {
+                NbtSerializer.PrependPath(ex, $"[{i}]");
+                throw;
+            }
         }
 
         if (!reader.Read() || reader.TokenType != NbtTokenType.EndList)
@@ -86,25 +109,30 @@ internal static class NbtCollectionReader
 
     private static bool TryGetKnownElementType(Type type, out NbtTagType tagType)
     {
+        if (type.IsEnum)
+        {
+            return TryGetKnownElementType(Enum.GetUnderlyingType(type), out tagType);
+        }
+
         if (type == typeof(sbyte) || type == typeof(byte) || type == typeof(bool))
         {
             tagType = NbtTagType.Byte;
             return true;
         }
 
-        if (type == typeof(short))
+        if (type == typeof(short) || type == typeof(ushort))
         {
             tagType = NbtTagType.Short;
             return true;
         }
 
-        if (type == typeof(int))
+        if (type == typeof(int) || type == typeof(uint))
         {
             tagType = NbtTagType.Int;
             return true;
         }
 
-        if (type == typeof(long))
+        if (type == typeof(long) || type == typeof(ulong))
         {
             tagType = NbtTagType.Long;
             return true;

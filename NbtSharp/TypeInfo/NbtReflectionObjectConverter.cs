@@ -18,6 +18,8 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
     private readonly ConstructorInfo? _constructor;
     private readonly int[] _constructorMemberIndexes;
     private readonly int[] _settableMemberIndexes;
+    private readonly int[] _requiredMemberIndexes;
+    private readonly bool[] _isRequiredMember;
 
     public NbtReflectionObjectConverter(Type type)
     {
@@ -34,6 +36,13 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
         }
 
         (_constructor, _constructorMemberIndexes) = SelectConstructor(type, _members);
+        _requiredMemberIndexes = DiscoverRequiredMemberIndexes(type, _constructor);
+        _isRequiredMember = new bool[_members.Length];
+        foreach (var requiredIndex in _requiredMemberIndexes)
+        {
+            _isRequiredMember[requiredIndex] = true;
+        }
+
         var constructorBound = _constructorMemberIndexes.ToHashSet();
         _settableMemberIndexes = Enumerable.Range(0, _members.Length)
             .Where(index => !constructorBound.Contains(index) && _members[index].CanWrite)
@@ -71,6 +80,20 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
         {
             if (reader.TokenType == NbtTokenType.EndCompound)
             {
+                foreach (var requiredIndex in _requiredMemberIndexes)
+                {
+                    if (!present[requiredIndex])
+                    {
+                        var requiredName = _members[requiredIndex].Name;
+                        throw new NbtException(
+                            $"The compound does not contain the required member '{requiredName}'.")
+                        {
+                            BytePosition = reader.BytesConsumed,
+                            Path = "." + requiredName,
+                        };
+                    }
+                }
+
                 return CreateInstance(values, present);
             }
 
@@ -98,11 +121,20 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
                 };
             }
 
-            values[index] = NbtSerializer.DeserializeValueInternal(
-                ref reader,
-                _members[index].Type,
-                options,
-                "." + name);
+            try
+            {
+                values[index] = NbtSerializer.DeserializeValueInternal(
+                    ref reader,
+                    _members[index].Type,
+                    options,
+                    pathSegment: null);
+            }
+            catch (NbtException ex)
+            {
+                NbtSerializer.PrependPath(ex, "." + name);
+                throw;
+            }
+
             present[index] = true;
         }
 
@@ -121,12 +153,24 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
         }
 
         writer.WriteStartCompound();
-        foreach (var member in _members)
+        for (var i = 0; i < _members.Length; i++)
         {
+            var member = _members[i];
+            var memberValue = member.GetValue(value);
+            if (_isRequiredMember[i] && memberValue is null)
+            {
+                throw new NbtException(
+                    $"The required member '{member.Name}' cannot be null.")
+                {
+                    BytePosition = writer.BytesWritten,
+                    Path = "." + member.Name,
+                };
+            }
+
             NbtSerializer.SerializeMemberInternal(
                 ref writer,
                 member.Name,
-                member.GetValue(value),
+                memberValue,
                 member.Type,
                 options);
         }
@@ -172,13 +216,96 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
 
     private static object? GetDefault(Type type) => type.IsValueType ? Activator.CreateInstance(type) : null;
 
+    private int[] DiscoverRequiredMemberIndexes(Type type, ConstructorInfo? constructor)
+    {
+        var mappedIndexes = new HashSet<int>();
+        List<MemberInfo>? unmapped = null;
+        foreach (var requiredMember in DiscoverRequiredMembers(type))
+        {
+            var index = Array.FindIndex(_members, member => member.Matches(requiredMember));
+            if (index >= 0)
+            {
+                mappedIndexes.Add(index);
+            }
+            else
+            {
+                unmapped ??= [];
+                unmapped.Add(requiredMember);
+            }
+        }
+
+        if (unmapped is not null &&
+            (constructor is null || !SetsRequiredMembers(constructor)))
+        {
+            throw new NotSupportedException(
+                $"The required member '{unmapped[0].Name}' on {type} is not serialized and the " +
+                "selected constructor is not marked with SetsRequiredMembers.");
+        }
+
+        return Enumerable.Range(0, _members.Length)
+            .Where(mappedIndexes.Contains)
+            .ToArray();
+    }
+
+    private static List<MemberInfo> DiscoverRequiredMembers(Type type)
+    {
+        const BindingFlags flags =
+            BindingFlags.Public |
+            BindingFlags.NonPublic |
+            BindingFlags.Instance |
+            BindingFlags.DeclaredOnly;
+
+        var required = new List<MemberInfo>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        for (var current = type; current is not null; current = current.BaseType)
+        {
+            foreach (var property in current.GetProperties(flags))
+            {
+                if (!property.IsDefined(
+                        typeof(System.Runtime.CompilerServices.RequiredMemberAttribute),
+                        inherit: false))
+                {
+                    continue;
+                }
+
+                var key = "P:" + property.Name + ":" + property.PropertyType;
+                if (seen.Add(key))
+                {
+                    required.Add(property);
+                }
+            }
+
+            foreach (var field in current.GetFields(flags))
+            {
+                if (!field.IsDefined(
+                        typeof(System.Runtime.CompilerServices.RequiredMemberAttribute),
+                        inherit: false))
+                {
+                    continue;
+                }
+
+                var key = "F:" + field.Name + ":" + field.FieldType;
+                if (seen.Add(key))
+                {
+                    required.Add(field);
+                }
+            }
+        }
+
+        return required;
+    }
+
+    private static bool SetsRequiredMembers(ConstructorInfo constructor) =>
+        constructor.IsDefined(typeof(SetsRequiredMembersAttribute), inherit: false);
+
     private static NbtReflectionMember[] DiscoverMembers(Type type)
     {
         var members = new List<(int Token, NbtReflectionMember Member)>();
 
         foreach (var property in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
         {
-            if (property.GetMethod is null || property.GetIndexParameters().Length != 0)
+            if (property.GetMethod is not { IsPublic: true } ||
+                property.GetIndexParameters().Length != 0)
             {
                 continue;
             }
@@ -216,7 +343,12 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
         Type type,
         NbtReflectionMember[] members)
     {
-        var constructors = type.GetConstructors(BindingFlags.Public | BindingFlags.Instance);
+        var constructors = type
+            .GetConstructors(BindingFlags.Public | BindingFlags.Instance)
+            .Where(static constructor =>
+                constructor.GetParameters().All(static parameter =>
+                    !parameter.ParameterType.IsByRef))
+            .ToArray();
         var parameterless = constructors.FirstOrDefault(static constructor => constructor.GetParameters().Length == 0);
         if (parameterless is not null)
         {
