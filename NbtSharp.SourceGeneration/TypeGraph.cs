@@ -117,6 +117,8 @@ internal sealed class MemberModel
 
     public bool CanWrite { get; }
 
+    public bool IsRequired { get; set; }
+
     public bool IsInitOnly { get; }
 
     public ITypeSymbol? SetterContainingType { get; }
@@ -344,9 +346,31 @@ internal sealed class TypeGraph
             }
         }
 
-        var requiredMembers = members.Where(static member => IsRequired(member.Symbol)).ToArray();
+        var requiredSymbols = CollectRequiredMembers(type);
+        var unmappedRequired = requiredSymbols
+            .Where(required => !members.Any(member => MatchesMember(member, required)))
+            .ToArray();
+        if (unmappedRequired.Length > 0 &&
+            (constructor is null || !SetsRequiredMembers(constructor.Symbol)))
+        {
+            var required = unmappedRequired[0];
+            Report(
+                Diagnostics.RequiredMemberNotMapped,
+                required.Locations.FirstOrDefault() ?? location,
+                type.ToDisplayString(FullyQualified),
+                required.Name);
+            HasErrors = true;
+            return null;
+        }
+
+        foreach (var member in members)
+        {
+            member.IsRequired = requiredSymbols.Any(required => MatchesMember(member, required));
+        }
+
+        var mappedRequired = members.Where(static member => member.IsRequired).ToArray();
         var useConstructorAccessor = false;
-        if (requiredMembers.Length > 0 &&
+        if (mappedRequired.Length > 0 &&
             (constructor is null || !SetsRequiredMembers(constructor.Symbol)))
         {
             if (type.IsValueType)
@@ -558,8 +582,60 @@ internal sealed class TypeGraph
         symbol.GetAttributes().FirstOrDefault(attribute =>
             attribute.AttributeClass?.ToDisplayString() == metadataName);
 
-    private static bool IsRequired(ISymbol symbol) =>
-        symbol is IPropertySymbol { IsRequired: true } or IFieldSymbol { IsRequired: true };
+    private static List<ISymbol> CollectRequiredMembers(INamedTypeSymbol type)
+    {
+        var requiredMembers = new List<ISymbol>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        for (var current = type; current is not null; current = current.BaseType)
+        {
+            foreach (var member in current.GetMembers())
+            {
+                var isRequired = member switch
+                {
+                    IPropertySymbol { IsRequired: true } => true,
+                    IFieldSymbol { IsRequired: true } => true,
+                    _ => false,
+                };
+                if (!isRequired)
+                {
+                    continue;
+                }
+
+                var memberType = GetMemberType(member);
+                if (memberType is null)
+                {
+                    continue;
+                }
+
+                var key = (member is IFieldSymbol ? "F:" : "P:") +
+                          member.Name +
+                          ":" +
+                          memberType.ToDisplayString(FullyQualified);
+                if (seen.Add(key))
+                {
+                    requiredMembers.Add(member);
+                }
+            }
+        }
+
+        return requiredMembers;
+    }
+
+    private static ITypeSymbol? GetMemberType(ISymbol member) => member switch
+    {
+        IPropertySymbol property => property.Type,
+        IFieldSymbol field => field.Type,
+        _ => null,
+    };
+
+    private static bool MatchesMember(MemberModel member, ISymbol requiredMember)
+    {
+        var requiredType = GetMemberType(requiredMember);
+        return requiredType is not null &&
+               member.ClrName == requiredMember.Name &&
+               member.IsField == requiredMember is IFieldSymbol &&
+               SymbolEqualityComparer.Default.Equals(member.Type, requiredType);
+    }
 
     private static bool SetsRequiredMembers(IMethodSymbol constructor) =>
         constructor.GetAttributes().Any(static attribute =>

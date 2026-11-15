@@ -118,6 +118,12 @@ converters read and write scalar members directly; registering a custom converte
 fast path for the operation. Generated source and diagnostics are cached per context, so unrelated
 compilation changes do not re-add unchanged sources.
 
+Required members are strict: every required member that is part of the mapping must be present in
+the compound, otherwise deserialization throws `NbtException`. A required member that is excluded
+from the mapping requires the selected constructor to be marked with `[SetsRequiredMembers]`;
+otherwise the source generator reports `NBTSG015` and the reflection resolver throws
+`NotSupportedException`.
+
 ## Streaming
 
 The reader produces value and container tokens. Compound members carry a name; list elements do not:

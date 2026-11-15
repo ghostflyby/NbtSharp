@@ -18,6 +18,7 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
     private readonly ConstructorInfo? _constructor;
     private readonly int[] _constructorMemberIndexes;
     private readonly int[] _settableMemberIndexes;
+    private readonly int[] _requiredMemberIndexes;
 
     public NbtReflectionObjectConverter(Type type)
     {
@@ -34,6 +35,7 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
         }
 
         (_constructor, _constructorMemberIndexes) = SelectConstructor(type, _members);
+        _requiredMemberIndexes = DiscoverRequiredMemberIndexes(type, _constructor);
         var constructorBound = _constructorMemberIndexes.ToHashSet();
         _settableMemberIndexes = Enumerable.Range(0, _members.Length)
             .Where(index => !constructorBound.Contains(index) && _members[index].CanWrite)
@@ -71,6 +73,20 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
         {
             if (reader.TokenType == NbtTokenType.EndCompound)
             {
+                foreach (var requiredIndex in _requiredMemberIndexes)
+                {
+                    if (!present[requiredIndex])
+                    {
+                        var requiredName = _members[requiredIndex].Name;
+                        throw new NbtException(
+                            $"The compound does not contain the required member '{requiredName}'.")
+                        {
+                            BytePosition = reader.BytesConsumed,
+                            Path = "." + requiredName,
+                        };
+                    }
+                }
+
                 return CreateInstance(values, present);
             }
 
@@ -171,6 +187,88 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
     }
 
     private static object? GetDefault(Type type) => type.IsValueType ? Activator.CreateInstance(type) : null;
+
+    private int[] DiscoverRequiredMemberIndexes(Type type, ConstructorInfo? constructor)
+    {
+        var mappedIndexes = new HashSet<int>();
+        List<MemberInfo>? unmapped = null;
+        foreach (var requiredMember in DiscoverRequiredMembers(type))
+        {
+            var index = Array.FindIndex(_members, member => member.Matches(requiredMember));
+            if (index >= 0)
+            {
+                mappedIndexes.Add(index);
+            }
+            else
+            {
+                unmapped ??= [];
+                unmapped.Add(requiredMember);
+            }
+        }
+
+        if (unmapped is not null &&
+            (constructor is null || !SetsRequiredMembers(constructor)))
+        {
+            throw new NotSupportedException(
+                $"The required member '{unmapped[0].Name}' on {type} is not serialized and the " +
+                "selected constructor is not marked with SetsRequiredMembers.");
+        }
+
+        return Enumerable.Range(0, _members.Length)
+            .Where(mappedIndexes.Contains)
+            .ToArray();
+    }
+
+    private static List<MemberInfo> DiscoverRequiredMembers(Type type)
+    {
+        const BindingFlags Flags =
+            BindingFlags.Public |
+            BindingFlags.NonPublic |
+            BindingFlags.Instance |
+            BindingFlags.DeclaredOnly;
+
+        var required = new List<MemberInfo>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        for (var current = type; current is not null; current = current.BaseType)
+        {
+            foreach (var property in current.GetProperties(Flags))
+            {
+                if (!property.IsDefined(
+                        typeof(System.Runtime.CompilerServices.RequiredMemberAttribute),
+                        inherit: false))
+                {
+                    continue;
+                }
+
+                var key = "P:" + property.Name + ":" + property.PropertyType;
+                if (seen.Add(key))
+                {
+                    required.Add(property);
+                }
+            }
+
+            foreach (var field in current.GetFields(Flags))
+            {
+                if (!field.IsDefined(
+                        typeof(System.Runtime.CompilerServices.RequiredMemberAttribute),
+                        inherit: false))
+                {
+                    continue;
+                }
+
+                var key = "F:" + field.Name + ":" + field.FieldType;
+                if (seen.Add(key))
+                {
+                    required.Add(field);
+                }
+            }
+        }
+
+        return required;
+    }
+
+    private static bool SetsRequiredMembers(ConstructorInfo constructor) =>
+        constructor.IsDefined(typeof(SetsRequiredMembersAttribute), inherit: false);
 
     private static NbtReflectionMember[] DiscoverMembers(Type type)
     {

@@ -159,6 +159,17 @@ public static class NbtMetadataServices
             Path = "." + name,
         };
 
+    /// <summary>Creates the exception for a missing required compound member.</summary>
+    /// <param name="reader">The reader at the end of the compound.</param>
+    /// <param name="name">The missing member name.</param>
+    /// <returns>The exception.</returns>
+    public static NbtException MissingRequiredMember(NbtReader reader, string name) =>
+        new($"The compound does not contain the required member '{name}'.")
+        {
+            BytePosition = reader.BytesConsumed,
+            Path = "." + name,
+        };
+
     /// <summary>Creates the exception for a compound that was not terminated.</summary>
     /// <param name="reader">The reader at the end of the input.</param>
     /// <returns>The exception.</returns>

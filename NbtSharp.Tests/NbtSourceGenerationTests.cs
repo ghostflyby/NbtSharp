@@ -478,6 +478,28 @@ public sealed class NbtSourceGenerationTests
     }
 
     [Fact]
+    public void MissingRequiredMembersThrow()
+    {
+        var context = SourceGenerationContext.Default;
+        var data = NbtSerializer.Serialize(new NbtRoot(
+            "root",
+            new NbtCompound { ["Name"] = "only-name" }));
+        var reflectionOptions = new NbtSerializerOptions
+        {
+            TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
+        };
+
+        var generated = Assert.Throws<NbtException>(() =>
+            NbtSerializer.Deserialize(data, context.SourceGenRequired));
+        var reflected = Assert.Throws<NbtException>(() =>
+            NbtSerializer.Deserialize<SourceGenRequired>(data, reflectionOptions));
+
+        Assert.Equal(reflected.Message, generated.Message);
+        Assert.Equal(reflected.Path, generated.Path);
+        Assert.Contains("Value", generated.Path, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void SupportsExplicitTypeInfoPropertyNames()
     {
         var context = SourceGenerationContext.Default;

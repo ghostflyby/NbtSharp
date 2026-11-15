@@ -481,6 +481,24 @@ internal sealed class ContextEmitter
         _writer.WriteLine("if (reader.TokenType == global::NbtSharp.NbtTokenType.EndCompound)");
         _writer.WriteLine("{");
         _writer.Indent();
+        foreach (var member in model.Members)
+        {
+            if (!member.IsRequired)
+            {
+                continue;
+            }
+
+            var requiredName = SymbolDisplay.FormatLiteral(member.NbtName, quote: true);
+            _writer.WriteLine($"if (!__p{member.Index})");
+            _writer.WriteLine("{");
+            _writer.Indent();
+            _writer.WriteLine(
+                $"throw global::NbtSharp.NbtMetadataServices.MissingRequiredMember(" +
+                $"reader, {requiredName});");
+            _writer.Outdent();
+            _writer.WriteLine("}");
+        }
+
         EmitConstruction(model, typeName);
         _writer.Outdent();
         _writer.WriteLine("}");

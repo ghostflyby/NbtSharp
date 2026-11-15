@@ -33,6 +33,15 @@ internal sealed class NbtReflectionMember
 
     public bool CanWrite => _property?.CanWrite == true || _field is { IsInitOnly: false, IsLiteral: false };
 
+    public bool Matches(MemberInfo member) =>
+        member is PropertyInfo property &&
+        _property is not null &&
+        property.Name == _property.Name &&
+        property.PropertyType == _property.PropertyType ||
+        member is FieldInfo field &&
+        _field is not null &&
+        field.Name == _field.Name &&
+        field.FieldType == _field.FieldType;
     public object? GetValue(object instance) =>
         _property is not null ? _property.GetValue(instance) : _field!.GetValue(instance);
 

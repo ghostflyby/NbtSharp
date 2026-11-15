@@ -62,6 +62,14 @@ internal static class Diagnostics
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
+    public static readonly DiagnosticDescriptor RequiredMemberNotMapped = new(
+        "NBTSG015",
+        "Required member is not serializable",
+        "The required member '{1}' on type '{0}' is not serialized and the selected constructor is not marked with SetsRequiredMembers",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
     public static readonly DiagnosticDescriptor GeneratedNameConflict = new(
         "NBTSG008",
         "Generated member name conflict",

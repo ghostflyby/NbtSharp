@@ -236,6 +236,82 @@ public sealed class NbtSourceGeneratorTests
     }
 
     [Fact]
+    public void ReportsUnmappedRequiredMembers()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Dto))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Dto
+            {
+                [NbtIgnore]
+                public required string Ignored { get; init; }
+
+                public int Value { get; set; }
+            }
+            """);
+
+        Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG015");
+    }
+
+    [Fact]
+    public void AllowsUnmappedRequiredMembersWithSetsRequiredMembers()
+    {
+        var result = Run("""
+            using System.Diagnostics.CodeAnalysis;
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Dto))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Dto
+            {
+                [NbtIgnore]
+                public required string Ignored { get; init; }
+
+                public int Value { get; set; }
+
+                [SetsRequiredMembers]
+                public Dto()
+                {
+                    Ignored = "";
+                }
+            }
+            """);
+
+        AssertNoErrors(result);
+        Assert.DoesNotContain(
+            result.GeneratorDiagnostics,
+            static diagnostic => diagnostic.Id == "NBTSG015");
+    }
+
+    [Fact]
+    public void ReportsRequiredValueTypes()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Dto))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal struct Dto
+            {
+                public required int Value { get; init; }
+            }
+            """);
+
+        Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG007");
+    }
+
+    [Fact]
     public void ReportsMissingConstructor()
     {
         var result = Run("""
