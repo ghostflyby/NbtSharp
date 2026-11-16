@@ -278,7 +278,7 @@ internal sealed class ContextEmitter
 
         for (var index = 0; index < _graph.Entries.Count; index++)
         {
-            EmitTypeInfoProperty(_graph.Entries[index], index, contextType);
+            EmitTypeInfoProperty(_graph.Entries[index], contextType);
         }
 
         EmitGetTypeInfo();
@@ -309,7 +309,6 @@ internal sealed class ContextEmitter
 
     private void EmitTypeInfoProperty(
         TypeEntry entry,
-        int index,
         INamedTypeSymbol contextType)
     {
         var typeName = Fq(entry.Type);
@@ -1100,7 +1099,7 @@ internal sealed class ContextEmitter
             _ => type.Name,
         };
 
-        var builder = new System.Text.StringBuilder(name.Length);
+        var builder = new StringBuilder(name.Length);
         foreach (var character in name)
         {
             builder.Append(char.IsLetterOrDigit(character) || character == '_' ? character : '_');
@@ -1220,7 +1219,7 @@ internal sealed class ContextEmitter
             builder.Append(diagnostic.Id).Append('|')
                 .Append(diagnostic.Severity).Append('|')
                 .Append(diagnostic.GetMessage(CultureInfo.InvariantCulture)).Append('|')
-                .Append(diagnostic.Location?.ToString() ?? "")
+                .Append(diagnostic.Location)
                 .Append('\0');
         }
 
@@ -1251,7 +1250,7 @@ internal sealed class ContextEmitter
 
     private static string GetHintName(INamedTypeSymbol contextType)
     {
-        var builder = new System.Text.StringBuilder();
+        var builder = new StringBuilder();
         foreach (var character in contextType.ToDisplayString())
         {
             builder.Append(char.IsLetterOrDigit(character) || character == '_' ? character : '_');

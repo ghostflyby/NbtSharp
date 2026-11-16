@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 
@@ -625,6 +626,7 @@ public sealed class NbtSourceGeneratorTests
         Assert.Equal(DiagnosticSeverity.Warning, diagnostic.Severity);
     }
 
+    [SuppressMessage("ReSharper", "ParameterOnlyUsedForPreconditionCheck.Local")]
     private static void AssertNoErrors(GeneratorRunResult result)
     {
         Assert.DoesNotContain(
@@ -675,7 +677,7 @@ public sealed class NbtSourceGeneratorTests
         return trustedPlatformAssemblies
             .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
             .Select(static path => (MetadataReference)MetadataReference.CreateFromFile(path))
-            .Append((MetadataReference)MetadataReference.CreateFromFile(
+            .Append(MetadataReference.CreateFromFile(
                 typeof(NbtSerializer).Assembly.Location))
             .ToImmutableArray();
     }

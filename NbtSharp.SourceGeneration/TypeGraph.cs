@@ -136,7 +136,6 @@ internal sealed class MemberModel
 
 internal sealed class TypeGraph
 {
-    private const string SerializableAttribute = "NbtSharp.NbtSerializableAttribute";
     private const string IgnoreAttribute = "NbtSharp.NbtIgnoreAttribute";
     private const string IncludeAttribute = "NbtSharp.NbtIncludeAttribute";
     private const string PropertyNameAttribute = "NbtSharp.NbtPropertyNameAttribute";

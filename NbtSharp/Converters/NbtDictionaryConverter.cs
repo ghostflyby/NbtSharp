@@ -68,7 +68,7 @@ internal sealed class NbtDictionaryConverter<TDictionary, TValue> : NbtConverter
                     : (TValue)NbtSerializer.DeserializeValueCore(
                         ref reader,
                         typeof(TValue),
-                        converter!,
+                        converter,
                         options,
                         pathSegment: null)!;
             }

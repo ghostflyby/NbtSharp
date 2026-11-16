@@ -20,6 +20,7 @@ public sealed class NbtSerializableAttribute : Attribute
     }
 
     /// <summary>Gets the CLR type to generate type information for.</summary>
+    // ReSharper disable once UnusedAutoPropertyAccessor.Global
     public Type Type { get; }
 
     /// <summary>
@@ -28,5 +29,6 @@ public sealed class NbtSerializableAttribute : Attribute
     /// <remarks>
     /// When this value is <see langword="null"/>, the generator derives a name from the type.
     /// </remarks>
+    // ReSharper disable once UnusedAutoPropertyAccessor.Global
     public string? TypeInfoPropertyName { get; init; }
 }

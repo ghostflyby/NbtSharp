@@ -739,6 +739,7 @@ internal sealed class SourceGenRenamed
     public int Value { get; init; }
 
     [NbtIgnore]
+    // ReSharper disable once UnusedAutoPropertyAccessor.Global
     public int Ignored { get; set; }
 }
 
@@ -837,6 +838,7 @@ internal sealed class SourceGenExplicit
 #pragma warning disable IDE1006 // Intentionally tests a C# keyword member name.
 internal sealed class SourceGenKeywords
 {
+    // ReSharper disable once InconsistentNaming
     public int @class { get; set; }
 }
 
@@ -871,7 +873,7 @@ internal enum SourceGenUInt16Enum : ushort
     Max = ushort.MaxValue,
 }
 
-internal enum SourceGenInt32Enum : int
+internal enum SourceGenInt32Enum
 {
     Minus = -1,
     Max = int.MaxValue,
@@ -952,6 +954,7 @@ internal sealed class SourceGenPrivateGetter
 {
     public int Visible { get; set; }
 
+    // ReSharper disable once UnusedAutoPropertyAccessor.Local
     public int Hidden { private get; set; }
 }
 
@@ -986,6 +989,7 @@ internal class SourceGenBase
     public int BaseValue { get; init; }
 
     [NbtIgnore]
+    // ReSharper disable once UnusedAutoPropertyAccessor.Global
     public virtual int Ignored { get; set; }
 }
 
