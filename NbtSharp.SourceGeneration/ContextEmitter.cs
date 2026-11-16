@@ -38,6 +38,8 @@ internal sealed partial class ContextEmitter
         string hintName,
         string cacheKey)
     {
+        // The hint name is derived from the context display name, which is part of cacheKey, so a hit
+        // always has the same hint.
         if (ContextSpecCache.TryGet(cacheKey, out var cached) &&
             cached.Diagnostics.Length == 0)
         {

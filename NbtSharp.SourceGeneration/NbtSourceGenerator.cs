@@ -128,8 +128,8 @@ internal sealed class GeneratedContextComparer : IEqualityComparer<GeneratedCont
 }
 
 /// <summary>
-/// Transient symbol-carrying context used only while preparing an uncached <see cref="ContextInput"/>.
-/// It is never a cached incremental-step value.
+/// Transient symbol-carrying context used only while preparing an uncached context. It is never a
+/// cached incremental-step value.
 /// </summary>
 internal sealed class ContextModel
 {

@@ -151,9 +151,12 @@ scalar members directly; registering a custom converter disables that fast path 
 Each attributed context is prepared inside the incremental transform and emits a symbol-free
 `PreparedContext`; generated source is cached per prepared context. A content-keyed reachability
 fingerprint cache skips graph construction for unchanged contexts, and no symbol-carrying value is
-retained by the pipeline. Partial context declarations are combined into one transform output. Editing
-an unrelated declaration in the same file does not regenerate the context; positional-only changes
-reuse the cached spec unless the context has diagnostics whose locations must be refreshed.
+retained by the pipeline. The cache is process-wide, bounded, and FIFO-evicted; it skips graph/spec
+construction, but the fingerprint walk still runs when a transform is invalidated. Partial context
+declarations are combined into one transform output. Editing an unrelated declaration in the same file
+does not regenerate the context; positional-only changes reuse the cached spec unless the context has
+diagnostics whose locations must be refreshed. Edits inside a reachable declaration rebuild that
+context's graph because declaration text is part of the content fingerprint.
 
 Required members are strict: every required member that is part of the mapping must be present in
 the compound, otherwise deserialization throws `NbtException`. A required mapped member whose value

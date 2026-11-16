@@ -9,9 +9,12 @@ namespace NbtSharp.SourceGeneration.Benchmarks;
 public class GeneratorIncrementalityBenchmarks
 {
     private CSharpParseOptions _parseOptions = null!;
+    private ImmutableArray<SyntaxTree> _trees;
+    private ImmutableArray<MetadataReference> _references;
     private Compilation _coldCompilation = null!;
-    private Compilation _unrelatedEditCompilation = null!;
+    private Compilation _editedCompilation = null!;
     private GeneratorDriver _warmDriver = null!;
+    private int _unrelatedCounter;
 
     [Params(100, 300)]
     // ReSharper disable once UnusedAutoPropertyAccessor.Global
@@ -21,7 +24,8 @@ public class GeneratorIncrementalityBenchmarks
     public void Setup()
     {
         _parseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
-        var trees = new List<SyntaxTree>(ContextCount);
+        _references = GetReferences();
+        var trees = ImmutableArray.CreateBuilder<SyntaxTree>(ContextCount);
         for (var i = 0; i < ContextCount; i++)
         {
             var source = $$"""
@@ -43,35 +47,76 @@ public class GeneratorIncrementalityBenchmarks
                 path: $"Context{i}.cs"));
         }
 
-        _coldCompilation = CSharpCompilation.Create(
-            "GeneratorBenchmarks",
-            trees,
-            GetReferences(),
-            new CSharpCompilationOptions(
-                OutputKind.DynamicallyLinkedLibrary,
-                nullableContextOptions: NullableContextOptions.Enable));
-        var unrelatedTree = CSharpSyntaxTree.ParseText(
-            "internal sealed class Unrelated { public int Value { get; set; } }",
-            _parseOptions,
-            path: "Unrelated.cs");
-        _unrelatedEditCompilation = _coldCompilation.AddSyntaxTrees(unrelatedTree);
+        _trees = trees.MoveToImmutable();
     }
 
     [IterationSetup(Target = nameof(Cold))]
-    public void ResetColdCache() => ContextSpecCache.ResetForTests();
+    public void ResetColdCache()
+    {
+        ContextSpecCache.ResetForTests();
+        ContextEmitter.ContextSpecBuilder.ResetGraphBuildCountForTests();
+        _coldCompilation = CreateCompilation();
+    }
 
     [Benchmark(Baseline = true)]
-    public GeneratorDriver Cold() => Run(_coldCompilation);
+    [InvocationCount(1)]
+    public GeneratorDriver Cold()
+    {
+        var driver = Run(_coldCompilation);
+        if (ContextEmitter.ContextSpecBuilder.GraphBuildCount != ContextCount)
+        {
+            throw new InvalidOperationException(
+                $"Cold generation built {ContextEmitter.ContextSpecBuilder.GraphBuildCount} " +
+                $"graphs instead of {ContextCount}.");
+        }
+
+        return driver;
+    }
 
     [IterationSetup(Target = nameof(UnrelatedEditWarm))]
     public void PrepareWarmDriver()
     {
         ContextSpecCache.ResetForTests();
-        _warmDriver = Run(_coldCompilation);
+        ContextEmitter.ContextSpecBuilder.ResetGraphBuildCountForTests();
+        var compilation = CreateCompilation();
+        _warmDriver = Run(compilation);
+        if (ContextEmitter.ContextSpecBuilder.GraphBuildCount != ContextCount)
+        {
+            throw new InvalidOperationException("Warm setup did not build every graph.");
+        }
+
+        var unrelatedIndex = _unrelatedCounter++;
+        var unrelatedTree = CSharpSyntaxTree.ParseText(
+            $"internal sealed class Unrelated{unrelatedIndex} " +
+            "{ public int Value { get; set; } }",
+            _parseOptions,
+            path: $"Unrelated{unrelatedIndex}.cs");
+        _editedCompilation = compilation.AddSyntaxTrees(unrelatedTree);
     }
 
     [Benchmark]
-    public GeneratorDriver UnrelatedEditWarm() => _warmDriver.RunGenerators(_unrelatedEditCompilation);
+    [InvocationCount(1)]
+    public GeneratorDriver UnrelatedEditWarm()
+    {
+        var before = ContextEmitter.ContextSpecBuilder.GraphBuildCount;
+        var driver = _warmDriver.RunGenerators(_editedCompilation);
+        if (ContextEmitter.ContextSpecBuilder.GraphBuildCount != before)
+        {
+            throw new InvalidOperationException(
+                "An unrelated edit rebuilt a graph instead of reusing the content cache.");
+        }
+
+        return driver;
+    }
+
+    private Compilation CreateCompilation() =>
+        CSharpCompilation.Create(
+            "GeneratorBenchmarks",
+            _trees,
+            _references,
+            new CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable));
 
     private GeneratorDriver Run(Compilation compilation)
     {

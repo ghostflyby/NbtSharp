@@ -6,32 +6,88 @@ namespace NbtSharp.SourceGeneration;
 /// Caches symbol-free prepared contexts by their content fingerprint. The cache prevents repeated
 /// graph construction when the same context is prepared again by another compilation or driver
 /// instance; positional-only changes deliberately reuse the cached spec unless it contains
-/// diagnostics, whose locations must be refreshed.
+/// diagnostics, whose locations must be refreshed. Diagnostic-bearing specs are never cached.
 /// </summary>
 internal static class ContextSpecCache
 {
-    // Keep prepared specs for realistic solution sizes. Eviction is exceptional; the cache is the
-    // mechanism that lets Prepare skip graph construction for unchanged contexts.
-    private const int Capacity = 4096;
+    // Keep prepared specs for realistic solution sizes. Eviction is FIFO and exceptional; the cache
+    // lets Prepare skip graph construction for unchanged contexts. The budget is process-wide.
+    private const int DefaultCapacity = 4096;
     private static readonly ConcurrentDictionary<string, PreparedContext> Entries =
         new(StringComparer.Ordinal);
+    private static readonly ConcurrentQueue<string> Order = new();
+    private static readonly object Gate = new();
+    private static int _count;
+    private static int _capacity = DefaultCapacity;
 
     public static bool TryGet(string contentFingerprint, out PreparedContext prepared) =>
         Entries.TryGetValue(contentFingerprint, out prepared!);
 
     public static void Add(string contentFingerprint, PreparedContext prepared)
     {
-        if (Entries.Count >= Capacity)
+        if (prepared.Diagnostics.Length != 0)
         {
-            foreach (var key in Entries.Keys)
-            {
-                Entries.TryRemove(key, out _);
-                break;
-            }
+            return;
         }
 
-        Entries[contentFingerprint] = prepared;
+        lock (Gate)
+        {
+            if (Entries.ContainsKey(contentFingerprint))
+            {
+                Entries[contentFingerprint] = prepared;
+                return;
+            }
+
+            while (_count >= _capacity && Order.TryDequeue(out var oldest))
+            {
+                if (Entries.TryRemove(oldest, out _))
+                {
+                    _count--;
+                }
+            }
+
+            if (_count >= _capacity)
+            {
+                return;
+            }
+
+            Entries[contentFingerprint] = prepared;
+            Order.Enqueue(contentFingerprint);
+            _count++;
+        }
     }
 
-    internal static void ResetForTests() => Entries.Clear();
+    internal static void ResetForTests()
+    {
+        lock (Gate)
+        {
+            Entries.Clear();
+            while (Order.TryDequeue(out _))
+            {
+            }
+
+            _count = 0;
+            _capacity = DefaultCapacity;
+        }
+    }
+
+    internal static void SetCapacityForTests(int capacity)
+    {
+        if (capacity < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(capacity));
+        }
+
+        lock (Gate)
+        {
+            _capacity = capacity;
+            while (_count > _capacity && Order.TryDequeue(out var oldest))
+            {
+                if (Entries.TryRemove(oldest, out _))
+                {
+                    _count--;
+                }
+            }
+        }
+    }
 }

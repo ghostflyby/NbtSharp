@@ -11,7 +11,7 @@ namespace NbtSharp.SourceGeneration;
 /// </summary>
 internal static class ReachableFingerprint
 {
-    private const string FormatVersion = "reachable-fingerprint-v3";
+    private const string FormatVersion = "reachable-fingerprint-v4";
     private const string UseConverterAttribute = "NbtSharp.NbtUseConverterAttribute";
 
     private static readonly SymbolDisplayFormat FullyQualified = SymbolDisplayFormat.FullyQualifiedFormat;
@@ -23,6 +23,7 @@ internal static class ReachableFingerprint
     {
         var hash = StableHash.Create();
         hash.Add(FormatVersion);
+        hash.Add(typeof(ReachableFingerprint).Assembly.ManifestModule.ModuleVersionId.ToString());
         hash.Add((int)compilation.Options.NullableContextOptions);
         hash.Add(contextType.ToDisplayString(FullyQualified));
         AddAssemblyIdentity(ref hash, contextType);
@@ -63,6 +64,13 @@ internal static class ReachableFingerprint
         hash.Add((int)type.SpecialType);
         hash.Add((int)type.DeclaredAccessibility);
         hash.Add(type.IsValueType);
+        hash.Add(type.IsRefLikeType);
+        if (type is INamedTypeSymbol namedType)
+        {
+            hash.Add(namedType.IsFileLocal);
+            hash.Add(namedType.IsUnboundGenericType);
+        }
+
         hash.Add(type.ToDisplayString(FullyQualified));
         AddAssemblyIdentity(ref hash, type);
         AddDeclarationHashes(ref hash, type);
@@ -297,6 +305,8 @@ internal static class ReachableFingerprint
 
     private static void AddAssemblyIdentity(ref StableHash hash, ITypeSymbol type)
     {
+        // Metadata types are tracked by assembly identity; a referenced assembly rebuilt with the same
+        // identity is assumed to be unchanged apart from the shape facts hashed by AddType.
         hash.Add(type.ContainingAssembly?.Identity.ToString());
     }
 
