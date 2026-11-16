@@ -121,6 +121,82 @@ public static class NbtMetadataServices
         NbtSerializer.SerializeMemberInternal(ref writer, name, value, typeof(T), options);
     }
 
+    /// <summary>Reads one value with an explicitly supplied converter.</summary>
+    /// <typeparam name="T">The value type.</typeparam>
+    /// <param name="reader">The reader positioned at the value's first token.</param>
+    /// <param name="converter">The converter or converter factory for <typeparamref name="T"/>.</param>
+    /// <param name="options">The serializer options.</param>
+    /// <param name="pathSegment">The path segment for error reporting.</param>
+    /// <returns>The decoded value.</returns>
+    /// <remarks>The converter must be an <see cref="NbtConverter{T}"/> or a factory that creates one.</remarks>
+    [RequiresUnreferencedCode("Converter factories may use reflection or runtime generic construction.")]
+    [RequiresDynamicCode("Converter factories may use runtime generic construction.")]
+    public static T ReadValueWithConverter<T>(
+        ref NbtReader reader,
+        NbtConverter converter,
+        NbtSerializerOptions options,
+        string? pathSegment)
+    {
+        ArgumentNullException.ThrowIfNull(converter);
+        ArgumentNullException.ThrowIfNull(options);
+        NbtConverter resolved = converter;
+        if (resolved is NbtConverterFactory factory)
+        {
+            resolved = factory.CreateConverter(typeof(T), options);
+        }
+
+        if (resolved is not NbtConverter<T> typed)
+        {
+            var converterName = GetConverterName(resolved);
+            throw new NotSupportedException(
+                $"The converter {converterName} does not support {typeof(T)}.");
+        }
+
+        return NbtSerializer.DeserializeValueCore(ref reader, typed, options, pathSegment);
+    }
+
+    /// <summary>Writes one named compound member with an explicitly supplied converter.</summary>
+    /// <typeparam name="T">The member type.</typeparam>
+    /// <param name="writer">The writer that receives the member.</param>
+    /// <param name="name">The member name.</param>
+    /// <param name="value">The member value.</param>
+    /// <param name="converter">The converter or converter factory for <typeparamref name="T"/>.</param>
+    /// <param name="options">The serializer options.</param>
+    /// <remarks>The converter must be an <see cref="NbtConverter{T}"/> or a factory that creates one.</remarks>
+    [RequiresUnreferencedCode("Converter factories may use reflection or runtime generic construction.")]
+    [RequiresDynamicCode("Converter factories may use runtime generic construction.")]
+    public static void WriteMemberWithConverter<T>(
+        ref NbtWriter writer,
+        string name,
+        T value,
+        NbtConverter converter,
+        NbtSerializerOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        ArgumentNullException.ThrowIfNull(converter);
+        ArgumentNullException.ThrowIfNull(options);
+        if (value is null)
+        {
+            NbtSerializer.SerializeMemberInternal(ref writer, name, value, typeof(T), options);
+            return;
+        }
+
+        NbtConverter resolved = converter;
+        if (resolved is NbtConverterFactory factory)
+        {
+            resolved = factory.CreateConverter(typeof(T), options);
+        }
+
+        if (resolved is not NbtConverter<T> typed)
+        {
+            var converterName = GetConverterName(resolved);
+            throw new NotSupportedException(
+                $"The converter {converterName} does not support {typeof(T)}.");
+        }
+
+        NbtSerializer.SerializeMemberCore(ref writer, name, value, typed, options);
+    }
+
     /// <summary>Prepends a path segment to an exception.</summary>
     /// <param name="exception">The exception to update.</param>
     /// <param name="segment">The path segment to prepend, or <see langword="null"/>.</param>
@@ -180,6 +256,9 @@ public static class NbtMetadataServices
             BytePosition = reader.BytesConsumed,
             Path = "." + name,
         };
+
+    private static string GetConverterName(NbtConverter? converter) =>
+        converter is null ? "null" : converter.GetType().ToString();
 
     /// <summary>Creates the exception for a compound that was not terminated.</summary>
     /// <param name="reader">The reader at the end of the input.</param>

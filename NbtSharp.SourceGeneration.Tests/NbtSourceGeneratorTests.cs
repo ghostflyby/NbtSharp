@@ -62,6 +62,63 @@ public sealed class NbtSourceGeneratorTests
     }
 
     [Fact]
+    public void RefreshesDiagnosticLocationsWhenDeclarationsShift()
+    {
+        var parseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
+        var source = """
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Player
+            {
+                public decimal Amount { get; set; }
+            }
+            """;
+        var tree = CSharpSyntaxTree.ParseText(
+            source,
+            parseOptions,
+            path: "Player.cs",
+            cancellationToken: TestContext.Current.CancellationToken);
+        var compilation = CSharpCompilation.Create(
+            "GeneratorTests",
+            [tree],
+            References,
+            new CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable));
+        var driver = CreateTrackingDriver(parseOptions);
+        ContextSpecCache.ResetForTests();
+
+        driver = driver.RunGenerators(compilation, TestContext.Current.CancellationToken);
+        var before = GetDiagnosticLine(driver.GetRunResult(), "NBTSG003");
+
+        var shiftedTree = CSharpSyntaxTree.ParseText(
+            "\n" + source,
+            parseOptions,
+            path: "Player.cs",
+            cancellationToken: TestContext.Current.CancellationToken);
+        driver = driver.RunGenerators(
+            compilation.ReplaceSyntaxTree(tree, shiftedTree),
+            TestContext.Current.CancellationToken);
+
+        var after = GetDiagnosticLine(driver.GetRunResult(), "NBTSG003");
+        Assert.Equal(before + 1, after);
+    }
+
+    private static int GetDiagnosticLine(GeneratorDriverRunResult result, string diagnosticId)
+    {
+        var diagnostics = result.Diagnostics
+            .Where(diagnostic => diagnostic.Id == diagnosticId)
+            .ToArray();
+        Assert.Single(diagnostics);
+        return diagnostics[0].Location.GetLineSpan().StartLinePosition.Line;
+    }
+
+    [Fact]
     public void CachesGeneratedContextsForUnrelatedChanges()
     {
         var parseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
@@ -213,6 +270,444 @@ public sealed class NbtSourceGeneratorTests
         Assert.Contains(
             GetReasons(result, "NbtPreparedContexts"),
             static reason => reason is IncrementalStepRunReason.New or IncrementalStepRunReason.Modified);
+    }
+
+    [Fact]
+    public void CachesGraphConstructionForUnrelatedChanges()
+    {
+        var parseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
+        var contextTree = CSharpSyntaxTree.ParseText(
+            """
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+            """,
+            parseOptions,
+            cancellationToken: TestContext.Current.CancellationToken);
+        var dtoTree = CSharpSyntaxTree.ParseText(
+            """
+            internal sealed class Player
+            {
+                public int Health { get; set; }
+            }
+            """,
+            parseOptions,
+            cancellationToken: TestContext.Current.CancellationToken);
+        var compilation = CSharpCompilation.Create(
+            "GeneratorTests",
+            [contextTree, dtoTree],
+            References,
+            new CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable));
+        var driver = CreateTrackingDriver(parseOptions);
+        ContextSpecCache.ResetForTests();
+        ContextEmitter.ContextSpecBuilder.ResetGraphBuildCountForTests();
+
+        driver = driver.RunGenerators(compilation, TestContext.Current.CancellationToken);
+        Assert.Equal(1, ContextEmitter.ContextSpecBuilder.GraphBuildCount);
+
+        var unrelatedTree = CSharpSyntaxTree.ParseText(
+            "internal sealed class Unrelated { public int Value { get; set; } }",
+            parseOptions,
+            cancellationToken: TestContext.Current.CancellationToken);
+        driver = driver.RunGenerators(
+            compilation.AddSyntaxTrees(unrelatedTree),
+            TestContext.Current.CancellationToken);
+
+        var result = driver.GetRunResult();
+        Assert.Equal(1, ContextEmitter.ContextSpecBuilder.GraphBuildCount);
+        AssertCached(result, "NbtContextModels");
+        AssertCached(result, "NbtPreparedContexts");
+        AssertCached(result, "NbtGeneratedContexts");
+    }
+
+    [Fact]
+    public void RebuildsGraphWhenReachableTypeChanges()
+    {
+        var parseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
+        var contextTree = CSharpSyntaxTree.ParseText(
+            """
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+            """,
+            parseOptions,
+            cancellationToken: TestContext.Current.CancellationToken);
+        var dtoTree = CSharpSyntaxTree.ParseText(
+            """
+            internal sealed class Player
+            {
+                public int Health { get; set; }
+            }
+            """,
+            parseOptions,
+            cancellationToken: TestContext.Current.CancellationToken);
+        var compilation = CSharpCompilation.Create(
+            "GeneratorTests",
+            [contextTree, dtoTree],
+            References,
+            new CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable));
+        var driver = CreateTrackingDriver(parseOptions);
+        ContextSpecCache.ResetForTests();
+        ContextEmitter.ContextSpecBuilder.ResetGraphBuildCountForTests();
+
+        driver = driver.RunGenerators(compilation, TestContext.Current.CancellationToken);
+        Assert.Equal(1, ContextEmitter.ContextSpecBuilder.GraphBuildCount);
+
+        var changedDtoTree = CSharpSyntaxTree.ParseText(
+            """
+            internal sealed class Player
+            {
+                public int Health { get; set; }
+
+                public int Armor { get; set; }
+            }
+            """,
+            parseOptions,
+            cancellationToken: TestContext.Current.CancellationToken);
+        driver = driver.RunGenerators(
+            compilation.ReplaceSyntaxTree(dtoTree, changedDtoTree),
+            TestContext.Current.CancellationToken);
+
+        var result = driver.GetRunResult();
+        Assert.True(
+            ContextEmitter.ContextSpecBuilder.GraphBuildCount > 1,
+            "Changing a reachable DTO must rebuild the context graph.");
+        Assert.Contains(
+            GetReasons(result, "NbtPreparedContexts"),
+            static reason => reason is IncrementalStepRunReason.New or IncrementalStepRunReason.Modified);
+        Assert.Contains(
+            GetReasons(result, "NbtGeneratedContexts"),
+            static reason => reason is IncrementalStepRunReason.New or IncrementalStepRunReason.Modified);
+    }
+
+    [Fact]
+    public void OnlyRebuildsChangedContextInLargeCompilation()
+    {
+        const int contextCount = 300;
+        var parseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
+        var trees = new List<SyntaxTree>(contextCount);
+        for (var i = 0; i < contextCount; i++)
+        {
+            var source = $$"""
+                using NbtSharp;
+
+                [NbtSerializable(typeof(Dto{{i}}))]
+                internal partial class Context{{i}} : NbtSerializerContext
+                {
+                }
+
+                internal sealed class Dto{{i}}
+                {
+                    public int Value { get; set; }
+                }
+                """;
+            trees.Add(CSharpSyntaxTree.ParseText(
+                source,
+                parseOptions,
+                path: $"Context{i}.cs",
+                cancellationToken: TestContext.Current.CancellationToken));
+        }
+
+        var compilation = CSharpCompilation.Create(
+            "LargeGeneratorTests",
+            trees,
+            References,
+            new CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable));
+        var driver = CreateTrackingDriver(parseOptions);
+        ContextSpecCache.ResetForTests();
+        ContextEmitter.ContextSpecBuilder.ResetGraphBuildCountForTests();
+
+        driver = driver.RunGenerators(compilation, TestContext.Current.CancellationToken);
+        Assert.Equal(contextCount, ContextEmitter.ContextSpecBuilder.GraphBuildCount);
+
+        const int changedIndex = 42;
+        var changedSource = $$"""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Dto{{changedIndex}}))]
+            internal partial class Context{{changedIndex}} : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Dto{{changedIndex}}
+            {
+                public int Value { get; set; }
+
+                public int Armor { get; set; }
+            }
+            """;
+        var changedTree = CSharpSyntaxTree.ParseText(
+            changedSource,
+            parseOptions,
+            path: $"Context{changedIndex}.cs",
+            cancellationToken: TestContext.Current.CancellationToken);
+        driver = driver.RunGenerators(
+            compilation.ReplaceSyntaxTree(trees[changedIndex], changedTree),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(
+            1,
+            ContextEmitter.ContextSpecBuilder.GraphBuildCount - contextCount);
+        var preparedReasons = GetReasons(driver.GetRunResult(), "NbtPreparedContexts");
+        Assert.Equal(contextCount, preparedReasons.Count);
+        Assert.Equal(
+            1,
+            preparedReasons.Count(static reason =>
+                reason is IncrementalStepRunReason.New or IncrementalStepRunReason.Modified));
+    }
+
+    [Fact]
+    public void OnlyRebuildsContextsWhoseDeclarationsChangeInSharedFile()
+    {
+        var parseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
+        var sourceTree = CSharpSyntaxTree.ParseText(
+            """
+            using NbtSharp;
+
+            [NbtSerializable(typeof(DtoA))]
+            internal partial class ContextA : NbtSerializerContext
+            {
+            }
+
+            [NbtSerializable(typeof(DtoB))]
+            internal partial class ContextB : NbtSerializerContext
+            {
+            }
+
+            internal sealed class DtoA
+            {
+                public int Value { get; set; }
+            }
+
+            internal sealed class DtoB
+            {
+                public int Value { get; set; }
+            }
+            """,
+            parseOptions,
+            path: "Shared.cs",
+            cancellationToken: TestContext.Current.CancellationToken);
+        var compilation = CSharpCompilation.Create(
+            "SharedFileGeneratorTests",
+            [sourceTree],
+            References,
+            new CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable));
+        var driver = CreateTrackingDriver(parseOptions);
+        ContextSpecCache.ResetForTests();
+        ContextEmitter.ContextSpecBuilder.ResetGraphBuildCountForTests();
+
+        driver = driver.RunGenerators(compilation, TestContext.Current.CancellationToken);
+        Assert.Equal(2, ContextEmitter.ContextSpecBuilder.GraphBuildCount);
+
+        var changedTree = CSharpSyntaxTree.ParseText(
+            """
+            using NbtSharp;
+
+            [NbtSerializable(typeof(DtoA))]
+            internal partial class ContextA : NbtSerializerContext
+            {
+            }
+
+            [NbtSerializable(typeof(DtoB))]
+            internal partial class ContextB : NbtSerializerContext
+            {
+            }
+
+            internal sealed class DtoA
+            {
+                public int Value { get; set; }
+
+                public int Armor { get; set; }
+            }
+
+            internal sealed class DtoB
+            {
+                public int Value { get; set; }
+            }
+            """,
+            parseOptions,
+            path: "Shared.cs",
+            cancellationToken: TestContext.Current.CancellationToken);
+        driver = driver.RunGenerators(
+            compilation.ReplaceSyntaxTree(sourceTree, changedTree),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, ContextEmitter.ContextSpecBuilder.GraphBuildCount - 2);
+        var preparedReasons = GetReasons(driver.GetRunResult(), "NbtPreparedContexts");
+        Assert.Equal(2, preparedReasons.Count);
+        Assert.Equal(
+            1,
+            preparedReasons.Count(static reason =>
+                reason is IncrementalStepRunReason.New or IncrementalStepRunReason.Modified));
+    }
+
+    [Fact]
+    public void InvalidatesNestedTypeWhenContainingTypeShapeChanges()
+    {
+        var parseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
+        var sourceTree = CSharpSyntaxTree.ParseText(
+            """
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Outer.Inner))]
+            public partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            public static class Outer
+            {
+                public sealed class Inner
+                {
+                    public int Value { get; set; }
+                }
+            }
+            """,
+            parseOptions,
+            path: "Nested.cs",
+            cancellationToken: TestContext.Current.CancellationToken);
+        var compilation = CSharpCompilation.Create(
+            "NestedGeneratorTests",
+            [sourceTree],
+            References,
+            new CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable));
+        var driver = CreateTrackingDriver(parseOptions);
+        ContextSpecCache.ResetForTests();
+
+        driver = driver.RunGenerators(compilation, TestContext.Current.CancellationToken);
+        var before = GetGeneratedSource(driver.GetRunResult());
+
+        var changedTree = CSharpSyntaxTree.ParseText(
+            """
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Outer.Inner))]
+            public partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal static class Outer
+            {
+                public sealed class Inner
+                {
+                    public int Value { get; set; }
+                }
+            }
+            """,
+            parseOptions,
+            path: "Nested.cs",
+            cancellationToken: TestContext.Current.CancellationToken);
+        driver = driver.RunGenerators(
+            compilation.ReplaceSyntaxTree(sourceTree, changedTree),
+            TestContext.Current.CancellationToken);
+
+        var result = driver.GetRunResult();
+        Assert.NotEqual(before, GetGeneratedSource(result));
+        Assert.Contains(
+            GetReasons(result, "NbtPreparedContexts"),
+            static reason => reason is IncrementalStepRunReason.New or IncrementalStepRunReason.Modified);
+    }
+
+    [Fact]
+    public void InvalidatesNestedEnumWhenContainingTypeShapeChanges()
+    {
+        var parseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
+        var sourceTree = CSharpSyntaxTree.ParseText(
+            """
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Outer.Status))]
+            public partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            public static class Outer
+            {
+                public enum Status
+                {
+                    Idle,
+                }
+            }
+            """,
+            parseOptions,
+            path: "NestedEnum.cs",
+            cancellationToken: TestContext.Current.CancellationToken);
+        var compilation = CSharpCompilation.Create(
+            "NestedEnumGeneratorTests",
+            [sourceTree],
+            References,
+            new CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable));
+        var driver = CreateTrackingDriver(parseOptions);
+        ContextSpecCache.ResetForTests();
+
+        driver = driver.RunGenerators(compilation, TestContext.Current.CancellationToken);
+        var before = GetGeneratedSource(driver.GetRunResult());
+
+        var changedTree = CSharpSyntaxTree.ParseText(
+            """
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Outer.Status))]
+            public partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal static class Outer
+            {
+                public enum Status
+                {
+                    Idle,
+                }
+            }
+            """,
+            parseOptions,
+            path: "NestedEnum.cs",
+            cancellationToken: TestContext.Current.CancellationToken);
+        driver = driver.RunGenerators(
+            compilation.ReplaceSyntaxTree(sourceTree, changedTree),
+            TestContext.Current.CancellationToken);
+
+        var result = driver.GetRunResult();
+        Assert.NotEqual(before, GetGeneratedSource(result));
+        Assert.Contains(
+            GetReasons(result, "NbtPreparedContexts"),
+            static reason => reason is IncrementalStepRunReason.New or IncrementalStepRunReason.Modified);
+    }
+
+    private static GeneratorDriver CreateTrackingDriver(CSharpParseOptions parseOptions) =>
+        CSharpGeneratorDriver.Create(
+            [new NbtSourceGenerator().AsSourceGenerator()],
+            parseOptions: parseOptions,
+            driverOptions: new GeneratorDriverOptions(
+                IncrementalGeneratorOutputKind.None,
+                trackIncrementalGeneratorSteps: true));
+
+    private static void AssertCached(GeneratorDriverRunResult result, string stepName)
+    {
+        var reasons = GetReasons(result, stepName);
+        Assert.NotEmpty(reasons);
+        Assert.All(
+            reasons,
+            static reason => Assert.True(
+                reason is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged,
+                $"Expected cached step output, but found {reason}."));
     }
 
     private static string GetGeneratedSource(GeneratorDriverRunResult result) =>
@@ -481,6 +976,281 @@ public sealed class NbtSourceGeneratorTests
             """);
 
         Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG003");
+    }
+
+    [Fact]
+    public void SupportsRuntimeConverterOptOutForUnsupportedType()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Player
+            {
+                [NbtUseConverter]
+                public decimal Amount { get; set; }
+            }
+            """);
+
+        Assert.DoesNotContain(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG003");
+        Assert.DoesNotContain(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG016");
+        AssertNoErrors(result);
+        Assert.Contains("ReadValue<decimal>", result.GeneratedSource, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "UnconditionalSuppressMessage",
+            result.GeneratedSource,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SupportsExplicitConverterOptOutForUnsupportedType()
+    {
+        var result = Run("""
+            using System;
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Player
+            {
+                [NbtUseConverter(typeof(GuidConverter))]
+                public Guid Id { get; set; }
+            }
+
+            internal sealed class GuidConverter : NbtConverter<Guid>
+            {
+                public override Guid Read(ref NbtReader reader, NbtSerializerOptions options) =>
+                    Guid.Parse(reader.GetString());
+
+                public override void Write(ref NbtWriter writer, Guid value, NbtSerializerOptions options) =>
+                    writer.WriteString(value.ToString());
+
+                public override bool TryGetTagType(
+                    Guid value,
+                    NbtSerializerOptions options,
+                    out NbtTagType tagType)
+                {
+                    tagType = NbtTagType.String;
+                    return true;
+                }
+            }
+            """);
+
+        Assert.DoesNotContain(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG003");
+        Assert.DoesNotContain(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG016");
+        AssertNoErrors(result);
+        Assert.Contains(
+            "ReadValueWithConverter<global::System.Guid>",
+            result.GeneratedSource,
+            StringComparison.Ordinal);
+        Assert.Contains("WriteMemberWithConverter(", result.GeneratedSource, StringComparison.Ordinal);
+        Assert.Contains("new global::GuidConverter()", result.GeneratedSource, StringComparison.Ordinal);
+        Assert.Contains(
+            "UnconditionalSuppressMessage",
+            result.GeneratedSource,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ReportsInvalidExplicitConverterType()
+    {
+        var result = Run("""
+            using System;
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Player
+            {
+                [NbtUseConverter(typeof(string))]
+                public Guid Id { get; set; }
+            }
+            """);
+
+        Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG016");
+    }
+
+    [Fact]
+    public void RejectsConverterThatHandlesDifferentMemberType()
+    {
+        var result = Run("""
+            using System;
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Player
+            {
+                [NbtUseConverter(typeof(GuidConverter))]
+                public Guid? Id { get; set; }
+            }
+
+            internal sealed class GuidConverter : NbtConverter<Guid>
+            {
+                public override Guid Read(ref NbtReader reader, NbtSerializerOptions options) =>
+                    Guid.Parse(reader.GetString());
+
+                public override void Write(ref NbtWriter writer, Guid value, NbtSerializerOptions options) =>
+                    writer.WriteString(value.ToString());
+
+                public override bool TryGetTagType(
+                    Guid value,
+                    NbtSerializerOptions options,
+                    out NbtTagType tagType)
+                {
+                    tagType = NbtTagType.String;
+                    return true;
+                }
+            }
+            """);
+
+        Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG016");
+    }
+
+    [Fact]
+    public void RejectsAbstractExplicitConverter()
+    {
+        var result = Run("""
+            using System;
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Player
+            {
+                [NbtUseConverter(typeof(GuidConverter))]
+                public Guid Id { get; set; }
+            }
+
+            internal abstract class GuidConverter : NbtConverter<Guid>
+            {
+                public override Guid Read(ref NbtReader reader, NbtSerializerOptions options) =>
+                    Guid.Parse(reader.GetString());
+
+                public override void Write(ref NbtWriter writer, Guid value, NbtSerializerOptions options) =>
+                    writer.WriteString(value.ToString());
+            }
+            """);
+
+        Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG016");
+    }
+
+    [Fact]
+    public void RejectsConverterWithoutPublicParameterlessConstructor()
+    {
+        var result = Run("""
+            using System;
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Player
+            {
+                [NbtUseConverter(typeof(GuidConverter))]
+                public Guid Id { get; set; }
+            }
+
+            internal sealed class GuidConverter : NbtConverter<Guid>
+            {
+                private GuidConverter()
+                {
+                }
+
+                public override Guid Read(ref NbtReader reader, NbtSerializerOptions options) =>
+                    Guid.Parse(reader.GetString());
+
+                public override void Write(ref NbtWriter writer, Guid value, NbtSerializerOptions options) =>
+                    writer.WriteString(value.ToString());
+            }
+            """);
+
+        Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG016");
+    }
+
+    [Fact]
+    public void ReportsFieldConverterWithoutInclude()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Player
+            {
+                [NbtUseConverter]
+                public decimal Amount;
+            }
+            """);
+
+        Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG016");
+    }
+
+    [Fact]
+    public void ExplicitConverterFactoryDoesNotSuppressAotWarnings()
+    {
+        var result = Run("""
+            using System;
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Player
+            {
+                [NbtUseConverter(typeof(GuidFactory))]
+                public Guid Id { get; set; }
+            }
+
+            internal sealed class GuidFactory : NbtConverterFactory
+            {
+                public override bool CanConvert(Type typeToConvert) => typeToConvert == typeof(Guid);
+
+                public override NbtConverter CreateConverter(
+                    Type typeToConvert,
+                    NbtSerializerOptions options) => new GuidConverter();
+            }
+
+            internal sealed class GuidConverter : NbtConverter<Guid>
+            {
+                public override Guid Read(ref NbtReader reader, NbtSerializerOptions options) =>
+                    Guid.Parse(reader.GetString());
+
+                public override void Write(ref NbtWriter writer, Guid value, NbtSerializerOptions options) =>
+                    writer.WriteString(value.ToString());
+            }
+            """);
+
+        Assert.DoesNotContain(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG016");
+        AssertNoErrors(result);
+        Assert.Contains("new global::GuidFactory()", result.GeneratedSource, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "UnconditionalSuppressMessage",
+            result.GeneratedSource,
+            StringComparison.Ordinal);
     }
 
     [Fact]

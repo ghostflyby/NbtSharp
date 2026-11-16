@@ -28,7 +28,8 @@ internal static class Diagnostics
         "The type '{0}' {1} cannot be mapped by the NBT source generator",
         Category,
         DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        isEnabledByDefault: true,
+        description: "For a member type, mark the member with [NbtUseConverter] to resolve its converter at runtime, or [NbtUseConverter(typeof(...))] to specify a converter type. Roots and collection elements need a converter in NbtSerializerOptions.Converters.");
 
     public static readonly DiagnosticDescriptor NoUsableConstructor = new(
         "NBTSG004",
@@ -66,6 +67,14 @@ internal static class Diagnostics
         "NBTSG015",
         "Required member is not serializable",
         "The required member '{1}' on type '{0}' is not serialized and the selected constructor is not marked with SetsRequiredMembers",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor InvalidUseConverter = new(
+        "NBTSG016",
+        "Invalid NbtUseConverter declaration",
+        "The [NbtUseConverter] declaration on member '{0}' is invalid: {1}",
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);

@@ -31,6 +31,10 @@ NbtSharp.NbtNullValueHandling.Throw = 1 -> NbtSharp.NbtNullValueHandling
 NbtSharp.NbtPropertyNameAttribute
 NbtSharp.NbtPropertyNameAttribute.Name.get -> string!
 NbtSharp.NbtPropertyNameAttribute.NbtPropertyNameAttribute(string! name) -> void
+NbtSharp.NbtUseConverterAttribute
+NbtSharp.NbtUseConverterAttribute.ConverterType.get -> System.Type?
+NbtSharp.NbtUseConverterAttribute.NbtUseConverterAttribute() -> void
+NbtSharp.NbtUseConverterAttribute.NbtUseConverterAttribute(System.Type! converterType) -> void
 NbtSharp.NbtReader.BytesConsumed.get -> long
 NbtSharp.NbtReader.CurrentDepth.get -> int
 NbtSharp.NbtReader.GetByteArray() -> byte[]!
@@ -273,7 +277,9 @@ static NbtSharp.NbtMetadataServices.MissingRequiredMember(NbtSharp.NbtReader rea
 static NbtSharp.NbtMetadataServices.NullRequiredMember(NbtSharp.NbtWriter writer, string! name) -> NbtSharp.NbtException!
 static NbtSharp.NbtMetadataServices.PrependPath(NbtSharp.NbtException! exception, string? segment) -> void
 static NbtSharp.NbtMetadataServices.ReadValue<T>(ref NbtSharp.NbtReader reader, NbtSharp.NbtSerializerOptions! options, string? pathSegment) -> T
+static NbtSharp.NbtMetadataServices.ReadValueWithConverter<T>(ref NbtSharp.NbtReader reader, NbtSharp.NbtConverter! converter, NbtSharp.NbtSerializerOptions! options, string? pathSegment) -> T
 static NbtSharp.NbtMetadataServices.WriteMember<T>(ref NbtSharp.NbtWriter writer, string! name, T value, NbtSharp.NbtSerializerOptions! options) -> void
+static NbtSharp.NbtMetadataServices.WriteMemberWithConverter<T>(ref NbtSharp.NbtWriter writer, string! name, T value, NbtSharp.NbtConverter! converter, NbtSharp.NbtSerializerOptions! options) -> void
 static NbtSharp.NbtSerializer.Deserialize<T>(System.Buffers.ReadOnlySequence<byte> data, NbtSharp.NbtTypeInfo<T>! typeInfo, out string? rootName) -> T
 static NbtSharp.NbtSerializer.Deserialize<T>(System.Buffers.ReadOnlySequence<byte> data, NbtSharp.NbtTypeInfo<T>! typeInfo) -> T
 static NbtSharp.NbtSerializer.Deserialize<T>(System.IO.Stream! stream, NbtSharp.NbtTypeInfo<T>! typeInfo, out string? rootName) -> T

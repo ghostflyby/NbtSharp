@@ -1,35 +1,23 @@
 using System.Collections.Immutable;
-using Microsoft.CodeAnalysis;
 
 namespace NbtSharp.SourceGeneration;
 
 internal sealed class PreparedContext : IEquatable<PreparedContext>
 {
-    public PreparedContext(
-        ContextModel model,
-        TypeGraph? graph,
-        string hintName,
-        ImmutableArray<Diagnostic> diagnostics,
-        string fingerprint)
+    public PreparedContext(ContextSpec spec)
     {
-        Model = model;
-        Graph = graph;
-        HintName = hintName;
-        Diagnostics = diagnostics;
-        Fingerprint = fingerprint;
+        Spec = spec;
     }
 
-    public ContextModel Model { get; }
+    public ContextSpec Spec { get; }
 
-    public TypeGraph? Graph { get; }
+    public string HintName => Spec.HintName;
 
-    public string HintName { get; }
+    public ImmutableArray<DiagnosticSpec> Diagnostics => Spec.Diagnostics;
 
-    public ImmutableArray<Diagnostic> Diagnostics { get; }
+    public string Fingerprint => Spec.Fingerprint;
 
-    public string Fingerprint { get; }
-
-    public bool HasSource => Graph is not null;
+    public bool HasSource => Spec.HasSource;
 
     public bool Equals(PreparedContext? other) =>
         other is not null && StringComparer.Ordinal.Equals(Fingerprint, other.Fingerprint);

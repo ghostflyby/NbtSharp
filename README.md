@@ -113,15 +113,47 @@ rules as the reflection resolver: public instance properties, `[NbtInclude]` fie
 `init`-only and `required` members are supported through `UnsafeAccessor`. Unsupported shapes are
 reported as `NBTSG` diagnostics at compile time.
 
+Members whose type is not modeled by the generator can opt out with `[NbtUseConverter]`:
+
+```csharp
+internal sealed class Player
+{
+    [NbtUseConverter]
+    public Guid Id { get; init; }
+
+    [NbtUseConverter(typeof(DecimalConverter))]
+    public decimal Balance { get; init; }
+}
+```
+
+With no argument, the member's converter is resolved from `options.Converters` at runtime, preserving
+the normal converter precedence. With a converter type, the generated code creates that converter
+directly and uses it for the member; this form takes precedence over `options.Converters`. An explicit
+`NbtConverter<T>` is AOT-safe when the converter itself is AOT-safe. The converter type must be a
+closed, non-abstract type derived from `NbtConverter<T>` whose `T` matches the member type (or a
+`NbtConverterFactory`), with a
+public parameterless constructor. A converter for `Guid` therefore does not automatically apply to a
+`Guid?` member; use runtime resolution or a nullable-aware converter. Marked members remain normal DTO
+members, so required/null/constructor semantics are unchanged. Fields also require `[NbtInclude]`.
+Invalid declarations report `NBTSG016`.
+
+Runtime resolution may use reflection, so an AOT/trim-enabled consumer sees the corresponding
+analyzer diagnostics for `[NbtUseConverter]` without a converter type; factories remain
+analyzer-visible as well. Use the explicit typed `NbtConverter<T>` form when the generated path must
+remain warning-free.
+
 The analyzer ships inside the `NbtSharp` package. The type-information overloads do not carry
 `RequiresUnreferencedCode` or `RequiresDynamicCode`; Native AOT works when every reachable type is
 generated. Reflection remains available through `NbtReflectionTypeInfoResolver` for types that are
 not part of a generated context, and it also supports enum members through the built-in enum
 converter. When no custom converters are registered, generated object converters read and write
 scalar members directly; registering a custom converter disables that fast path for the operation.
-Prepared context models, generated source, and diagnostics are cached per context, so unrelated
-compilation changes reuse them and skip source emission; type-graph preparation still runs when
-semantic models change.
+Prepared contexts are symbol-free and cached per context by a reachability fingerprint; unrelated
+compilation changes skip both graph construction and source emission, while changes to a context or
+any reachable declaration invalidate only that context. The transform input still carries symbols for
+semantic analysis, but every cached prepared/generated stage is symbol-free. Fingerprints hash each
+reachable declaration's text and track positions separately, so editing an unrelated declaration in
+the same file does not regenerate the context; positional shifts only re-check diagnostics.
 
 Required members are strict: every required member that is part of the mapping must be present in
 the compound, otherwise deserialization throws `NbtException`. A required mapped member whose value
@@ -213,6 +245,11 @@ public sealed class CompactInt32Converter : NbtConverter<int>
 ```
 
 Add converters to `options.Converters`. Custom converters are checked before built-in converters.
+For source-generated DTOs, `[NbtUseConverter]` opts a member out of the generated type graph and
+resolves its converter at runtime; `[NbtUseConverter(typeof(MyConverter))]` uses a specific converter
+and does not consult `options.Converters` for that member. Null member values follow the normal
+`NullValueHandling` rules and are not passed to the member converter. The explicit form requires the
+converter to be an `NbtConverter<T>` for the exact member type or a `NbtConverterFactory`.
 `TryGetTagType` is required for named compound members, root values, and the first element of a
 non-empty list, because the tag type must be known before the header is written. If it returns
 `false`, those operations throw `NotSupportedException`; implement the prediction to use the
@@ -258,7 +295,12 @@ follows Java's `DataInputStream.readUTF` and rejects lead bytes of 0xF0 or great
 Generic serializer entry points that may resolve converters or reflection are annotated with
 `RequiresUnreferencedCode` and `RequiresDynamicCode`. DOM entry points use built-in converters and
 remain AOT-clean. The reflection resolver is opt-in. Source-generated type information and the
-type-information serializer overloads provide the fully AOT-safe path.
+type-information serializer overloads provide the fully AOT-safe path. The `NbtSharp.Aot.Tests`
+project sets `IsAotCompatible` and covers generated converters, required/init members, enums,
+generic DTOs, collections, nullable values, and explicit member converters under the SDK AOT/trim
+analyzers. Generated converters suppress AOT/trim diagnostics only when every member is covered by the
+generated graph or by an explicit typed converter; runtime and factory-based `[NbtUseConverter]`
+members remain analyzer-visible.
 
 The `Stream` overloads are synchronous. `Serialize(Stream)` flushes the document when serialization
 completes and leaves the stream open; `Deserialize(Stream)` reads the stream through a fixed-size
