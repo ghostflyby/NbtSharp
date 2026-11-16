@@ -580,6 +580,34 @@ public sealed class NbtSourceGenerationTests
     }
 
     [Fact]
+    public void RequiredMarkedMemberCannotBeNull()
+    {
+        var context = new SourceGenerationContext();
+        var value = new SourceGenConverterRequiredNull { Amount = null };
+
+        var exception = Assert.Throws<NbtException>(
+            () => NbtSerializer.Serialize(value, context.SourceGenConverterRequiredNull, "root"));
+
+        Assert.Contains("Amount", exception.Path, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SupportsExplicitConverterFactories()
+    {
+        var context = new SourceGenerationContext();
+        var value = new SourceGenFactoryConverter
+        {
+            Id = new Guid("55555555-5555-5555-5555-555555555555"),
+        };
+
+        var copy = NbtSerializer.Deserialize(
+            NbtSerializer.Serialize(value, context.SourceGenFactoryConverter, "root"),
+            context.SourceGenFactoryConverter);
+
+        Assert.Equal(value.Id, copy.Id);
+    }
+
+    [Fact]
     public void ExplicitMemberConverterIsUsedForReadEvenWhenOptionsHasDifferentConverter()
     {
         var writeContext = new SourceGenerationContext();
@@ -851,6 +879,8 @@ public sealed class NbtSourceGenerationTests
 [NbtSerializable(typeof(SourceGenConverterConstructor))]
 [NbtSerializable(typeof(SourceGenConverterField))]
 [NbtSerializable(typeof(SourceGenExplicitOnly))]
+[NbtSerializable(typeof(SourceGenConverterRequiredNull))]
+[NbtSerializable(typeof(SourceGenFactoryConverter))]
 internal partial class SourceGenerationContext : NbtSerializerContext
 {
     public SourceGenerationContext()
@@ -1121,6 +1151,27 @@ internal sealed class SourceGenExplicitOnly
 {
     [NbtUseConverter(typeof(SourceGenGuidConverter))]
     public Guid Id { get; set; }
+}
+
+internal sealed class SourceGenConverterRequiredNull
+{
+    [NbtUseConverter]
+    public required decimal? Amount { get; init; }
+}
+
+internal sealed class SourceGenFactoryConverter
+{
+    [NbtUseConverter(typeof(SourceGenGuidFactory))]
+    public Guid Id { get; set; }
+}
+
+internal sealed class SourceGenGuidFactory : NbtConverterFactory
+{
+    public override bool CanConvert(Type typeToConvert) => typeToConvert == typeof(Guid);
+
+    public override NbtConverter CreateConverter(
+        Type typeToConvert,
+        NbtSerializerOptions options) => SourceGenGuidConverter.Instance;
 }
 
 internal sealed class SourceGenGuidConverter : NbtConverter<Guid>
