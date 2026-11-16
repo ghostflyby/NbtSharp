@@ -149,6 +149,16 @@ internal static class ReachableFingerprint
 
         hash.Add(named.IsRecord);
         hash.Add(named.IsAbstract);
+        hash.Add(named.IsStatic);
+        hash.Add(named.IsSealed);
+        hash.Add(named.BaseType?.ToDisplayString(FullyQualified));
+        hash.Add(named.AllInterfaces.Length);
+        foreach (var interfaceType in named.AllInterfaces
+                     .OrderBy(static value => value.ToDisplayString(FullyQualified), StringComparer.Ordinal))
+        {
+            hash.Add(interfaceType.ToDisplayString(FullyQualified));
+        }
+
         foreach (var member in named.GetMembers())
         {
             hash.Add(member.Name);
@@ -160,9 +170,18 @@ internal static class ReachableFingerprint
             {
                 case IPropertySymbol property when !property.IsStatic:
                     hash.Add(property.IsRequired);
+                    hash.Add(property.IsIndexer);
+                    hash.Add(property.IsOverride);
                     hash.Add((int)(property.GetMethod?.DeclaredAccessibility ?? Accessibility.NotApplicable));
                     hash.Add((int)(property.SetMethod?.DeclaredAccessibility ?? Accessibility.NotApplicable));
                     hash.Add(property.SetMethod?.IsInitOnly ?? false);
+                    for (var overridden = property.OverriddenProperty;
+                         overridden is not null;
+                         overridden = overridden.OverriddenProperty)
+                    {
+                        hash.Add(overridden.OriginalDefinition.ToDisplayString(FullyQualified));
+                    }
+
                     pending.Push(property.Type);
                     AddExplicitConverterType(property, pending);
                     break;
@@ -293,8 +312,13 @@ internal static class ReachableFingerprint
         hash.Add(orderedReferences.Length);
         foreach (var reference in orderedReferences)
         {
+            var text = reference.SyntaxTree.GetText();
+            var span = reference.Span;
             hash.Add(reference.SyntaxTree.FilePath);
-            hash.Add(reference.SyntaxTree.GetText().GetChecksum().AsSpan());
+            for (var index = span.Start; index < span.End; index++)
+            {
+                hash.Add(text[index]);
+            }
         }
     }
 

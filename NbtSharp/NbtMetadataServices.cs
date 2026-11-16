@@ -128,6 +128,7 @@ public static class NbtMetadataServices
     /// <param name="options">The serializer options.</param>
     /// <param name="pathSegment">The path segment for error reporting.</param>
     /// <returns>The decoded value.</returns>
+    /// <remarks>The converter must be an <see cref="NbtConverter{T}"/> or a factory that creates one.</remarks>
     [RequiresUnreferencedCode("Converter factories may use reflection or runtime generic construction.")]
     [RequiresDynamicCode("Converter factories may use runtime generic construction.")]
     public static T ReadValueWithConverter<T>(
@@ -143,14 +144,13 @@ public static class NbtMetadataServices
             converter = factory.CreateConverter(typeof(T), options);
         }
 
-        return converter is NbtConverter<T> typed
-            ? NbtSerializer.DeserializeValueCore(ref reader, typed, options, pathSegment)
-            : (T)NbtSerializer.DeserializeValueCore(
-                ref reader,
-                typeof(T),
-                converter,
-                options,
-                pathSegment)!;
+        if (converter is not NbtConverter<T> typed)
+        {
+            throw new NotSupportedException(
+                $"The converter {converter.GetType()} does not support {typeof(T)}.");
+        }
+
+        return NbtSerializer.DeserializeValueCore(ref reader, typed, options, pathSegment);
     }
 
     /// <summary>Writes one named compound member with an explicitly supplied converter.</summary>
@@ -160,6 +160,7 @@ public static class NbtMetadataServices
     /// <param name="value">The member value.</param>
     /// <param name="converter">The converter or converter factory for <typeparamref name="T"/>.</param>
     /// <param name="options">The serializer options.</param>
+    /// <remarks>The converter must be an <see cref="NbtConverter{T}"/> or a factory that creates one.</remarks>
     [RequiresUnreferencedCode("Converter factories may use reflection or runtime generic construction.")]
     [RequiresDynamicCode("Converter factories may use runtime generic construction.")]
     public static void WriteMemberWithConverter<T>(
@@ -183,13 +184,13 @@ public static class NbtMetadataServices
             converter = factory.CreateConverter(typeof(T), options);
         }
 
-        if (converter is NbtConverter<T> typed)
+        if (converter is not NbtConverter<T> typed)
         {
-            NbtSerializer.SerializeMemberCore(ref writer, name, value, typed, options);
-            return;
+            throw new NotSupportedException(
+                $"The converter {converter.GetType()} does not support {typeof(T)}.");
         }
 
-        NbtSerializer.SerializeMemberInternal(ref writer, name, value, typeof(T), options);
+        NbtSerializer.SerializeMemberCore(ref writer, name, value, typed, options);
     }
 
     /// <summary>Prepends a path segment to an exception.</summary>

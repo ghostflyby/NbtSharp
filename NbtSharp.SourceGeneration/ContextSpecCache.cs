@@ -20,7 +20,11 @@ internal static class ContextSpecCache
     {
         if (Entries.Count >= Capacity)
         {
-            Entries.Clear();
+            foreach (var key in Entries.Keys)
+            {
+                Entries.TryRemove(key, out _);
+                break;
+            }
         }
 
         Entries[inputFingerprint] = prepared;

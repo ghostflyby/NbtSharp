@@ -385,14 +385,18 @@ internal sealed partial class ContextEmitter
     private void EmitObjectConverter(TypeSpec entry, ObjectSpec model)
     {
         var typeName = model.TypeName;
-        _writer.WriteLine(
-            "[global::System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage(" +
-            "\"Trimming\", \"IL2026\", " +
-            "Justification = \"The generated type graph covers every reachable type.\")]");
-        _writer.WriteLine(
-            "[global::System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage(" +
-            "\"AOT\", \"IL3050\", " +
-            "Justification = \"The generated type graph covers every reachable type.\")]");
+        if (!model.RequiresRuntimeResolution)
+        {
+            _writer.WriteLine(
+                "[global::System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage(" +
+                "\"Trimming\", \"IL2026\", " +
+                "Justification = \"The generated type graph covers every reachable type.\")]");
+            _writer.WriteLine(
+                "[global::System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage(" +
+                "\"AOT\", \"IL3050\", " +
+                "Justification = \"The generated type graph covers every reachable type.\")]");
+        }
+
         _writer.WriteLine($"private sealed class {entry.ConverterName} : global::NbtSharp.NbtConverter<{typeName}>");
         _writer.WriteLine("{");
         _writer.Indent();

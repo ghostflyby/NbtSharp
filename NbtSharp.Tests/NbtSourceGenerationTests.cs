@@ -548,6 +548,56 @@ public sealed class NbtSourceGenerationTests
     }
 
     [Fact]
+    public void SupportsExplicitConvertersOnRequiredInitConstructorAndFieldMembers()
+    {
+        var options = new NbtSerializerOptions();
+        options.Converters.Add(SourceGenDecimalConverter.Instance);
+        var context = new SourceGenerationContext(options);
+        var id = new Guid("33333333-3333-3333-3333-333333333333");
+
+        var required = new SourceGenConverterRequired
+        {
+            Id = id,
+            OptionalAmount = 1.5m,
+        };
+        var requiredCopy = NbtSerializer.Deserialize(
+            NbtSerializer.Serialize(required, context.SourceGenConverterRequired, "root"),
+            context.SourceGenConverterRequired);
+        Assert.Equal(id, requiredCopy.Id);
+        Assert.Equal(1.5m, requiredCopy.OptionalAmount);
+
+        var constructed = new SourceGenConverterConstructor(id);
+        var constructedCopy = NbtSerializer.Deserialize(
+            NbtSerializer.Serialize(constructed, context.SourceGenConverterConstructor, "root"),
+            context.SourceGenConverterConstructor);
+        Assert.Equal(id, constructedCopy.Id);
+
+        var field = new SourceGenConverterField { Id = id };
+        var fieldCopy = NbtSerializer.Deserialize(
+            NbtSerializer.Serialize(field, context.SourceGenConverterField, "root"),
+            context.SourceGenConverterField);
+        Assert.Equal(id, fieldCopy.Id);
+    }
+
+    [Fact]
+    public void ExplicitMemberConverterIsUsedForReadEvenWhenOptionsHasDifferentConverter()
+    {
+        var writeContext = new SourceGenerationContext();
+        var value = new SourceGenExplicitOnly
+        {
+            Id = new Guid("44444444-4444-4444-4444-444444444444"),
+        };
+        var data = NbtSerializer.Serialize(value, writeContext.SourceGenExplicitOnly, "root");
+
+        var options = new NbtSerializerOptions();
+        options.Converters.Add(SourceGenAlternateGuidConverter.Instance);
+        var readContext = new SourceGenerationContext(options);
+        var copy = NbtSerializer.Deserialize(data, readContext.SourceGenExplicitOnly);
+
+        Assert.Equal(value.Id, copy.Id);
+    }
+
+    [Fact]
     public void DirectScalarReadsKeepMemberErrorPaths()
     {
         var context = SourceGenerationContext.Default;
@@ -797,6 +847,10 @@ public sealed class NbtSourceGenerationTests
 [NbtSerializable(typeof(SourceGenDefaultEnum))]
 [NbtSerializable(typeof(SourceGenEnumHolder))]
 [NbtSerializable(typeof(SourceGenConverterOptOut))]
+[NbtSerializable(typeof(SourceGenConverterRequired))]
+[NbtSerializable(typeof(SourceGenConverterConstructor))]
+[NbtSerializable(typeof(SourceGenConverterField))]
+[NbtSerializable(typeof(SourceGenExplicitOnly))]
 internal partial class SourceGenerationContext : NbtSerializerContext
 {
     public SourceGenerationContext()
@@ -1034,6 +1088,39 @@ internal sealed class SourceGenConverterOptOut
 
     [NbtUseConverter(typeof(SourceGenDecimalConverter))]
     public decimal ExplicitAmount { get; set; }
+}
+
+internal sealed class SourceGenConverterRequired
+{
+    [NbtUseConverter(typeof(SourceGenGuidConverter))]
+    public required Guid Id { get; init; }
+
+    [NbtUseConverter]
+    public decimal? OptionalAmount { get; init; }
+}
+
+internal sealed class SourceGenConverterConstructor
+{
+    public SourceGenConverterConstructor(Guid id)
+    {
+        Id = id;
+    }
+
+    [NbtUseConverter(typeof(SourceGenGuidConverter))]
+    public Guid Id { get; }
+}
+
+internal sealed class SourceGenConverterField
+{
+    [NbtInclude]
+    [NbtUseConverter(typeof(SourceGenGuidConverter))]
+    public Guid Id;
+}
+
+internal sealed class SourceGenExplicitOnly
+{
+    [NbtUseConverter(typeof(SourceGenGuidConverter))]
+    public Guid Id { get; set; }
 }
 
 internal sealed class SourceGenGuidConverter : NbtConverter<Guid>

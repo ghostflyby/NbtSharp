@@ -122,7 +122,8 @@ internal sealed class ObjectSpec
         ImmutableArray<string> constraintLines,
         ImmutableArray<MemberSpec> members,
         ConstructorSpec? constructor,
-        bool useConstructorAccessor)
+        bool useConstructorAccessor,
+        bool requiresRuntimeResolution)
     {
         TypeName = typeName;
         Name = name;
@@ -134,6 +135,7 @@ internal sealed class ObjectSpec
         Members = members;
         Constructor = constructor;
         UseConstructorAccessor = useConstructorAccessor;
+        RequiresRuntimeResolution = requiresRuntimeResolution;
     }
 
     public string TypeName { get; }
@@ -155,6 +157,8 @@ internal sealed class ObjectSpec
     public ConstructorSpec? Constructor { get; }
 
     public bool UseConstructorAccessor { get; }
+
+    public bool RequiresRuntimeResolution { get; }
 }
 
 /// <summary>
@@ -199,7 +203,8 @@ internal sealed class MemberSpec
         string setterTypeArguments,
         string setterValueTypeName,
         ConverterMode converterMode,
-        string? explicitConverterTypeName)
+        string? explicitConverterTypeName,
+        bool explicitConverterIsFactory)
     {
         Index = index;
         ClrName = clrName;
@@ -223,6 +228,7 @@ internal sealed class MemberSpec
         SetterValueTypeName = setterValueTypeName;
         ConverterMode = converterMode;
         ExplicitConverterTypeName = explicitConverterTypeName;
+        ExplicitConverterIsFactory = explicitConverterIsFactory;
     }
 
     public int Index { get; }
@@ -268,6 +274,8 @@ internal sealed class MemberSpec
     public ConverterMode ConverterMode { get; }
 
     public string? ExplicitConverterTypeName { get; }
+
+    public bool ExplicitConverterIsFactory { get; }
 }
 
 /// <summary>
@@ -539,6 +547,7 @@ internal static class ContextSpecFingerprint
         hash.Add(model.TypeParameterList);
         AddStrings(ref hash, model.ConstraintLines);
         hash.Add(model.UseConstructorAccessor);
+        hash.Add(model.RequiresRuntimeResolution);
 
         if (model.Constructor is { } constructor)
         {
@@ -585,6 +594,7 @@ internal static class ContextSpecFingerprint
             hash.Add(member.SetterValueTypeName);
             hash.Add((int)member.ConverterMode);
             hash.Add(member.ExplicitConverterTypeName);
+            hash.Add(member.ExplicitConverterIsFactory);
         }
     }
 

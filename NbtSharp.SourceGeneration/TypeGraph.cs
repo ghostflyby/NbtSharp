@@ -124,6 +124,8 @@ internal sealed class MemberModel
 
     public ITypeSymbol? ExplicitConverterType { get; set; }
 
+    public bool ExplicitConverterIsFactory { get; set; }
+
     public bool IsInitOnly { get; }
 
     public ITypeSymbol? SetterContainingType { get; }
@@ -512,9 +514,23 @@ internal sealed class TypeGraph
                         continue;
                     }
 
-                    if (FindAttribute(field, IncludeAttribute) is null ||
-                        FindAttribute(field, IgnoreAttribute) is not null)
+                    if (FindAttribute(field, IgnoreAttribute) is not null)
                     {
+                        continue;
+                    }
+
+                    if (FindAttribute(field, IncludeAttribute) is null)
+                    {
+                        if (FindAttribute(field, UseConverterAttribute) is not null)
+                        {
+                            Report(
+                                Diagnostics.InvalidUseConverter,
+                                field.Locations.FirstOrDefault() ?? location,
+                                field.Name,
+                                "fields require [NbtInclude] in addition to [NbtUseConverter]");
+                            return null;
+                        }
+
                         continue;
                     }
 
@@ -574,7 +590,11 @@ internal sealed class TypeGraph
             return false;
         }
 
-        if (!IsValidExplicitConverter(converterType, out var reason))
+        if (!IsValidExplicitConverter(
+                member.Type,
+                converterType,
+                out var reason,
+                out var isFactory))
         {
             Report(Diagnostics.InvalidUseConverter, location, member.ClrName, reason);
             return false;
@@ -582,6 +602,7 @@ internal sealed class TypeGraph
 
         member.ConverterMode = ConverterMode.Explicit;
         member.ExplicitConverterType = converterType;
+        member.ExplicitConverterIsFactory = isFactory;
         return true;
     }
 
@@ -606,8 +627,13 @@ internal sealed class TypeGraph
         return false;
     }
 
-    private bool IsValidExplicitConverter(ITypeSymbol type, out string reason)
+    private bool IsValidExplicitConverter(
+        ITypeSymbol memberType,
+        ITypeSymbol type,
+        out string reason,
+        out bool isFactory)
     {
+        isFactory = false;
         if (type is not INamedTypeSymbol named)
         {
             reason = "the converter type must be a named type";
@@ -652,8 +678,47 @@ internal sealed class TypeGraph
             return false;
         }
 
+        isFactory = InheritsFrom(named, "global::NbtSharp.NbtConverterFactory");
+        if (isFactory)
+        {
+            reason = "";
+            return true;
+        }
+
+        var converterBase = FindConverterBase(named);
+        if (converterBase is null)
+        {
+            reason = "the converter type must derive from NbtConverter<T> or NbtConverterFactory";
+            return false;
+        }
+
+        var handledType = converterBase.TypeArguments[0];
+        if (!SymbolEqualityComparer.Default.Equals(handledType, memberType))
+        {
+            reason =
+                $"the converter handles '{handledType.ToDisplayString(FullyQualified)}' " +
+                $"but the member type is '{memberType.ToDisplayString(FullyQualified)}'";
+            return false;
+        }
+
         reason = "";
         return true;
+    }
+
+    private static INamedTypeSymbol? FindConverterBase(ITypeSymbol type)
+    {
+        for (var current = type as INamedTypeSymbol; current is not null; current = current.BaseType)
+        {
+            var definition = current.OriginalDefinition;
+            if (definition.Name == "NbtConverter" &&
+                definition.Arity == 1 &&
+                definition.ContainingNamespace?.ToDisplayString() == "NbtSharp")
+            {
+                return current;
+            }
+        }
+
+        return null;
     }
 
     private static bool InheritsFrom(ITypeSymbol type, string baseTypeName)

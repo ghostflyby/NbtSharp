@@ -15,6 +15,9 @@ namespace NbtSharp;
 /// member. The converter type must be a closed, non-abstract type derived from <see cref="NbtConverter"/>
 /// with a public parameterless constructor.
 /// </para>
+/// <para>
+/// Fields must also be marked with <see cref="NbtIncludeAttribute"/> to participate in the mapping.
+/// </para>
 /// </remarks>
 [AttributeUsage(
     AttributeTargets.Property | AttributeTargets.Field,

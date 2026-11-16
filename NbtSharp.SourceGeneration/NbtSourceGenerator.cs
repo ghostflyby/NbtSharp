@@ -11,6 +11,9 @@ public sealed class NbtSourceGenerator : IIncrementalGenerator
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
+        // ContextModel remains symbol-carrying because Prepare needs semantic symbols. The comparer
+        // compares only its dependency fingerprint, and every cached prepared/generated stage is
+        // symbol-free.
         var models = context.SyntaxProvider
             .ForAttributeWithMetadataName(
                 SerializableAttributeName,

@@ -99,7 +99,10 @@ internal sealed partial class ContextEmitter
                 FormatConstraints(definition.TypeParameters).ToImmutableArray(),
                 members,
                 BuildConstructorSpec(model),
-                model.UseConstructorAccessor);
+                model.UseConstructorAccessor,
+                members.Any(static member =>
+                    member.ConverterMode == ConverterMode.Runtime ||
+                    member is { ConverterMode: ConverterMode.Explicit, ExplicitConverterIsFactory: true }));
         }
 
         private static ConstructorSpec? BuildConstructorSpec(ObjectModel model)
@@ -175,7 +178,8 @@ internal sealed partial class ContextEmitter
                 setterTypeArguments,
                 setterValueTypeName,
                 member.ConverterMode,
-                member.ExplicitConverterType is null ? null : Fq(member.ExplicitConverterType));
+                member.ExplicitConverterType is null ? null : Fq(member.ExplicitConverterType),
+                member.ExplicitConverterIsFactory);
         }
     }
 }

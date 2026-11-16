@@ -29,7 +29,7 @@ internal static class Diagnostics
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "Mark the member with [NbtUseConverter] to resolve its converter at runtime, or [NbtUseConverter(typeof(...))] to specify a converter type.");
+        description: "For a member type, mark the member with [NbtUseConverter] to resolve its converter at runtime, or [NbtUseConverter(typeof(...))] to specify a converter type. Roots and collection elements need a converter in NbtSerializerOptions.Converters.");
 
     public static readonly DiagnosticDescriptor NoUsableConstructor = new(
         "NBTSG004",
