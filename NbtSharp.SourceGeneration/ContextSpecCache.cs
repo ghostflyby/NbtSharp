@@ -10,7 +10,9 @@ namespace NbtSharp.SourceGeneration;
 /// </summary>
 internal static class ContextSpecCache
 {
-    private const int Capacity = 256;
+    // Keep prepared specs for realistic solution sizes. Eviction is exceptional; the cache is the
+    // mechanism that lets Prepare skip graph construction for unchanged contexts.
+    private const int Capacity = 4096;
     private static readonly ConcurrentDictionary<string, PreparedContext> Entries =
         new(StringComparer.Ordinal);
 

@@ -5,33 +5,18 @@ using Microsoft.CodeAnalysis;
 namespace NbtSharp.SourceGeneration;
 
 /// <summary>
-/// Computes a conservative dependency fingerprint for a context without constructing the type
-/// graph. The walk visits every type that can influence generated source and hashes declaration
-/// text for source types and assembly identities for metadata types.
+/// Computes a conservative content fingerprint for a context without constructing the type graph.
+/// The walk visits every type that can influence generated source and hashes declaration text for
+/// source types and assembly identities for metadata types.
 /// </summary>
-internal readonly struct ReachableFingerprintResult
-{
-    public ReachableFingerprintResult(string content, string full)
-    {
-        Content = content;
-        Full = full;
-    }
-
-    /// <summary>Fingerprint of semantic content; stable across positional-only edits.</summary>
-    public string Content { get; }
-
-    /// <summary>Content plus declaration positions; used to refresh diagnostic locations.</summary>
-    public string Full { get; }
-}
-
 internal static class ReachableFingerprint
 {
-    private const string FormatVersion = "reachable-fingerprint-v2";
+    private const string FormatVersion = "reachable-fingerprint-v3";
     private const string UseConverterAttribute = "NbtSharp.NbtUseConverterAttribute";
 
     private static readonly SymbolDisplayFormat FullyQualified = SymbolDisplayFormat.FullyQualifiedFormat;
 
-    public static ReachableFingerprintResult Compute(
+    public static string Compute(
         INamedTypeSymbol contextType,
         ImmutableArray<RootType> roots,
         Compilation compilation)
@@ -64,47 +49,6 @@ internal static class ReachableFingerprint
             }
 
             AddType(ref hash, type, pending);
-        }
-
-        var content = hash.ToHex();
-        var positions = StableHash.Create();
-        positions.Add("positions-v1");
-        var positionEntries = visited
-            .SelectMany(static type => type.DeclaringSyntaxReferences.Select(reference => (Type: type, Reference: reference)))
-            .Select(static entry => (
-                TypeName: entry.Type.ToDisplayString(FullyQualified),
-                entry.Reference.SyntaxTree.FilePath,
-                entry.Reference.Span.Start,
-                entry.Reference.Span.Length))
-            .OrderBy(static entry => entry.TypeName, StringComparer.Ordinal)
-            .ThenBy(static entry => entry.FilePath, StringComparer.Ordinal)
-            .ThenBy(static entry => entry.Start)
-            .ThenBy(static entry => entry.Length)
-            .ToArray();
-        positions.Add(positionEntries.Length);
-        foreach (var entry in positionEntries)
-        {
-            positions.Add(entry.TypeName);
-            positions.Add(entry.FilePath);
-            positions.Add(entry.Start);
-            positions.Add(entry.Length);
-        }
-
-        var full = StableHash.Create();
-        full.Add("full-fingerprint-v1");
-        full.Add(content);
-        full.Add(positions.ToHex());
-        return new ReachableFingerprintResult(content, full.ToHex());
-    }
-
-    public static string Combine(INamedTypeSymbol contextType, IEnumerable<string> fingerprints)
-    {
-        var hash = StableHash.Create();
-        hash.Add("context-merge-v1");
-        hash.Add(contextType.ToDisplayString(FullyQualified));
-        foreach (var fingerprint in fingerprints.OrderBy(static value => value, StringComparer.Ordinal))
-        {
-            hash.Add(fingerprint);
         }
 
         return hash.ToHex();

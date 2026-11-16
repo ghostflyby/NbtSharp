@@ -148,12 +148,12 @@ generated. Reflection remains available through `NbtReflectionTypeInfoResolver` 
 not part of a generated context, and it also supports enum members through the built-in enum
 converter. When no custom converters are registered, generated object converters read and write
 scalar members directly; registering a custom converter disables that fast path for the operation.
-Prepared contexts are symbol-free and cached per context by a reachability fingerprint; unrelated
-compilation changes skip both graph construction and source emission, while changes to a context or
-any reachable declaration invalidate only that context. The transform input still carries symbols for
-semantic analysis, but every cached prepared/generated stage is symbol-free. Fingerprints hash each
-reachable declaration's text and track positions separately, so editing an unrelated declaration in
-the same file does not regenerate the context; positional shifts only re-check diagnostics.
+Each attributed context is prepared inside the incremental transform and emits a symbol-free
+`PreparedContext`; generated source is cached per prepared context. A content-keyed reachability
+fingerprint cache skips graph construction for unchanged contexts, and no symbol-carrying value is
+retained by the pipeline. Partial context declarations are combined into one transform output. Editing
+an unrelated declaration in the same file does not regenerate the context; positional-only changes
+reuse the cached spec unless the context has diagnostics whose locations must be refreshed.
 
 Required members are strict: every required member that is part of the mapping must be present in
 the compound, otherwise deserialization throws `NbtException`. A required mapped member whose value
@@ -316,6 +316,9 @@ them. The writer does not roll back partial output if a converter throws.
 ```bash
 dotnet build NbtSharp.slnx
 dotnet test NbtSharp.slnx
+
+# Cold and unrelated-edit warm source generation benchmarks (100 and 300 contexts).
+dotnet run --project NbtSharp.SourceGeneration.Benchmarks/NbtSharp.SourceGeneration.Benchmarks.csproj -c Release
 ```
 
 Requires the .NET 11 SDK (see `global.json`). Tests run on xunit.v3 through

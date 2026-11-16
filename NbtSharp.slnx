@@ -1,6 +1,7 @@
 <Solution>
   <Project Path="NbtSharp/NbtSharp.csproj" />
   <Project Path="NbtSharp.Aot.Tests/NbtSharp.Aot.Tests.csproj" />
+  <Project Path="NbtSharp.SourceGeneration.Benchmarks/NbtSharp.SourceGeneration.Benchmarks.csproj" />
   <Project Path="NbtSharp.SourceGeneration.Tests/NbtSharp.SourceGeneration.Tests.csproj" />
   <Project Path="NbtSharp.SourceGeneration/NbtSharp.SourceGeneration.csproj" />
   <Project Path="NbtSharp.Tests/NbtSharp.Tests.csproj" />

@@ -320,7 +320,7 @@ public sealed class NbtSourceGeneratorTests
 
         var result = driver.GetRunResult();
         Assert.Equal(1, ContextEmitter.ContextSpecBuilder.GraphBuildCount);
-        AssertCached(result, "NbtContextModels");
+        AssertCached(result, "NbtContextInputs");
         AssertCached(result, "NbtPreparedContexts");
         AssertCached(result, "NbtGeneratedContexts");
     }
@@ -1407,6 +1407,121 @@ public sealed class NbtSourceGeneratorTests
             static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
     }
 
+    [Fact]
+    public void SupportsAttributesOnMultiplePartialContextDeclarations()
+    {
+        var result = RunWithSources(
+            """
+            using NbtSharp;
+
+            [NbtSerializable(typeof(DtoA))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class DtoA
+            {
+                public int A { get; set; }
+            }
+            """,
+            """
+            using NbtSharp;
+
+            [NbtSerializable(typeof(DtoB))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class DtoB
+            {
+                public int B { get; set; }
+            }
+            """);
+
+        AssertNoErrors(result);
+        Assert.Contains("DtoA", result.GeneratedSource, StringComparison.Ordinal);
+        Assert.Contains("DtoB", result.GeneratedSource, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UpdatesContextWhenNonPrimaryPartialChanges()
+    {
+        var parseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
+        var treeA = CSharpSyntaxTree.ParseText(
+            """
+            using NbtSharp;
+
+            [NbtSerializable(typeof(DtoA))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class DtoA
+            {
+                public int A { get; set; }
+            }
+            """,
+            parseOptions,
+            path: "A.cs",
+            cancellationToken: TestContext.Current.CancellationToken);
+        var treeB = CSharpSyntaxTree.ParseText(
+            """
+            using NbtSharp;
+
+            [NbtSerializable(typeof(DtoB))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class DtoB
+            {
+                public int B { get; set; }
+            }
+            """,
+            parseOptions,
+            path: "B.cs",
+            cancellationToken: TestContext.Current.CancellationToken);
+        var compilation = CSharpCompilation.Create(
+            "PartialGeneratorTests",
+            [treeA, treeB],
+            References,
+            new CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable));
+        var driver = CreateTrackingDriver(parseOptions);
+        ContextSpecCache.ResetForTests();
+
+        driver = driver.RunGenerators(compilation, TestContext.Current.CancellationToken);
+        var before = GetGeneratedSource(driver.GetRunResult());
+
+        var changedTreeB = CSharpSyntaxTree.ParseText(
+            """
+            using NbtSharp;
+
+            [NbtSerializable(typeof(DtoB))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class DtoB
+            {
+                public int B { get; set; }
+
+                public int Armor { get; set; }
+            }
+            """,
+            parseOptions,
+            path: "B.cs",
+            cancellationToken: TestContext.Current.CancellationToken);
+        driver = driver.RunGenerators(
+            compilation.ReplaceSyntaxTree(treeB, changedTreeB),
+            TestContext.Current.CancellationToken);
+
+        var after = GetGeneratedSource(driver.GetRunResult());
+        Assert.NotEqual(before, after);
+        Assert.Contains("Armor", after, StringComparison.Ordinal);
+    }
+
     private static GeneratorRunResult Run(string source)
     {
         var parseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
@@ -1414,6 +1529,45 @@ public sealed class NbtSourceGeneratorTests
         var compilation = CSharpCompilation.Create(
             "GeneratorTests",
             [syntaxTree],
+            References,
+            new CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable));
+
+        var driver = CSharpGeneratorDriver.Create(
+            [new NbtSourceGenerator().AsSourceGenerator()],
+            parseOptions: parseOptions);
+        GeneratorDriver generatorDriver = driver.RunGeneratorsAndUpdateCompilation(
+            compilation,
+            out var outputCompilation,
+            out var generatorDiagnostics);
+
+        var runResult = generatorDriver.GetRunResult();
+        var generatedSource = string.Join(
+            "\n",
+            runResult.Results
+                .SelectMany(static result => result.GeneratedSources)
+                .Select(static result => result.SourceText.ToString()));
+
+        return new GeneratorRunResult(
+            generatorDiagnostics,
+            outputCompilation.GetDiagnostics(),
+            generatedSource);
+    }
+
+    private static GeneratorRunResult RunWithSources(params string[] sources)
+    {
+        var parseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
+        var syntaxTrees = sources
+            .Select((source, index) => CSharpSyntaxTree.ParseText(
+                source,
+                parseOptions,
+                path: $"Source{index}.cs",
+                cancellationToken: TestContext.Current.CancellationToken))
+            .ToArray();
+        var compilation = CSharpCompilation.Create(
+            "GeneratorTests",
+            syntaxTrees,
             References,
             new CSharpCompilationOptions(
                 OutputKind.DynamicallyLinkedLibrary,
