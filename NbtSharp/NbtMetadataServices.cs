@@ -121,6 +121,77 @@ public static class NbtMetadataServices
         NbtSerializer.SerializeMemberInternal(ref writer, name, value, typeof(T), options);
     }
 
+    /// <summary>Reads one value with an explicitly supplied converter.</summary>
+    /// <typeparam name="T">The value type.</typeparam>
+    /// <param name="reader">The reader positioned at the value's first token.</param>
+    /// <param name="converter">The converter or converter factory for <typeparamref name="T"/>.</param>
+    /// <param name="options">The serializer options.</param>
+    /// <param name="pathSegment">The path segment for error reporting.</param>
+    /// <returns>The decoded value.</returns>
+    [RequiresUnreferencedCode("Converter factories may use reflection or runtime generic construction.")]
+    [RequiresDynamicCode("Converter factories may use runtime generic construction.")]
+    public static T ReadValueWithConverter<T>(
+        ref NbtReader reader,
+        NbtConverter converter,
+        NbtSerializerOptions options,
+        string? pathSegment)
+    {
+        ArgumentNullException.ThrowIfNull(converter);
+        ArgumentNullException.ThrowIfNull(options);
+        if (converter is NbtConverterFactory factory)
+        {
+            converter = factory.CreateConverter(typeof(T), options);
+        }
+
+        return converter is NbtConverter<T> typed
+            ? NbtSerializer.DeserializeValueCore(ref reader, typed, options, pathSegment)
+            : (T)NbtSerializer.DeserializeValueCore(
+                ref reader,
+                typeof(T),
+                converter,
+                options,
+                pathSegment)!;
+    }
+
+    /// <summary>Writes one named compound member with an explicitly supplied converter.</summary>
+    /// <typeparam name="T">The member type.</typeparam>
+    /// <param name="writer">The writer that receives the member.</param>
+    /// <param name="name">The member name.</param>
+    /// <param name="value">The member value.</param>
+    /// <param name="converter">The converter or converter factory for <typeparamref name="T"/>.</param>
+    /// <param name="options">The serializer options.</param>
+    [RequiresUnreferencedCode("Converter factories may use reflection or runtime generic construction.")]
+    [RequiresDynamicCode("Converter factories may use runtime generic construction.")]
+    public static void WriteMemberWithConverter<T>(
+        ref NbtWriter writer,
+        string name,
+        T value,
+        NbtConverter converter,
+        NbtSerializerOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        ArgumentNullException.ThrowIfNull(converter);
+        ArgumentNullException.ThrowIfNull(options);
+        if (value is null)
+        {
+            NbtSerializer.SerializeMemberInternal(ref writer, name, value, typeof(T), options);
+            return;
+        }
+
+        if (converter is NbtConverterFactory factory)
+        {
+            converter = factory.CreateConverter(typeof(T), options);
+        }
+
+        if (converter is NbtConverter<T> typed)
+        {
+            NbtSerializer.SerializeMemberCore(ref writer, name, value, typed, options);
+            return;
+        }
+
+        NbtSerializer.SerializeMemberInternal(ref writer, name, value, typeof(T), options);
+    }
+
     /// <summary>Prepends a path segment to an exception.</summary>
     /// <param name="exception">The exception to update.</param>
     /// <param name="segment">The path segment to prepend, or <see langword="null"/>.</param>

@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Globalization;
 
 namespace NbtSharp.Tests;
 
@@ -457,6 +458,96 @@ public sealed class NbtSourceGenerationTests
     }
 
     [Fact]
+    public void SupportsRuntimeAndExplicitMemberConverters()
+    {
+        var options = new NbtSerializerOptions();
+        options.Converters.Add(SourceGenGuidConverter.Instance);
+        options.Converters.Add(SourceGenDecimalConverter.Instance);
+        var context = new SourceGenerationContext(options);
+        var value = new SourceGenConverterOptOut
+        {
+            RuntimeId = new Guid("11111111-1111-1111-1111-111111111111"),
+            ExplicitId = new Guid("22222222-2222-2222-2222-222222222222"),
+            RuntimeAmount = 12.34m,
+            ExplicitAmount = 56.78m,
+        };
+
+        var data = NbtSerializer.Serialize(value, context.SourceGenConverterOptOut, "root");
+        var copy = NbtSerializer.Deserialize(data, context.SourceGenConverterOptOut);
+        var root = (NbtCompound)NbtSerializer.Deserialize(data).Value.Value!;
+
+        Assert.Equal(value.RuntimeId, copy.RuntimeId);
+        Assert.Equal(value.ExplicitId, copy.ExplicitId);
+        Assert.Equal(value.RuntimeAmount, copy.RuntimeAmount);
+        Assert.Equal(value.ExplicitAmount, copy.ExplicitAmount);
+        Assert.Equal(NbtTagType.ByteArray, root["ExplicitId"].TagType);
+    }
+
+    [Fact]
+    public void ExplicitMemberConverterOverridesOptionsConverters()
+    {
+        var options = new NbtSerializerOptions();
+        options.Converters.Add(SourceGenAlternateGuidConverter.Instance);
+        options.Converters.Add(SourceGenAlternateDecimalConverter.Instance);
+        var context = new SourceGenerationContext(options);
+        var value = new SourceGenConverterOptOut
+        {
+            RuntimeId = new Guid("11111111-1111-1111-1111-111111111111"),
+            ExplicitId = new Guid("22222222-2222-2222-2222-222222222222"),
+            RuntimeAmount = 12.34m,
+            ExplicitAmount = 56.78m,
+        };
+
+        var data = NbtSerializer.Serialize(value, context.SourceGenConverterOptOut, "root");
+        var root = (NbtCompound)NbtSerializer.Deserialize(data).Value.Value!;
+
+        Assert.Equal(NbtTagType.String, root["RuntimeId"].TagType);
+        Assert.Equal(NbtTagType.ByteArray, root["ExplicitId"].TagType);
+        Assert.Equal(NbtTagType.Double, root["RuntimeAmount"].TagType);
+        Assert.Equal(NbtTagType.String, root["ExplicitAmount"].TagType);
+    }
+
+    [Fact]
+    public void RuntimeMemberConverterRequiresRegisteredConverter()
+    {
+        var context = new SourceGenerationContext();
+        var value = new SourceGenConverterOptOut
+        {
+            ExplicitId = new Guid("22222222-2222-2222-2222-222222222222"),
+            ExplicitAmount = 56.78m,
+        };
+
+        var exception = Assert.Throws<NotSupportedException>(
+            () => NbtSerializer.Serialize(value, context.SourceGenConverterOptOut, "root"));
+
+        Assert.Contains("Guid", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MemberConvertersMatchReflectionSerialization()
+    {
+        var options = new NbtSerializerOptions
+        {
+            TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
+        };
+        options.Converters.Add(SourceGenGuidConverter.Instance);
+        options.Converters.Add(SourceGenDecimalConverter.Instance);
+        var context = new SourceGenerationContext(options);
+        var value = new SourceGenConverterOptOut
+        {
+            RuntimeId = new Guid("11111111-1111-1111-1111-111111111111"),
+            ExplicitId = new Guid("22222222-2222-2222-2222-222222222222"),
+            RuntimeAmount = 12.34m,
+            ExplicitAmount = 56.78m,
+        };
+
+        var generated = NbtSerializer.Serialize(value, context.SourceGenConverterOptOut, "root");
+        var reflected = NbtSerializer.Serialize(value, "root", options);
+
+        Assert.Equal(reflected, generated);
+    }
+
+    [Fact]
     public void DirectScalarReadsKeepMemberErrorPaths()
     {
         var context = SourceGenerationContext.Default;
@@ -705,6 +796,7 @@ public sealed class NbtSourceGenerationTests
 [NbtSerializable(typeof(SourceGenRequiredNullable))]
 [NbtSerializable(typeof(SourceGenDefaultEnum))]
 [NbtSerializable(typeof(SourceGenEnumHolder))]
+[NbtSerializable(typeof(SourceGenConverterOptOut))]
 internal partial class SourceGenerationContext : NbtSerializerContext
 {
     public SourceGenerationContext()
@@ -928,6 +1020,101 @@ internal sealed class SourceGenEnumHolder
     public SourceGenDefaultEnum Undefined { get; set; }
 }
 #pragma warning restore IDE1006
+
+internal sealed class SourceGenConverterOptOut
+{
+    [NbtUseConverter]
+    public Guid RuntimeId { get; set; }
+
+    [NbtUseConverter(typeof(SourceGenGuidConverter))]
+    public Guid ExplicitId { get; set; }
+
+    [NbtUseConverter]
+    public decimal RuntimeAmount { get; set; }
+
+    [NbtUseConverter(typeof(SourceGenDecimalConverter))]
+    public decimal ExplicitAmount { get; set; }
+}
+
+internal sealed class SourceGenGuidConverter : NbtConverter<Guid>
+{
+    public static readonly SourceGenGuidConverter Instance = new();
+
+    public override Guid Read(ref NbtReader reader, NbtSerializerOptions options) =>
+        new(reader.GetByteArray());
+
+    public override void Write(ref NbtWriter writer, Guid value, NbtSerializerOptions options) =>
+        writer.WriteByteArray(value.ToByteArray());
+
+    public override bool TryGetTagType(
+        Guid value,
+        NbtSerializerOptions options,
+        out NbtTagType tagType)
+    {
+        tagType = NbtTagType.ByteArray;
+        return true;
+    }
+}
+
+internal sealed class SourceGenAlternateGuidConverter : NbtConverter<Guid>
+{
+    public static readonly SourceGenAlternateGuidConverter Instance = new();
+
+    public override Guid Read(ref NbtReader reader, NbtSerializerOptions options) =>
+        Guid.Parse(reader.GetString(), CultureInfo.InvariantCulture);
+
+    public override void Write(ref NbtWriter writer, Guid value, NbtSerializerOptions options) =>
+        writer.WriteString(value.ToString("D", CultureInfo.InvariantCulture));
+
+    public override bool TryGetTagType(
+        Guid value,
+        NbtSerializerOptions options,
+        out NbtTagType tagType)
+    {
+        tagType = NbtTagType.String;
+        return true;
+    }
+}
+
+internal sealed class SourceGenDecimalConverter : NbtConverter<decimal>
+{
+    public static readonly SourceGenDecimalConverter Instance = new();
+
+    public override decimal Read(ref NbtReader reader, NbtSerializerOptions options) =>
+        decimal.Parse(reader.GetString(), CultureInfo.InvariantCulture);
+
+    public override void Write(ref NbtWriter writer, decimal value, NbtSerializerOptions options) =>
+        writer.WriteString(value.ToString(CultureInfo.InvariantCulture));
+
+    public override bool TryGetTagType(
+        decimal value,
+        NbtSerializerOptions options,
+        out NbtTagType tagType)
+    {
+        tagType = NbtTagType.String;
+        return true;
+    }
+}
+
+internal sealed class SourceGenAlternateDecimalConverter : NbtConverter<decimal>
+{
+    public static readonly SourceGenAlternateDecimalConverter Instance = new();
+
+    public override decimal Read(ref NbtReader reader, NbtSerializerOptions options) =>
+        (decimal)reader.GetDouble();
+
+    public override void Write(ref NbtWriter writer, decimal value, NbtSerializerOptions options) =>
+        writer.WriteDouble((double)value);
+
+    public override bool TryGetTagType(
+        decimal value,
+        NbtSerializerOptions options,
+        out NbtTagType tagType)
+    {
+        tagType = NbtTagType.Double;
+        return true;
+    }
+}
 
 internal sealed class SourceGenScalars
 {

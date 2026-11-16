@@ -1,5 +1,4 @@
 using System.Collections.Immutable;
-using System.Globalization;
 using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -7,20 +6,21 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace NbtSharp.SourceGeneration;
 
-internal sealed class ContextEmitter
+internal sealed partial class ContextEmitter
 {
     private const string ContextBaseType = "global::NbtSharp.NbtSerializerContext";
     private const string MetadataServices = "global::NbtSharp.NbtMetadataServices";
 
     private static readonly SymbolDisplayFormat FullyQualified = SymbolDisplayFormat.FullyQualifiedFormat;
 
-    private readonly Action<Diagnostic> _reportDiagnostic;
+    private readonly Action<DiagnosticSpec> _reportDiagnostic;
     private readonly ContextModel _model;
     private readonly CodeWriter _writer = new();
     private TypeGraph _graph = null!;
+    private ContextSpec? _spec;
     private bool _hasNameErrors;
 
-    public ContextEmitter(ContextModel model, Action<Diagnostic> reportDiagnostic)
+    public ContextEmitter(ContextModel model, Action<DiagnosticSpec> reportDiagnostic)
     {
         _model = model;
         _reportDiagnostic = reportDiagnostic;
@@ -28,30 +28,36 @@ internal sealed class ContextEmitter
 
     internal ContextEmitter(PreparedContext prepared)
     {
-        _model = prepared.Model;
-        _graph = prepared.Graph!;
+        _model = null!;
+        _spec = prepared.Spec;
         _reportDiagnostic = static _ => { };
     }
 
     public static PreparedContext Prepare(ContextModel model)
     {
-        var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
+        if (ContextSpecCache.TryGet(model.Fingerprint, out var cached))
+        {
+            return cached;
+        }
+
+        var diagnostics = ImmutableArray.CreateBuilder<DiagnosticSpec>();
         var emitter = new ContextEmitter(model, diagnostics.Add);
         var contextType = model.ContextType;
         var hintName = GetHintName(contextType);
 
         if (!emitter.Validate(contextType))
         {
-            return CreatePrepared(model, graph: null, hintName, diagnostics);
+            return Cache(model, CreatePrepared(model, graph: null, hintName, diagnostics));
         }
 
         emitter._graph = new TypeGraph(contextType.ContainingAssembly, emitter._reportDiagnostic);
+        ContextSpecBuilder.RecordGraphBuild();
         foreach (var root in model.Roots)
         {
             var entry = emitter._graph.AddRoot(root.Type, root.PropertyName, root.Location);
             if (entry is null && !emitter._graph.HasErrors)
             {
-                emitter._reportDiagnostic(Diagnostic.Create(
+                emitter._reportDiagnostic(DiagnosticSpec.Create(
                     Diagnostics.BuiltInRoot,
                     root.Location,
                     root.Type.ToDisplayString(FullyQualified)));
@@ -60,37 +66,39 @@ internal sealed class ContextEmitter
 
         if (emitter._graph.HasErrors)
         {
-            return CreatePrepared(model, graph: null, hintName, diagnostics);
+            return Cache(model, CreatePrepared(model, graph: null, hintName, diagnostics));
         }
 
         emitter.AssignNames(contextType);
         if (emitter._hasNameErrors || emitter._graph.HasErrors)
         {
-            return CreatePrepared(model, graph: null, hintName, diagnostics);
+            return Cache(model, CreatePrepared(model, graph: null, hintName, diagnostics));
         }
 
-        return CreatePrepared(model, emitter._graph, hintName, diagnostics);
+        return Cache(model, CreatePrepared(model, emitter._graph, hintName, diagnostics));
     }
 
     public string EmitSource()
     {
-        WriteSource(_model.ContextType);
+        WriteSource();
         return _writer.ToString();
+    }
+
+    private static PreparedContext Cache(ContextModel model, PreparedContext prepared)
+    {
+        ContextSpecCache.Add(model.Fingerprint, prepared);
+        return prepared;
     }
 
     private static PreparedContext CreatePrepared(
         ContextModel model,
         TypeGraph? graph,
         string hintName,
-        ImmutableArray<Diagnostic>.Builder diagnostics)
+        ImmutableArray<DiagnosticSpec>.Builder diagnostics)
     {
         var immutableDiagnostics = diagnostics.ToImmutable();
-        return new PreparedContext(
-            model,
-            graph,
-            hintName,
-            immutableDiagnostics,
-            ComputeFingerprint(model, graph, hintName, immutableDiagnostics));
+        var spec = ContextSpecBuilder.Build(model, graph, hintName, immutableDiagnostics);
+        return new PreparedContext(spec);
     }
 
     private bool Validate(INamedTypeSymbol contextType)
@@ -249,41 +257,38 @@ internal sealed class ContextEmitter
         }
     }
 
-    private void WriteSource(INamedTypeSymbol contextType)
+    private void WriteSource()
     {
+        var spec = _spec!;
         _writer.WriteLine("// <auto-generated/>");
         _writer.WriteLine("#nullable enable");
         _writer.WriteLine("#pragma warning disable CS1591");
         _writer.WriteLine();
 
-        var containingNamespace = contextType.ContainingNamespace;
-        var hasNamespace = containingNamespace is { IsGlobalNamespace: false };
+        var hasNamespace = spec.ContainingNamespace.Length != 0;
         if (hasNamespace)
         {
-            _writer.WriteLine($"namespace {containingNamespace.ToDisplayString()}");
+            _writer.WriteLine($"namespace {spec.ContainingNamespace}");
             _writer.WriteLine("{");
             _writer.Indent();
         }
 
-        var accessibility = contextType.DeclaredAccessibility == Accessibility.Public
-            ? "public"
-            : "internal";
-        var declarationKind = contextType.IsRecord ? "record class" : "class";
-        _writer.WriteLine($"{accessibility} partial {declarationKind} {contextType.Name}");
+        var declarationKind = spec.IsRecord ? "record class" : "class";
+        _writer.WriteLine($"{spec.Accessibility} partial {declarationKind} {spec.ContextName}");
         _writer.WriteLine("{");
         _writer.Indent();
 
-        _writer.WriteLine($"public static {contextType.Name} Default {{ get; }} = new();");
+        _writer.WriteLine($"public static {spec.ContextName} Default {{ get; }} = new();");
         _writer.WriteLine();
 
-        for (var index = 0; index < _graph.Entries.Count; index++)
+        foreach (var entry in spec.Entries)
         {
-            EmitTypeInfoProperty(_graph.Entries[index], contextType);
+            EmitTypeInfoProperty(entry);
         }
 
         EmitGetTypeInfo();
 
-        foreach (var entry in _graph.Entries)
+        foreach (var entry in spec.Entries)
         {
             if (entry.Kind == TypeEntryKind.Object && entry.Object is not null)
             {
@@ -307,15 +312,12 @@ internal sealed class ContextEmitter
         }
     }
 
-    private void EmitTypeInfoProperty(
-        TypeEntry entry,
-        INamedTypeSymbol contextType)
+    private void EmitTypeInfoProperty(TypeSpec entry)
     {
-        var typeName = Fq(entry.Type);
+        var typeName = entry.TypeName;
         var visibility = !entry.IsRoot
             ? "private"
-            : contextType.DeclaredAccessibility == Accessibility.Public &&
-              !IsPubliclyAccessible(entry.Type)
+            : _spec!.Accessibility == "public" && !entry.IsPubliclyAccessible
                 ? "internal"
                 : "public";
         _writer.WriteLine($"private global::NbtSharp.NbtTypeInfo<{typeName}>? {entry.BackingFieldName};");
@@ -342,9 +344,9 @@ internal sealed class ContextEmitter
         _writer.WriteLine("{");
         _writer.Indent();
 
-        foreach (var entry in _graph.Entries)
+        foreach (var entry in _spec!.Entries)
         {
-            _writer.WriteLine($"if (type == typeof({Fq(entry.Type)}))");
+            _writer.WriteLine($"if (type == typeof({entry.TypeName}))");
             _writer.Indent();
             _writer.WriteLine($"return {entry.AccessorName};");
             _writer.Outdent();
@@ -357,32 +359,32 @@ internal sealed class ContextEmitter
         _writer.WriteLine();
     }
 
-    private string GetFactory(TypeEntry entry) => entry.Kind switch
+    private string GetFactory(TypeSpec entry) => entry.Kind switch
     {
         TypeEntryKind.Object => $"new {entry.ConverterName}()",
         TypeEntryKind.Enum => $"new {entry.ConverterName}()",
         TypeEntryKind.Array =>
-            $"{MetadataServices}.CreateArrayConverter<{Fq(entry.ElementType!)}>()",
+            $"{MetadataServices}.CreateArrayConverter<{entry.ElementTypeName!}>()",
         TypeEntryKind.List =>
-            $"{MetadataServices}.CreateListConverter<{Fq(entry.ElementType!)}>()",
+            $"{MetadataServices}.CreateListConverter<{entry.ElementTypeName!}>()",
         TypeEntryKind.ReadOnlyList =>
-            $"{MetadataServices}.CreateReadOnlyListConverter<{Fq(entry.ElementType!)}>()",
+            $"{MetadataServices}.CreateReadOnlyListConverter<{entry.ElementTypeName!}>()",
         TypeEntryKind.ReadOnlyCollection =>
-            $"{MetadataServices}.CreateReadOnlyCollectionConverter<{Fq(entry.ElementType!)}>()",
+            $"{MetadataServices}.CreateReadOnlyCollectionConverter<{entry.ElementTypeName!}>()",
         TypeEntryKind.Nullable =>
-            $"{MetadataServices}.CreateNullableConverter<{Fq(entry.UnderlyingType!)}>()",
+            $"{MetadataServices}.CreateNullableConverter<{entry.UnderlyingTypeName!}>()",
         TypeEntryKind.Dictionary =>
-            $"{MetadataServices}.CreateDictionaryConverter<{Fq(entry.ValueType!)}>()",
+            $"{MetadataServices}.CreateDictionaryConverter<{entry.ValueTypeName!}>()",
         TypeEntryKind.IDictionary =>
-            $"{MetadataServices}.CreateIDictionaryConverter<{Fq(entry.ValueType!)}>()",
+            $"{MetadataServices}.CreateIDictionaryConverter<{entry.ValueTypeName!}>()",
         TypeEntryKind.IReadOnlyDictionary =>
-            $"{MetadataServices}.CreateIReadOnlyDictionaryConverter<{Fq(entry.ValueType!)}>()",
+            $"{MetadataServices}.CreateIReadOnlyDictionaryConverter<{entry.ValueTypeName!}>()",
         _ => throw new InvalidOperationException($"Unknown entry kind {entry.Kind}."),
     };
 
-    private void EmitObjectConverter(TypeEntry entry, ObjectModel model)
+    private void EmitObjectConverter(TypeSpec entry, ObjectSpec model)
     {
-        var typeName = Fq(model.Type);
+        var typeName = model.TypeName;
         _writer.WriteLine(
             "[global::System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage(" +
             "\"Trimming\", \"IL2026\", " +
@@ -395,6 +397,7 @@ internal sealed class ContextEmitter
         _writer.WriteLine("{");
         _writer.Indent();
 
+        EmitMemberConverters(model);
         EmitAccessors(model);
 
         EmitRead(model, typeName);
@@ -407,7 +410,29 @@ internal sealed class ContextEmitter
         _writer.WriteLine("}");
     }
 
-    private void EmitAccessors(ObjectModel model)
+    private void EmitMemberConverters(ObjectSpec model)
+    {
+        var emitted = false;
+        foreach (var member in model.Members)
+        {
+            if (member.ConverterMode != ConverterMode.Explicit)
+            {
+                continue;
+            }
+
+            _writer.WriteLine(
+                $"private static readonly global::NbtSharp.NbtConverter __converter{member.Index} = " +
+                $"new {member.ExplicitConverterTypeName!}();");
+            emitted = true;
+        }
+
+        if (emitted)
+        {
+            _writer.WriteLine();
+        }
+    }
+
+    private void EmitAccessors(ObjectSpec model)
     {
         foreach (var member in model.Members)
         {
@@ -416,19 +441,16 @@ internal sealed class ContextEmitter
                 continue;
             }
 
-            if (member.SetterContainingType is INamedTypeSymbol { IsGenericType: true } receiver)
+            if (member.SetterIsGeneric)
             {
-                var definition = receiver.OriginalDefinition;
-                var property = (IPropertySymbol)member.Symbol;
-                var openMemberType = property.OriginalDefinition.Type;
-                var receiverParameter = definition.IsValueType
-                    ? $"ref {Fq(definition)} instance"
-                    : $"{Fq(definition)} instance";
+                var receiverParameter = member.SetterReceiverIsValueType
+                    ? $"ref {member.SetterReceiverTypeName} instance"
+                    : $"{member.SetterReceiverTypeName} instance";
 
                 _writer.WriteLine(
                     $"private static class Accessors_{member.Index}" +
-                    FormatTypeParameterList(definition.TypeParameters));
-                foreach (var constraint in FormatConstraints(definition.TypeParameters))
+                    member.SetterReceiverTypeParameterList);
+                foreach (var constraint in member.SetterReceiverConstraintLines)
                 {
                     _writer.WriteLine(constraint);
                 }
@@ -441,15 +463,15 @@ internal sealed class ContextEmitter
                     $"Name = \"set_{member.ClrName}\")]");
                 _writer.WriteLine(
                     $"internal static extern void Set_{member.Index}(" +
-                    $"{receiverParameter}, {Fq(openMemberType)} value);");
+                    $"{receiverParameter}, {member.SetterValueTypeName} value);");
                 _writer.Outdent();
                 _writer.WriteLine("}");
                 _writer.WriteLine();
                 continue;
             }
 
-            var declaringType = Fq(member.SetterContainingType ?? model.Type);
-            var directReceiver = member.SetterContainingType?.IsValueType == true
+            var declaringType = member.SetterReceiverTypeName;
+            var directReceiver = member.SetterReceiverIsValueType
                 ? $"ref {declaringType} instance"
                 : $"{declaringType} instance";
             _writer.WriteLine(
@@ -457,22 +479,18 @@ internal sealed class ContextEmitter
                 "global::System.Runtime.CompilerServices.UnsafeAccessorKind.Method, " +
                 $"Name = \"set_{member.ClrName}\")]");
             _writer.WriteLine(
-                $"private static extern void Set_{member.Index}({directReceiver}, {Fq(member.Type)} value);");
+                $"private static extern void Set_{member.Index}({directReceiver}, {member.TypeName} value);");
             _writer.WriteLine();
         }
 
         if (model.UseConstructorAccessor && model.Constructor is not null)
         {
-            if (model.Type.IsGenericType)
+            if (model.IsGenericType)
             {
-                var definition = model.Type.OriginalDefinition;
-                var constructor = model.Constructor.Symbol.OriginalDefinition;
-                var parameterList = FormatParameters(constructor.Parameters);
-
                 _writer.WriteLine(
                     $"private static class AccessorsCtor_0" +
-                    FormatTypeParameterList(definition.TypeParameters));
-                foreach (var constraint in FormatConstraints(definition.TypeParameters))
+                    model.TypeParameterList);
+                foreach (var constraint in model.ConstraintLines)
                 {
                     _writer.WriteLine(constraint);
                 }
@@ -483,25 +501,24 @@ internal sealed class ContextEmitter
                     "[global::System.Runtime.CompilerServices.UnsafeAccessor(" +
                     "global::System.Runtime.CompilerServices.UnsafeAccessorKind.Constructor)]");
                 _writer.WriteLine(
-                    $"internal static extern {Fq(definition)} Create({parameterList});");
+                    $"internal static extern {model.Constructor.DefinitionTypeName} Create({model.Constructor.ParameterList});");
                 _writer.Outdent();
                 _writer.WriteLine("}");
                 _writer.WriteLine();
             }
             else
             {
-                var parameterList = FormatParameters(model.Constructor.Symbol.Parameters);
                 _writer.WriteLine(
                     "[global::System.Runtime.CompilerServices.UnsafeAccessor(" +
                     "global::System.Runtime.CompilerServices.UnsafeAccessorKind.Constructor)]");
                 _writer.WriteLine(
-                    $"private static extern {Fq(model.Type)} Create_{model.Type.Name}({parameterList});");
+                    $"private static extern {model.TypeName} Create_{model.Name}({model.Constructor.ParameterList});");
                 _writer.WriteLine();
             }
         }
     }
 
-    private void EmitRead(ObjectModel model, string typeName)
+    private void EmitRead(ObjectSpec model, string typeName)
     {
         _writer.WriteLine(
             $"public override {typeName} Read(" +
@@ -523,12 +540,12 @@ internal sealed class ContextEmitter
 
         foreach (var member in model.Members)
         {
-            _writer.WriteLine($"var __v{member.Index} = default({Fq(member.Type)})!;");
+            _writer.WriteLine($"var __v{member.Index} = default({member.TypeName})!;");
             _writer.WriteLine($"var __p{member.Index} = false;");
         }
 
         var hasDirectMembers = model.Members.Any(
-            static member => GetScalarKind(member.Type) != ScalarKind.None);
+            static member => member.ScalarKind != ScalarKind.None);
         if (hasDirectMembers)
         {
             _writer.WriteLine("var __direct = options.Converters.Count == 0;");
@@ -594,7 +611,7 @@ internal sealed class ContextEmitter
         {
             var nbtName = SymbolDisplay.FormatLiteral(member.NbtName, quote: true);
             var path = SymbolDisplay.FormatLiteral("." + member.NbtName, quote: true);
-            var scalarKind = GetScalarKind(member.Type);
+            var scalarKind = member.ScalarKind;
             _writer.WriteLine($"case {nbtName}:");
             _writer.Indent();
             _writer.WriteLine(
@@ -621,9 +638,18 @@ internal sealed class ContextEmitter
                 _writer.Indent();
             }
 
-            _writer.WriteLine(
-                $"__v{member.Index} = global::NbtSharp.NbtMetadataServices.ReadValue<{Fq(member.Type)}>(" +
-                $"ref reader, options, {path});");
+            if (member.ConverterMode == ConverterMode.Explicit)
+            {
+                _writer.WriteLine(
+                    $"__v{member.Index} = global::NbtSharp.NbtMetadataServices.ReadValueWithConverter<{member.TypeName}>(" +
+                    $"ref reader, __converter{member.Index}, options, {path});");
+            }
+            else
+            {
+                _writer.WriteLine(
+                    $"__v{member.Index} = global::NbtSharp.NbtMetadataServices.ReadValue<{member.TypeName}>(" +
+                    $"ref reader, options, {path});");
+            }
 
             if (scalarKind != ScalarKind.None)
             {
@@ -668,7 +694,7 @@ internal sealed class ContextEmitter
         _writer.WriteLine("}");
     }
 
-    private void EmitConstruction(ObjectModel model, string typeName)
+    private void EmitConstruction(ObjectSpec model, string typeName)
     {
         _writer.WriteLine($"var __result = {BuildConstruction(model, typeName)};");
         foreach (var member in model.Members)
@@ -680,17 +706,19 @@ internal sealed class ContextEmitter
 
             if (member.NeedsSetterAccessor)
             {
-                if (member.SetterContainingType is INamedTypeSymbol { IsGenericType: true } receiver)
+                if (member.SetterIsGeneric)
                 {
-                    var receiverPrefix = receiver.IsValueType ? "ref __result, " : "__result, ";
+                    var receiverPrefix = member.SetterReceiverIsValueType
+                        ? "ref __result, "
+                        : "__result, ";
                     _writer.WriteLine(
                         $"if (__p{member.Index}) Accessors_{member.Index}" +
-                        $"<{FormatTypeArguments(receiver.TypeArguments)}>" +
+                        $"<{member.SetterTypeArguments}>" +
                         $".Set_{member.Index}({receiverPrefix}__v{member.Index});");
                 }
                 else
                 {
-                    var receiverPrefix = model.Type.IsValueType ? "ref __result, " : "__result, ";
+                    var receiverPrefix = model.IsValueType ? "ref __result, " : "__result, ";
                     _writer.WriteLine(
                         $"if (__p{member.Index}) Set_{member.Index}({receiverPrefix}__v{member.Index});");
                 }
@@ -698,26 +726,26 @@ internal sealed class ContextEmitter
             else
             {
                 _writer.WriteLine(
-                    $"if (__p{member.Index}) __result.{EscapeIdentifier(member.ClrName)} = __v{member.Index};");
+                    $"if (__p{member.Index}) __result.{member.EscapedClrName} = __v{member.Index};");
             }
         }
 
         _writer.WriteLine("return __result;");
     }
 
-    private string BuildConstruction(ObjectModel model, string typeName)
+    private string BuildConstruction(ObjectSpec model, string typeName)
     {
         if (model.Constructor is null)
         {
             return $"new {typeName}()";
         }
 
-        var parameters = model.Constructor.Symbol.Parameters;
-        var arguments = new string[parameters.Length];
-        for (var i = 0; i < parameters.Length; i++)
+        var parameterMemberIndexes = model.Constructor.ParameterMemberIndexes;
+        var arguments = new string[parameterMemberIndexes.Length];
+        for (var i = 0; i < parameterMemberIndexes.Length; i++)
         {
-            var memberIndex = model.Constructor.ParameterMemberIndexes[i];
-            var memberType = Fq(model.Members[memberIndex].Type);
+            var memberIndex = parameterMemberIndexes[i];
+            var memberType = model.Members[memberIndex].TypeName;
             arguments[i] =
                 $"__p{memberIndex} ? __v{memberIndex} : default({memberType})!";
         }
@@ -728,12 +756,12 @@ internal sealed class ContextEmitter
             return $"new {typeName}({argumentList})";
         }
 
-        return model.Type.IsGenericType
-            ? $"AccessorsCtor_0<{FormatTypeArguments(model.Type.TypeArguments)}>.Create({argumentList})"
-            : $"Create_{model.Type.Name}({argumentList})";
+        return model.IsGenericType
+            ? $"AccessorsCtor_0<{model.TypeArguments}>.Create({argumentList})"
+            : $"{model.Constructor.CreateMethodName}({argumentList})";
     }
 
-    private void EmitWrite(ObjectModel model, string typeName)
+    private void EmitWrite(ObjectSpec model, string typeName)
     {
         _writer.WriteLine(
             $"public override void Write(" +
@@ -743,7 +771,7 @@ internal sealed class ContextEmitter
         _writer.WriteLine("{");
         _writer.Indent();
         var hasDirectMembers = model.Members.Any(
-            static member => GetScalarKind(member.Type) != ScalarKind.None);
+            static member => member.ScalarKind != ScalarKind.None);
         _writer.WriteLine("writer.WriteStartCompound();");
         if (hasDirectMembers)
         {
@@ -757,8 +785,8 @@ internal sealed class ContextEmitter
         foreach (var member in model.Members)
         {
             var nbtName = SymbolDisplay.FormatLiteral(member.NbtName, quote: true);
-            var value = $"value.{EscapeIdentifier(member.ClrName)}";
-            if (member.IsRequired && CanBeNull(member.Type))
+            var value = $"value.{member.EscapedClrName}";
+            if (member.IsRequired && member.CanBeNull)
             {
                 _writer.WriteLine($"if ({value} is null)");
                 _writer.WriteLine("{");
@@ -769,7 +797,7 @@ internal sealed class ContextEmitter
                 _writer.WriteLine("}");
             }
 
-            var scalarKind = GetScalarKind(member.Type);
+            var scalarKind = member.ScalarKind;
             if (scalarKind != ScalarKind.None)
             {
                 var path = SymbolDisplay.FormatLiteral("." + member.NbtName, quote: true);
@@ -785,8 +813,7 @@ internal sealed class ContextEmitter
                 _writer.WriteLine("{");
                 _writer.Indent();
                 _writer.WriteLine("__path = null;");
-                _writer.WriteLine(
-                    $"{MetadataServices}.WriteMember(ref writer, {nbtName}, {value}, options);");
+                _writer.WriteLine(GetWriteMemberStatement(member, nbtName, value));
                 _writer.Outdent();
                 _writer.WriteLine("}");
             }
@@ -797,8 +824,7 @@ internal sealed class ContextEmitter
                     _writer.WriteLine("__path = null;");
                 }
 
-                _writer.WriteLine(
-                    $"{MetadataServices}.WriteMember(ref writer, {nbtName}, {value}, options);");
+                _writer.WriteLine(GetWriteMemberStatement(member, nbtName, value));
             }
         }
 
@@ -821,6 +847,11 @@ internal sealed class ContextEmitter
         _writer.WriteLine("}");
     }
 
+    private static string GetWriteMemberStatement(MemberSpec member, string nbtName, string value) =>
+        member.ConverterMode == ConverterMode.Explicit
+            ? $"{MetadataServices}.WriteMemberWithConverter(ref writer, {nbtName}, {value}, __converter{member.Index}, options);"
+            : $"{MetadataServices}.WriteMember(ref writer, {nbtName}, {value}, options);";
+
     private void EmitTryGetTagType(string typeName)
     {
         _writer.WriteLine(
@@ -837,12 +868,12 @@ internal sealed class ContextEmitter
     }
 
     private void Report(DiagnosticDescriptor descriptor, Location? location, params object[] arguments) =>
-        _reportDiagnostic(Diagnostic.Create(descriptor, location, arguments));
+        _reportDiagnostic(DiagnosticSpec.Create(descriptor, location, arguments));
 
-    private void EmitEnumConverter(TypeEntry entry)
+    private void EmitEnumConverter(TypeSpec entry)
     {
-        var typeName = Fq(entry.Type);
-        var mapping = GetEnumMapping(typeName, entry.UnderlyingType!);
+        var typeName = entry.TypeName;
+        var mapping = entry.EnumMapping!;
 
         _writer.WriteLine(
             $"private sealed class {entry.ConverterName} : " +
@@ -934,18 +965,6 @@ internal sealed class ContextEmitter
         public string ReadExpression { get; }
 
         public string WriteStatement { get; }
-    }
-
-    private enum ScalarKind
-    {
-        None,
-        SByte,
-        Byte,
-        Int16,
-        Int32,
-        Int64,
-        Single,
-        Double,
     }
 
     private static ScalarKind GetScalarKind(ITypeSymbol type) => type.SpecialType switch
@@ -1133,118 +1152,6 @@ internal sealed class ContextEmitter
             {
                 return candidate;
             }
-        }
-    }
-
-    private static string ComputeFingerprint(
-        ContextModel model,
-        TypeGraph? graph,
-        string hintName,
-        ImmutableArray<Diagnostic> diagnostics)
-    {
-        var builder = new StringBuilder();
-        builder.Append(hintName).Append('\0')
-            .Append(model.ContextType.ToDisplayString(FullyQualified)).Append('|')
-            .Append(model.ContextType.DeclaredAccessibility).Append('|')
-            .Append(model.ContextType.IsRecord)
-            .Append('\0');
-
-        foreach (var root in model.Roots)
-        {
-            builder.Append(root.Type.ToDisplayString(FullyQualified)).Append('|')
-                .Append(root.PropertyName ?? "")
-                .Append('\0');
-        }
-
-        if (graph is not null)
-        {
-            foreach (var entry in graph.Entries)
-            {
-                builder.Append((int)entry.Kind).Append('|')
-                    .Append(entry.Type.ToDisplayString(FullyQualified)).Append('|')
-                    .Append(entry.Type.IsValueType).Append('|')
-                    .Append(entry.AccessorName).Append('|')
-                    .Append(entry.BackingFieldName).Append('|')
-                    .Append(entry.ConverterName).Append('|')
-                    .Append(entry.PublicPropertyName ?? "").Append('|')
-                    .Append(entry.ElementType?.ToDisplayString(FullyQualified) ?? "").Append('|')
-                    .Append(entry.ValueType?.ToDisplayString(FullyQualified) ?? "").Append('|')
-                    .Append(entry.UnderlyingType?.ToDisplayString(FullyQualified) ?? "").Append('|')
-                    .Append(entry.IsRoot && IsPubliclyAccessible(entry.Type))
-                    .Append('\0');
-
-                if (entry.Object is not { } objectModel)
-                {
-                    continue;
-                }
-
-                builder.Append("ctor:")
-                    .Append(objectModel.Constructor?.Symbol.OriginalDefinition.ToDisplayString(FullyQualified) ?? "")
-                    .Append('|')
-                    .Append(objectModel.Type.IsValueType)
-                    .Append('|')
-                    .Append(objectModel.UseConstructorAccessor)
-                    .Append('\0');
-                AppendTypeParameters(builder, objectModel.Type.OriginalDefinition.TypeParameters);
-
-                foreach (var member in objectModel.Members)
-                {
-                    builder.Append(member.ClrName).Append('|')
-                        .Append(member.NbtName).Append('|')
-                        .Append(member.Type.ToDisplayString(FullyQualified)).Append('|')
-                        .Append(member.IsField).Append('|')
-                        .Append(member.CanWrite).Append('|')
-                        .Append(member.IsInitOnly).Append('|')
-                        .Append(member.NeedsSetterAccessor).Append('|')
-                        .Append(member.ConstructorParameterIndex).Append('|')
-                        .Append(member.IsRequired).Append('|')
-                        .Append(member.SetterContainingType?.ToDisplayString(FullyQualified) ?? "")
-                        .Append('|')
-                        .Append(member.SetterContainingType?.IsValueType ?? false)
-                        .Append('|')
-                        .Append((member.Symbol as IPropertySymbol)?.OriginalDefinition.Type
-                            .ToDisplayString(FullyQualified) ?? "")
-                        .Append('\0');
-
-                    if (member.SetterContainingType is INamedTypeSymbol setterType)
-                    {
-                        AppendTypeParameters(builder, setterType.OriginalDefinition.TypeParameters);
-                    }
-                }
-            }
-        }
-
-        foreach (var diagnostic in diagnostics)
-        {
-            builder.Append(diagnostic.Id).Append('|')
-                .Append(diagnostic.Severity).Append('|')
-                .Append(diagnostic.GetMessage(CultureInfo.InvariantCulture)).Append('|')
-                .Append(diagnostic.Location)
-                .Append('\0');
-        }
-
-        return builder.ToString();
-    }
-
-    private static void AppendTypeParameters(
-        StringBuilder builder,
-        ImmutableArray<ITypeParameterSymbol> parameters)
-    {
-        foreach (var parameter in parameters)
-        {
-            builder.Append("tp:").Append(parameter.Name).Append('|')
-                .Append(parameter.HasUnmanagedTypeConstraint).Append('|')
-                .Append(parameter.HasValueTypeConstraint).Append('|')
-                .Append(parameter.HasReferenceTypeConstraint).Append('|')
-                .Append(parameter.HasNotNullConstraint).Append('|')
-                .Append(parameter.HasConstructorConstraint).Append('|');
-
-            foreach (var constraint in parameter.ConstraintTypes)
-            {
-                builder.Append(constraint.ToDisplayString(FullyQualified)).Append('|');
-            }
-
-            builder.Append('\0');
         }
     }
 

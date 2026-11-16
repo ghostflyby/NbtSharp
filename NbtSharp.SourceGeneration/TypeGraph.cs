@@ -120,6 +120,10 @@ internal sealed class MemberModel
 
     public bool IsRequired { get; set; }
 
+    public ConverterMode ConverterMode { get; set; } = ConverterMode.Generated;
+
+    public ITypeSymbol? ExplicitConverterType { get; set; }
+
     public bool IsInitOnly { get; }
 
     public ITypeSymbol? SetterContainingType { get; }
@@ -139,16 +143,17 @@ internal sealed class TypeGraph
     private const string IgnoreAttribute = "NbtSharp.NbtIgnoreAttribute";
     private const string IncludeAttribute = "NbtSharp.NbtIncludeAttribute";
     private const string PropertyNameAttribute = "NbtSharp.NbtPropertyNameAttribute";
+    private const string UseConverterAttribute = "NbtSharp.NbtUseConverterAttribute";
 
     private static readonly SymbolDisplayFormat FullyQualified = SymbolDisplayFormat.FullyQualifiedFormat;
 
-    private readonly Action<Diagnostic> _report;
+    private readonly Action<DiagnosticSpec> _report;
     private readonly IAssemblySymbol _contextAssembly;
     private readonly Dictionary<ITypeSymbol, TypeEntry> _entries =
         new(SymbolEqualityComparer.Default);
     private readonly HashSet<ITypeSymbol> _reported = new(SymbolEqualityComparer.Default);
 
-    public TypeGraph(IAssemblySymbol contextAssembly, Action<Diagnostic> report)
+    public TypeGraph(IAssemblySymbol contextAssembly, Action<DiagnosticSpec> report)
     {
         _contextAssembly = contextAssembly;
         _report = report;
@@ -339,7 +344,13 @@ internal sealed class TypeGraph
 
     private ObjectModel? BuildObjectModel(INamedTypeSymbol type, Location? location)
     {
-        var members = CollectMembers(type);
+        var members = CollectMembers(type, location);
+        if (members is null)
+        {
+            HasErrors = true;
+            return null;
+        }
+
         var duplicate = members
             .GroupBy(static member => member.NbtName, StringComparer.Ordinal)
             .FirstOrDefault(static group => group.Count() > 1);
@@ -407,6 +418,11 @@ internal sealed class TypeGraph
 
         foreach (var member in members)
         {
+            if (member.ConverterMode != ConverterMode.Generated)
+            {
+                continue;
+            }
+
             AddType(
                 member.Type,
                 member.Symbol.Locations.FirstOrDefault(),
@@ -416,7 +432,7 @@ internal sealed class TypeGraph
         return new ObjectModel(type, members.ToImmutableArray(), constructor, useConstructorAccessor);
     }
 
-    private List<MemberModel> CollectMembers(INamedTypeSymbol type)
+    private List<MemberModel>? CollectMembers(INamedTypeSymbol type, Location? location)
     {
         var fields = new List<MemberModel>();
         var properties = new List<MemberModel>();
@@ -470,7 +486,7 @@ internal sealed class TypeGraph
                     var nbtName = FindAttribute(property, PropertyNameAttribute)?.ConstructorArguments
                         .FirstOrDefault().Value as string ?? property.Name;
                     var setter = property.SetMethod;
-                    properties.Add(new MemberModel(
+                    var memberModel = new MemberModel(
                         property,
                         property.Name,
                         nbtName,
@@ -478,7 +494,13 @@ internal sealed class TypeGraph
                         isField: false,
                         canWrite: setter is not null,
                         isInitOnly: setter?.IsInitOnly == true,
-                        setterContainingType: current));
+                        setterContainingType: current);
+                    if (!TryConfigureConverter(memberModel, property, location))
+                    {
+                        return null;
+                    }
+
+                    properties.Add(memberModel);
                 }
                 else if (member is IFieldSymbol field)
                 {
@@ -498,7 +520,7 @@ internal sealed class TypeGraph
 
                     var nbtName = FindAttribute(field, PropertyNameAttribute)?.ConstructorArguments
                         .FirstOrDefault().Value as string ?? field.Name;
-                    fields.Add(new MemberModel(
+                    var memberModel = new MemberModel(
                         field,
                         field.Name,
                         nbtName,
@@ -506,13 +528,145 @@ internal sealed class TypeGraph
                         isField: true,
                         canWrite: true,
                         isInitOnly: false,
-                        setterContainingType: null));
+                        setterContainingType: null);
+                    if (!TryConfigureConverter(memberModel, field, location))
+                    {
+                        return null;
+                    }
+
+                    fields.Add(memberModel);
                 }
             }
         }
 
         fields.AddRange(properties);
         return fields;
+    }
+
+    private bool TryConfigureConverter(MemberModel member, ISymbol symbol, Location? containingLocation)
+    {
+        var attribute = FindAttribute(symbol, UseConverterAttribute);
+        if (attribute is null)
+        {
+            return true;
+        }
+
+        var location = symbol.Locations.FirstOrDefault() ?? containingLocation;
+        if (!CanUseRuntimeConverter(member, location))
+        {
+            return false;
+        }
+
+        if (attribute.ConstructorArguments.Length == 0)
+        {
+            member.ConverterMode = ConverterMode.Runtime;
+            return true;
+        }
+
+        if (attribute.ConstructorArguments.Length != 1 ||
+            attribute.ConstructorArguments[0].Value is not ITypeSymbol converterType)
+        {
+            Report(
+                Diagnostics.InvalidUseConverter,
+                location,
+                member.ClrName,
+                "the converter argument must be a type");
+            return false;
+        }
+
+        if (!IsValidExplicitConverter(converterType, out var reason))
+        {
+            Report(Diagnostics.InvalidUseConverter, location, member.ClrName, reason);
+            return false;
+        }
+
+        member.ConverterMode = ConverterMode.Explicit;
+        member.ExplicitConverterType = converterType;
+        return true;
+    }
+
+    private bool CanUseRuntimeConverter(MemberModel member, Location? location)
+    {
+        var reason = member.Type switch
+        {
+            _ when member.Type.IsRefLikeType =>
+                "the member type is a ref-like type and cannot be used as a generic argument",
+            IPointerTypeSymbol or IFunctionPointerTypeSymbol =>
+                "the member type is a pointer and cannot be used as a generic argument",
+            _ when member.Type.SpecialType == SpecialType.System_Void =>
+                "the member type is void",
+            _ => null,
+        };
+        if (reason is null)
+        {
+            return true;
+        }
+
+        Report(Diagnostics.InvalidUseConverter, location, member.ClrName, reason);
+        return false;
+    }
+
+    private bool IsValidExplicitConverter(ITypeSymbol type, out string reason)
+    {
+        if (type is not INamedTypeSymbol named)
+        {
+            reason = "the converter type must be a named type";
+            return false;
+        }
+
+        if (named.TypeKind == TypeKind.Error)
+        {
+            reason = "the converter type could not be resolved";
+            return false;
+        }
+
+        if (named.IsUnboundGenericType)
+        {
+            reason = "the converter type must be a closed generic type";
+            return false;
+        }
+
+        if (named.IsAbstract)
+        {
+            reason = "the converter type must not be abstract";
+            return false;
+        }
+
+        if (!InheritsFrom(named, "global::NbtSharp.NbtConverter"))
+        {
+            reason = "the converter type must derive from NbtSharp.NbtConverter";
+            return false;
+        }
+
+        if (!named.InstanceConstructors.Any(static constructor =>
+                constructor.Parameters.Length == 0 &&
+                constructor.DeclaredAccessibility == Accessibility.Public))
+        {
+            reason = "the converter type must have a public parameterless constructor";
+            return false;
+        }
+
+        if (!IsAccessible(type))
+        {
+            reason = "the converter type must be accessible from the context assembly";
+            return false;
+        }
+
+        reason = "";
+        return true;
+    }
+
+    private static bool InheritsFrom(ITypeSymbol type, string baseTypeName)
+    {
+        for (var current = type as INamedTypeSymbol; current is not null; current = current.BaseType)
+        {
+            if (current.ToDisplayString(FullyQualified) == baseTypeName)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private ConstructorModel? SelectConstructor(
@@ -593,7 +747,7 @@ internal sealed class TypeGraph
 
     private void Report(DiagnosticDescriptor descriptor, Location? location, params object[] arguments)
     {
-        _report(Diagnostic.Create(descriptor, location, arguments));
+        _report(DiagnosticSpec.Create(descriptor, location, arguments));
     }
 
     private static AttributeData? FindAttribute(ISymbol symbol, string metadataName) =>

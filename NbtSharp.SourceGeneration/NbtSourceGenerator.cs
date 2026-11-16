@@ -1,5 +1,4 @@
 using System.Collections.Immutable;
-using System.Globalization;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
@@ -21,6 +20,7 @@ public sealed class NbtSourceGenerator : IIncrementalGenerator
             .Select(static (model, _) => model!)
             .Collect()
             .SelectMany(static (allModels, _) => Merge(allModels))
+            .WithComparer(ContextModelComparer.Instance)
             .WithTrackingName("NbtContextModels");
 
         var prepared = models
@@ -37,7 +37,7 @@ public sealed class NbtSourceGenerator : IIncrementalGenerator
         {
             foreach (var diagnostic in generatedContext.Diagnostics)
             {
-                productionContext.ReportDiagnostic(diagnostic);
+                productionContext.ReportDiagnostic(diagnostic.ToDiagnostic());
             }
 
             if (generatedContext.Source.Length != 0)
@@ -50,6 +50,7 @@ public sealed class NbtSourceGenerator : IIncrementalGenerator
     private static IEnumerable<ContextModel> Merge(ImmutableArray<ContextModel> models)
     {
         var groups = new Dictionary<INamedTypeSymbol, List<RootType>>(SymbolEqualityComparer.Default);
+        var fingerprints = new Dictionary<INamedTypeSymbol, List<string>>(SymbolEqualityComparer.Default);
         var order = new List<INamedTypeSymbol>();
         var sources = new Dictionary<INamedTypeSymbol, Location?>(SymbolEqualityComparer.Default);
 
@@ -59,16 +60,25 @@ public sealed class NbtSourceGenerator : IIncrementalGenerator
             {
                 roots = [];
                 groups.Add(model.ContextType, roots);
+                fingerprints.Add(model.ContextType, []);
                 order.Add(model.ContextType);
                 sources.Add(model.ContextType, model.Location);
             }
 
             roots.AddRange(model.Roots);
+            fingerprints[model.ContextType].Add(model.Fingerprint);
         }
 
         foreach (var contextType in order)
         {
-            yield return new ContextModel(contextType, groups[contextType].ToImmutableArray(), sources[contextType]);
+            var roots = groups[contextType]
+                .OrderBy(
+                    static root => root.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                    StringComparer.Ordinal)
+                .ThenBy(static root => root.PropertyName ?? "", StringComparer.Ordinal)
+                .ToImmutableArray();
+            var fingerprint = ReachableFingerprint.Combine(contextType, fingerprints[contextType]);
+            yield return new ContextModel(contextType, roots, sources[contextType], fingerprint);
         }
     }
 }
@@ -78,7 +88,7 @@ internal sealed class GeneratedContext : IEquatable<GeneratedContext>
     public GeneratedContext(
         string hintName,
         string source,
-        ImmutableArray<Diagnostic> diagnostics)
+        ImmutableArray<DiagnosticSpec> diagnostics)
     {
         HintName = hintName;
         Source = source;
@@ -89,7 +99,7 @@ internal sealed class GeneratedContext : IEquatable<GeneratedContext>
 
     public string Source { get; }
 
-    public ImmutableArray<Diagnostic> Diagnostics { get; }
+    public ImmutableArray<DiagnosticSpec> Diagnostics { get; }
 
     public static GeneratedContext Create(PreparedContext prepared)
     {
@@ -123,8 +133,8 @@ internal sealed class GeneratedContext : IEquatable<GeneratedContext>
         StringComparer.Ordinal.GetHashCode(Source);
 
     private static bool DiagnosticsEqual(
-        ImmutableArray<Diagnostic> left,
-        ImmutableArray<Diagnostic> right)
+        ImmutableArray<DiagnosticSpec> left,
+        ImmutableArray<DiagnosticSpec> right)
     {
         if (left.Length != right.Length)
         {
@@ -133,14 +143,7 @@ internal sealed class GeneratedContext : IEquatable<GeneratedContext>
 
         for (var i = 0; i < left.Length; i++)
         {
-            var leftDiagnostic = left[i];
-            var rightDiagnostic = right[i];
-            if (leftDiagnostic.Id != rightDiagnostic.Id ||
-                leftDiagnostic.Severity != rightDiagnostic.Severity ||
-                leftDiagnostic.GetMessage(CultureInfo.InvariantCulture) !=
-                rightDiagnostic.GetMessage(CultureInfo.InvariantCulture) ||
-                (leftDiagnostic.Location.ToString()) !=
-                (rightDiagnostic.Location.ToString()))
+            if (!left[i].Equals(right[i]))
             {
                 return false;
             }
@@ -159,16 +162,18 @@ internal sealed class GeneratedContextComparer : IEqualityComparer<GeneratedCont
     public int GetHashCode(GeneratedContext obj) => obj.GetHashCode();
 }
 
-internal sealed class ContextModel
+internal sealed class ContextModel : IEquatable<ContextModel>
 {
     public ContextModel(
         INamedTypeSymbol contextType,
         ImmutableArray<RootType> roots,
-        Location? location)
+        Location? location,
+        string fingerprint)
     {
         ContextType = contextType;
         Roots = roots;
         Location = location;
+        Fingerprint = fingerprint;
     }
 
     public INamedTypeSymbol ContextType { get; }
@@ -176,6 +181,8 @@ internal sealed class ContextModel
     public ImmutableArray<RootType> Roots { get; }
 
     public Location? Location { get; }
+
+    public string Fingerprint { get; }
 
     public static ContextModel? Create(GeneratorAttributeSyntaxContext syntaxContext)
     {
@@ -202,11 +209,40 @@ internal sealed class ContextModel
                 attribute.ApplicationSyntaxReference?.GetSyntax().GetLocation()));
         }
 
+        var orderedRoots = roots
+            .OrderBy(
+                static root => root.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                StringComparer.Ordinal)
+            .ThenBy(static root => root.PropertyName ?? "", StringComparer.Ordinal)
+            .ToImmutableArray();
+        var fingerprint = ReachableFingerprint.Compute(
+            contextType,
+            orderedRoots,
+            syntaxContext.SemanticModel.Compilation);
+
         return new ContextModel(
             contextType,
-            roots.ToImmutable(),
-            contextType.Locations.FirstOrDefault());
+            orderedRoots,
+            contextType.Locations.FirstOrDefault(),
+            fingerprint);
     }
+
+    public bool Equals(ContextModel? other) =>
+        other is not null &&
+        StringComparer.Ordinal.Equals(Fingerprint, other.Fingerprint);
+
+    public override bool Equals(object? obj) => obj is ContextModel other && Equals(other);
+
+    public override int GetHashCode() => StringComparer.Ordinal.GetHashCode(Fingerprint);
+}
+
+internal sealed class ContextModelComparer : IEqualityComparer<ContextModel>
+{
+    public static readonly ContextModelComparer Instance = new();
+
+    public bool Equals(ContextModel? x, ContextModel? y) => x?.Equals(y) ?? y is null;
+
+    public int GetHashCode(ContextModel obj) => obj.GetHashCode();
 }
 
 internal sealed class RootType
