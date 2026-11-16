@@ -623,6 +623,74 @@ public sealed class NbtSourceGeneratorTests
             static reason => reason is IncrementalStepRunReason.New or IncrementalStepRunReason.Modified);
     }
 
+    [Fact]
+    public void InvalidatesNestedEnumWhenContainingTypeShapeChanges()
+    {
+        var parseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
+        var sourceTree = CSharpSyntaxTree.ParseText(
+            """
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Outer.Status))]
+            public partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            public static class Outer
+            {
+                public enum Status
+                {
+                    Idle,
+                }
+            }
+            """,
+            parseOptions,
+            path: "NestedEnum.cs",
+            cancellationToken: TestContext.Current.CancellationToken);
+        var compilation = CSharpCompilation.Create(
+            "NestedEnumGeneratorTests",
+            [sourceTree],
+            References,
+            new CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable));
+        var driver = CreateTrackingDriver(parseOptions);
+        ContextSpecCache.ResetForTests();
+
+        driver = driver.RunGenerators(compilation, TestContext.Current.CancellationToken);
+        var before = GetGeneratedSource(driver.GetRunResult());
+
+        var changedTree = CSharpSyntaxTree.ParseText(
+            """
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Outer.Status))]
+            public partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal static class Outer
+            {
+                public enum Status
+                {
+                    Idle,
+                }
+            }
+            """,
+            parseOptions,
+            path: "NestedEnum.cs",
+            cancellationToken: TestContext.Current.CancellationToken);
+        driver = driver.RunGenerators(
+            compilation.ReplaceSyntaxTree(sourceTree, changedTree),
+            TestContext.Current.CancellationToken);
+
+        var result = driver.GetRunResult();
+        Assert.NotEqual(before, GetGeneratedSource(result));
+        Assert.Contains(
+            GetReasons(result, "NbtPreparedContexts"),
+            static reason => reason is IncrementalStepRunReason.New or IncrementalStepRunReason.Modified);
+    }
+
     private static GeneratorDriver CreateTrackingDriver(CSharpParseOptions parseOptions) =>
         CSharpGeneratorDriver.Create(
             [new NbtSourceGenerator().AsSourceGenerator()],

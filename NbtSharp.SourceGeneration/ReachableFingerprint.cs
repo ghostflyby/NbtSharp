@@ -142,6 +142,7 @@ internal static class ReachableFingerprint
                 return;
 
             case INamedTypeSymbol named:
+                AddContainingTypeShape(ref hash, named);
                 AddNamedType(ref hash, named, pending);
                 return;
         }
@@ -194,18 +195,6 @@ internal static class ReachableFingerprint
         hash.Add(named.IsAbstract);
         hash.Add(named.IsStatic);
         hash.Add(named.IsSealed);
-        for (var containingType = named.ContainingType;
-             containingType is not null;
-             containingType = containingType.ContainingType)
-        {
-            hash.Add("containing");
-            hash.Add(containingType.ToDisplayString(FullyQualified));
-            hash.Add((int)containingType.DeclaredAccessibility);
-            hash.Add(containingType.IsFileLocal);
-            hash.Add(containingType.IsGenericType);
-        }
-
-        hash.Add(-1);
         hash.Add(named.BaseType?.ToDisplayString(FullyQualified));
         hash.Add(named.AllInterfaces.Length);
         foreach (var interfaceType in named.AllInterfaces
@@ -259,6 +248,22 @@ internal static class ReachableFingerprint
                     break;
             }
         }
+    }
+
+    private static void AddContainingTypeShape(ref StableHash hash, INamedTypeSymbol named)
+    {
+        for (var containingType = named.ContainingType;
+             containingType is not null;
+             containingType = containingType.ContainingType)
+        {
+            hash.Add("containing");
+            hash.Add(containingType.ToDisplayString(FullyQualified));
+            hash.Add((int)containingType.DeclaredAccessibility);
+            hash.Add(containingType.IsFileLocal);
+            hash.Add(containingType.IsGenericType);
+        }
+
+        hash.Add(-1);
     }
 
     private static void AddAttributes(ref StableHash hash, ISymbol symbol)
