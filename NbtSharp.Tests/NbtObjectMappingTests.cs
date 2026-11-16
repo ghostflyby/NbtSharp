@@ -169,12 +169,11 @@ public sealed class NbtObjectMappingTests
     public void RequiredMembersMustBeMappedOrConstructorInitialized()
     {
         var options = ReflectionOptions();
+        var unmapped = new UnmappedRequiredDto { Ignored = "", Value = 1 };
 
+        Assert.Equal(1, unmapped.Value);
         Assert.Throws<NotSupportedException>(() =>
-            NbtSerializer.Serialize(
-                new UnmappedRequiredDto { Ignored = "", Value = 1 },
-                "root",
-                options));
+            NbtSerializer.Serialize(unmapped, "root", options));
 
         var value = new InitializedRequiredDto { Value = 2 };
         var copy = NbtSerializer.Deserialize<InitializedRequiredDto>(
@@ -292,6 +291,7 @@ public sealed class NbtObjectMappingTests
     private sealed class UnmappedRequiredDto
     {
         [NbtIgnore]
+        // ReSharper disable once UnusedAutoPropertyAccessor.Local
         public required string Ignored { get; init; }
 
         public int Value { get; set; }
@@ -299,13 +299,14 @@ public sealed class NbtObjectMappingTests
 
     private sealed class InitializedRequiredDto
     {
-        [System.Diagnostics.CodeAnalysis.SetsRequiredMembers]
+        [SetsRequiredMembers]
         public InitializedRequiredDto()
         {
             Ignored = "";
         }
 
         [NbtIgnore]
+        // ReSharper disable once UnusedAutoPropertyAccessor.Local
         public required string Ignored { get; init; }
 
         public int Value { get; set; }
@@ -317,7 +318,5 @@ public sealed class NbtObjectMappingTests
         {
             _ = value;
         }
-
-        public int Value { get; set; }
     }
 }

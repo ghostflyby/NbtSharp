@@ -139,8 +139,8 @@ internal sealed class GeneratedContext : IEquatable<GeneratedContext>
                 leftDiagnostic.Severity != rightDiagnostic.Severity ||
                 leftDiagnostic.GetMessage(CultureInfo.InvariantCulture) !=
                 rightDiagnostic.GetMessage(CultureInfo.InvariantCulture) ||
-                (leftDiagnostic.Location?.ToString() ?? "") !=
-                (rightDiagnostic.Location?.ToString() ?? ""))
+                (leftDiagnostic.Location.ToString()) !=
+                (rightDiagnostic.Location.ToString()))
             {
                 return false;
             }

@@ -291,7 +291,7 @@ public static class NbtSerializer
     {
         ArgumentNullException.ThrowIfNull(reader);
         ArgumentNullException.ThrowIfNull(typeInfo);
-        ValidateTypeInfo<T>(typeInfo);
+        ValidateTypeInfo(typeInfo);
         return await DeserializeAsyncCore<T>(
             reader,
             GetEffectiveConverter(typeInfo),
@@ -539,7 +539,7 @@ public static class NbtSerializer
         ArgumentNullException.ThrowIfNull(destination);
         ArgumentNullException.ThrowIfNull(typeInfo);
         ArgumentNullException.ThrowIfNull(rootName);
-        ValidateTypeInfo<T>(typeInfo);
+        ValidateTypeInfo(typeInfo);
 
         var options = typeInfo.Options;
         if (options.RootFormat == NbtRootFormat.Unnamed && rootName.Length != 0)
@@ -624,7 +624,7 @@ public static class NbtSerializer
         out string? rootName)
     {
         ArgumentNullException.ThrowIfNull(typeInfo);
-        ValidateTypeInfo<T>(typeInfo);
+        ValidateTypeInfo(typeInfo);
 
         var options = typeInfo.Options;
         var reader = new NbtReader(data, options.CreateReaderOptions());
@@ -651,7 +651,7 @@ public static class NbtSerializer
         out string? rootName)
     {
         ArgumentNullException.ThrowIfNull(typeInfo);
-        ValidateTypeInfo<T>(typeInfo);
+        ValidateTypeInfo(typeInfo);
 
         var options = typeInfo.Options;
         var reader = new NbtReader(data, options.CreateReaderOptions());
@@ -679,7 +679,7 @@ public static class NbtSerializer
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(typeInfo);
-        ValidateTypeInfo<T>(typeInfo);
+        ValidateTypeInfo(typeInfo);
 
         var options = typeInfo.Options;
         var reader = new NbtReader(stream, options.CreateReaderOptions());
@@ -701,7 +701,7 @@ public static class NbtSerializer
         if (typeof(T) == typeof(NbtRoot))
         {
             throw new NotSupportedException(
-                "NbtRoot is handled by the DOM overloads, not by type information.");
+                $"{typeInfo.Type} is handled by the DOM overloads, not by type information.");
         }
     }
 
@@ -956,7 +956,7 @@ public static class NbtSerializer
             throw new InvalidOperationException("A value payload is already expected.");
         }
 
-        NbtConverter? converter = null;
+        NbtConverter converter;
         try
         {
             if (value is null)
