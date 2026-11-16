@@ -57,15 +57,6 @@ internal struct StableHash
 
     public void Add(char value) => Add((int)value);
 
-    public void Add(ReadOnlySpan<byte> value)
-    {
-        Add(value.Length);
-        foreach (var item in value)
-        {
-            Add(item);
-        }
-    }
-
     public string ToHex() =>
         _first.ToString("x16", CultureInfo.InvariantCulture) +
         _second.ToString("x16", CultureInfo.InvariantCulture);
