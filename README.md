@@ -297,8 +297,8 @@ type-information serializer overloads provide the fully AOT-safe path. The `NbtS
 project sets `IsAotCompatible` and covers generated converters, required/init members, enums,
 generic DTOs, collections, nullable values, and explicit member converters under the SDK AOT/trim
 analyzers. Generated converters suppress AOT/trim diagnostics only when every member is covered by the
-generated graph or by an explicit typed converter/factory; runtime `[NbtUseConverter]` members remain
-analyzer-visible.
+generated graph or by an explicit typed converter; runtime and factory-based `[NbtUseConverter]`
+members remain analyzer-visible.
 
 The `Stream` overloads are synchronous. `Serialize(Stream)` flushes the document when serialization
 completes and leaves the stream open; `Deserialize(Stream)` reads the stream through a fixed-size
