@@ -5,8 +5,8 @@ namespace NbtSharp.SourceGeneration;
 /// <summary>
 /// Caches symbol-free prepared contexts by their content fingerprint. The cache prevents repeated
 /// graph construction when the same context is prepared again by another compilation or driver
-/// instance; positional-only changes deliberately reuse the cached spec unless it contains
-/// diagnostics, whose locations must be refreshed. Diagnostic-bearing specs are never cached.
+/// instance; positional-only changes deliberately reuse the cached spec. Diagnostic-bearing specs are
+/// never cached, so their locations are rebuilt on each transform run.
 /// </summary>
 internal static class ContextSpecCache
 {

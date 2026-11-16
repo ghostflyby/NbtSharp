@@ -39,7 +39,8 @@ internal sealed partial class ContextEmitter
         string cacheKey)
     {
         // The hint name is derived from the context display name, which is part of cacheKey, so a hit
-        // always has the same hint.
+        // always has the same hint. Add rejects diagnostic-bearing specs; the length check is defense
+        // in depth in case the cache is populated from another path.
         if (ContextSpecCache.TryGet(cacheKey, out var cached) &&
             cached.Diagnostics.Length == 0)
         {

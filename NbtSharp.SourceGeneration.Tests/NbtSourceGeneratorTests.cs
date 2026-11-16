@@ -475,6 +475,20 @@ public sealed class NbtSourceGeneratorTests
         driver = driver.RunGenerators(compilation, TestContext.Current.CancellationToken);
         Assert.Equal(contextCount, ContextEmitter.ContextSpecBuilder.GraphBuildCount);
 
+        var unrelatedTree = CSharpSyntaxTree.ParseText(
+            "internal sealed class Unrelated { public int Value { get; set; } }",
+            parseOptions,
+            path: "Unrelated.cs",
+            cancellationToken: TestContext.Current.CancellationToken);
+        var withUnrelatedTree = compilation.AddSyntaxTrees(unrelatedTree);
+        driver = driver.RunGenerators(withUnrelatedTree, TestContext.Current.CancellationToken);
+        Assert.Equal(contextCount, ContextEmitter.ContextSpecBuilder.GraphBuildCount);
+        var unrelatedReasons = GetReasons(driver.GetRunResult(), "NbtPreparedContexts");
+        Assert.Equal(contextCount, unrelatedReasons.Count);
+        Assert.DoesNotContain(
+            unrelatedReasons,
+            static reason => reason is IncrementalStepRunReason.New or IncrementalStepRunReason.Modified);
+
         const int changedIndex = 42;
         var changedSource = $$"""
             using NbtSharp;
@@ -497,7 +511,7 @@ public sealed class NbtSourceGeneratorTests
             path: $"Context{changedIndex}.cs",
             cancellationToken: TestContext.Current.CancellationToken);
         driver = driver.RunGenerators(
-            compilation.ReplaceSyntaxTree(trees[changedIndex], changedTree),
+            withUnrelatedTree.ReplaceSyntaxTree(trees[changedIndex], changedTree),
             TestContext.Current.CancellationToken);
 
         Assert.Equal(
