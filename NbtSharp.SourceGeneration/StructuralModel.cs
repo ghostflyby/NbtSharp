@@ -169,7 +169,7 @@ internal enum ConverterMode
     /// <summary>The source generator emits a converter for the member type.</summary>
     Generated,
 
-    /// <summary>The converter is resolved from <see cref="NbtSerializerOptions.Converters"/> at runtime.</summary>
+    /// <summary>The converter is resolved from <c>NbtSerializerOptions.Converters</c> at runtime.</summary>
     Runtime,
 
     /// <summary>The member declares an explicit converter type.</summary>

@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace NbtSharp.Aot.Tests;
 
 public sealed class GeneratedSerializationAotTests
@@ -221,10 +223,6 @@ internal sealed class AotConverters
 
 internal sealed class AotGuidConverter : NbtConverter<Guid>
 {
-    public AotGuidConverter()
-    {
-    }
-
     public override Guid Read(ref NbtReader reader, NbtSerializerOptions options) =>
         new(reader.GetByteArray());
 
@@ -243,15 +241,11 @@ internal sealed class AotGuidConverter : NbtConverter<Guid>
 
 internal sealed class AotDecimalConverter : NbtConverter<decimal>
 {
-    public AotDecimalConverter()
-    {
-    }
-
     public override decimal Read(ref NbtReader reader, NbtSerializerOptions options) =>
-        decimal.Parse(reader.GetString(), global::System.Globalization.CultureInfo.InvariantCulture);
+        decimal.Parse(reader.GetString(), CultureInfo.InvariantCulture);
 
     public override void Write(ref NbtWriter writer, decimal value, NbtSerializerOptions options) =>
-        writer.WriteString(value.ToString(global::System.Globalization.CultureInfo.InvariantCulture));
+        writer.WriteString(value.ToString(CultureInfo.InvariantCulture));
 
     public override bool TryGetTagType(
         decimal value,

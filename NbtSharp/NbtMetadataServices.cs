@@ -139,7 +139,7 @@ public static class NbtMetadataServices
     {
         ArgumentNullException.ThrowIfNull(converter);
         ArgumentNullException.ThrowIfNull(options);
-        NbtConverter? resolved = converter;
+        NbtConverter resolved = converter;
         if (resolved is NbtConverterFactory factory)
         {
             resolved = factory.CreateConverter(typeof(T), options);
@@ -147,7 +147,7 @@ public static class NbtMetadataServices
 
         if (resolved is not NbtConverter<T> typed)
         {
-            var converterName = resolved is null ? "null" : resolved.GetType().ToString();
+            var converterName = GetConverterName(resolved);
             throw new NotSupportedException(
                 $"The converter {converterName} does not support {typeof(T)}.");
         }
@@ -181,7 +181,7 @@ public static class NbtMetadataServices
             return;
         }
 
-        NbtConverter? resolved = converter;
+        NbtConverter resolved = converter;
         if (resolved is NbtConverterFactory factory)
         {
             resolved = factory.CreateConverter(typeof(T), options);
@@ -189,7 +189,7 @@ public static class NbtMetadataServices
 
         if (resolved is not NbtConverter<T> typed)
         {
-            var converterName = resolved is null ? "null" : resolved.GetType().ToString();
+            var converterName = GetConverterName(resolved);
             throw new NotSupportedException(
                 $"The converter {converterName} does not support {typeof(T)}.");
         }
@@ -256,6 +256,9 @@ public static class NbtMetadataServices
             BytePosition = reader.BytesConsumed,
             Path = "." + name,
         };
+
+    private static string GetConverterName(NbtConverter? converter) =>
+        converter is null ? "null" : converter.GetType().ToString();
 
     /// <summary>Creates the exception for a compound that was not terminated.</summary>
     /// <param name="reader">The reader at the end of the input.</param>

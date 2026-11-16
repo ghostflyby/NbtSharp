@@ -42,5 +42,6 @@ public sealed class NbtUseConverterAttribute : Attribute
     /// Gets the explicit converter type, or <see langword="null"/> when the converter is resolved at
     /// runtime.
     /// </summary>
+    // ReSharper disable once UnusedAutoPropertyAccessor.Global
     public Type? ConverterType { get; }
 }
