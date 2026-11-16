@@ -62,6 +62,63 @@ public sealed class NbtSourceGeneratorTests
     }
 
     [Fact]
+    public void RefreshesDiagnosticLocationsWhenDeclarationsShift()
+    {
+        var parseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
+        var source = """
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Player
+            {
+                public decimal Amount { get; set; }
+            }
+            """;
+        var tree = CSharpSyntaxTree.ParseText(
+            source,
+            parseOptions,
+            path: "Player.cs",
+            cancellationToken: TestContext.Current.CancellationToken);
+        var compilation = CSharpCompilation.Create(
+            "GeneratorTests",
+            [tree],
+            References,
+            new CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable));
+        var driver = CreateTrackingDriver(parseOptions);
+        ContextSpecCache.ResetForTests();
+
+        driver = driver.RunGenerators(compilation, TestContext.Current.CancellationToken);
+        var before = GetDiagnosticLine(driver.GetRunResult(), "NBTSG003");
+
+        var shiftedTree = CSharpSyntaxTree.ParseText(
+            "\n" + source,
+            parseOptions,
+            path: "Player.cs",
+            cancellationToken: TestContext.Current.CancellationToken);
+        driver = driver.RunGenerators(
+            compilation.ReplaceSyntaxTree(tree, shiftedTree),
+            TestContext.Current.CancellationToken);
+
+        var after = GetDiagnosticLine(driver.GetRunResult(), "NBTSG003");
+        Assert.Equal(before + 1, after);
+    }
+
+    private static int GetDiagnosticLine(GeneratorDriverRunResult result, string diagnosticId)
+    {
+        var diagnostics = result.Diagnostics
+            .Where(diagnostic => diagnostic.Id == diagnosticId)
+            .ToArray();
+        Assert.Single(diagnostics);
+        return diagnostics[0].Location.GetLineSpan().StartLinePosition.Line;
+    }
+
+    [Fact]
     public void CachesGeneratedContextsForUnrelatedChanges()
     {
         var parseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
@@ -496,6 +553,74 @@ public sealed class NbtSourceGeneratorTests
             1,
             preparedReasons.Count(static reason =>
                 reason is IncrementalStepRunReason.New or IncrementalStepRunReason.Modified));
+    }
+
+    [Fact]
+    public void InvalidatesNestedTypeWhenContainingTypeShapeChanges()
+    {
+        var parseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
+        var sourceTree = CSharpSyntaxTree.ParseText(
+            """
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Outer.Inner))]
+            public partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            public static class Outer
+            {
+                public sealed class Inner
+                {
+                    public int Value { get; set; }
+                }
+            }
+            """,
+            parseOptions,
+            path: "Nested.cs",
+            cancellationToken: TestContext.Current.CancellationToken);
+        var compilation = CSharpCompilation.Create(
+            "NestedGeneratorTests",
+            [sourceTree],
+            References,
+            new CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable));
+        var driver = CreateTrackingDriver(parseOptions);
+        ContextSpecCache.ResetForTests();
+
+        driver = driver.RunGenerators(compilation, TestContext.Current.CancellationToken);
+        var before = GetGeneratedSource(driver.GetRunResult());
+
+        var changedTree = CSharpSyntaxTree.ParseText(
+            """
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Outer.Inner))]
+            public partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal static class Outer
+            {
+                public sealed class Inner
+                {
+                    public int Value { get; set; }
+                }
+            }
+            """,
+            parseOptions,
+            path: "Nested.cs",
+            cancellationToken: TestContext.Current.CancellationToken);
+        driver = driver.RunGenerators(
+            compilation.ReplaceSyntaxTree(sourceTree, changedTree),
+            TestContext.Current.CancellationToken);
+
+        var result = driver.GetRunResult();
+        Assert.NotEqual(before, GetGeneratedSource(result));
+        Assert.Contains(
+            GetReasons(result, "NbtPreparedContexts"),
+            static reason => reason is IncrementalStepRunReason.New or IncrementalStepRunReason.Modified);
     }
 
     private static GeneratorDriver CreateTrackingDriver(CSharpParseOptions parseOptions) =>

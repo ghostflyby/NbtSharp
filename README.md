@@ -128,8 +128,8 @@ internal sealed class Player
 
 With no argument, the member's converter is resolved from `options.Converters` at runtime, preserving
 the normal converter precedence. With a converter type, the generated code creates that converter
-directly and uses it for the member; this form takes precedence over `options.Converters` and is
-AOT-safe when the converter itself is AOT-safe. The converter type must be a closed, non-abstract type
+directly and uses it for the member; this form takes precedence over `options.Converters`. An explicit
+`NbtConverter<T>` is AOT-safe when the converter itself is AOT-safe. The converter type must be a closed, non-abstract type
 derived from `NbtConverter<T>` whose `T` matches the member type (or a `NbtConverterFactory`), with a
 public parameterless constructor. A converter for `Guid` therefore does not automatically apply to a
 `Guid?` member; use runtime resolution or a nullable-aware converter. Marked members remain normal DTO
@@ -137,8 +137,9 @@ members, so required/null/constructor semantics are unchanged. Fields also requi
 Invalid declarations report `NBTSG016`.
 
 Runtime resolution may use reflection, so an AOT/trim-enabled consumer sees the corresponding
-analyzer diagnostics for `[NbtUseConverter]` without a converter type; use the explicit typed form, or
-an AOT-safe factory, when the generated path must remain warning-free.
+analyzer diagnostics for `[NbtUseConverter]` without a converter type; factories remain
+analyzer-visible as well. Use the explicit typed `NbtConverter<T>` form when the generated path must
+remain warning-free.
 
 The analyzer ships inside the `NbtSharp` package. The type-information overloads do not carry
 `RequiresUnreferencedCode` or `RequiresDynamicCode`; Native AOT works when every reachable type is

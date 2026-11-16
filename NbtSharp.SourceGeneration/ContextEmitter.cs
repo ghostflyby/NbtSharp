@@ -35,7 +35,8 @@ internal sealed partial class ContextEmitter
 
     public static PreparedContext Prepare(ContextModel model)
     {
-        if (ContextSpecCache.TryGet(model.Fingerprint, out var cached))
+        if (ContextSpecCache.TryGet(model.CacheKey, out var cached) &&
+            cached.Diagnostics.Length == 0)
         {
             return cached;
         }
@@ -86,7 +87,7 @@ internal sealed partial class ContextEmitter
 
     private static PreparedContext Cache(ContextModel model, PreparedContext prepared)
     {
-        ContextSpecCache.Add(model.Fingerprint, prepared);
+        ContextSpecCache.Add(model.CacheKey, prepared);
         return prepared;
     }
 

@@ -54,6 +54,7 @@ public sealed class NbtSourceGenerator : IIncrementalGenerator
     {
         var groups = new Dictionary<INamedTypeSymbol, List<RootType>>(SymbolEqualityComparer.Default);
         var fingerprints = new Dictionary<INamedTypeSymbol, List<string>>(SymbolEqualityComparer.Default);
+        var cacheKeys = new Dictionary<INamedTypeSymbol, List<string>>(SymbolEqualityComparer.Default);
         var order = new List<INamedTypeSymbol>();
         var sources = new Dictionary<INamedTypeSymbol, Location?>(SymbolEqualityComparer.Default);
 
@@ -64,12 +65,14 @@ public sealed class NbtSourceGenerator : IIncrementalGenerator
                 roots = [];
                 groups.Add(model.ContextType, roots);
                 fingerprints.Add(model.ContextType, []);
+                cacheKeys.Add(model.ContextType, []);
                 order.Add(model.ContextType);
                 sources.Add(model.ContextType, model.Location);
             }
 
             roots.AddRange(model.Roots);
             fingerprints[model.ContextType].Add(model.Fingerprint);
+            cacheKeys[model.ContextType].Add(model.CacheKey);
         }
 
         foreach (var contextType in order)
@@ -81,7 +84,13 @@ public sealed class NbtSourceGenerator : IIncrementalGenerator
                 .ThenBy(static root => root.PropertyName ?? "", StringComparer.Ordinal)
                 .ToImmutableArray();
             var fingerprint = ReachableFingerprint.Combine(contextType, fingerprints[contextType]);
-            yield return new ContextModel(contextType, roots, sources[contextType], fingerprint);
+            var cacheKey = ReachableFingerprint.Combine(contextType, cacheKeys[contextType]);
+            yield return new ContextModel(
+                contextType,
+                roots,
+                sources[contextType],
+                fingerprint,
+                cacheKey);
         }
     }
 }
@@ -171,12 +180,14 @@ internal sealed class ContextModel : IEquatable<ContextModel>
         INamedTypeSymbol contextType,
         ImmutableArray<RootType> roots,
         Location? location,
-        string fingerprint)
+        string fingerprint,
+        string cacheKey)
     {
         ContextType = contextType;
         Roots = roots;
         Location = location;
         Fingerprint = fingerprint;
+        CacheKey = cacheKey;
     }
 
     public INamedTypeSymbol ContextType { get; }
@@ -186,6 +197,8 @@ internal sealed class ContextModel : IEquatable<ContextModel>
     public Location? Location { get; }
 
     public string Fingerprint { get; }
+
+    public string CacheKey { get; }
 
     public static ContextModel? Create(GeneratorAttributeSyntaxContext syntaxContext)
     {
@@ -218,7 +231,7 @@ internal sealed class ContextModel : IEquatable<ContextModel>
                 StringComparer.Ordinal)
             .ThenBy(static root => root.PropertyName ?? "", StringComparer.Ordinal)
             .ToImmutableArray();
-        var fingerprint = ReachableFingerprint.Compute(
+        var fingerprints = ReachableFingerprint.Compute(
             contextType,
             orderedRoots,
             syntaxContext.SemanticModel.Compilation);
@@ -227,7 +240,8 @@ internal sealed class ContextModel : IEquatable<ContextModel>
             contextType,
             orderedRoots,
             contextType.Locations.FirstOrDefault(),
-            fingerprint);
+            fingerprints.Full,
+            fingerprints.Content);
     }
 
     public bool Equals(ContextModel? other) =>

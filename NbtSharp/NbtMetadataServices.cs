@@ -139,15 +139,17 @@ public static class NbtMetadataServices
     {
         ArgumentNullException.ThrowIfNull(converter);
         ArgumentNullException.ThrowIfNull(options);
-        if (converter is NbtConverterFactory factory)
+        NbtConverter? resolved = converter;
+        if (resolved is NbtConverterFactory factory)
         {
-            converter = factory.CreateConverter(typeof(T), options);
+            resolved = factory.CreateConverter(typeof(T), options);
         }
 
-        if (converter is not NbtConverter<T> typed)
+        if (resolved is not NbtConverter<T> typed)
         {
+            var converterName = resolved is null ? "null" : resolved.GetType().ToString();
             throw new NotSupportedException(
-                $"The converter {converter.GetType()} does not support {typeof(T)}.");
+                $"The converter {converterName} does not support {typeof(T)}.");
         }
 
         return NbtSerializer.DeserializeValueCore(ref reader, typed, options, pathSegment);
@@ -179,15 +181,17 @@ public static class NbtMetadataServices
             return;
         }
 
-        if (converter is NbtConverterFactory factory)
+        NbtConverter? resolved = converter;
+        if (resolved is NbtConverterFactory factory)
         {
-            converter = factory.CreateConverter(typeof(T), options);
+            resolved = factory.CreateConverter(typeof(T), options);
         }
 
-        if (converter is not NbtConverter<T> typed)
+        if (resolved is not NbtConverter<T> typed)
         {
+            var converterName = resolved is null ? "null" : resolved.GetType().ToString();
             throw new NotSupportedException(
-                $"The converter {converter.GetType()} does not support {typeof(T)}.");
+                $"The converter {converterName} does not support {typeof(T)}.");
         }
 
         NbtSerializer.SerializeMemberCore(ref writer, name, value, typed, options);

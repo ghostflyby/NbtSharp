@@ -9,14 +9,29 @@ namespace NbtSharp.SourceGeneration;
 /// graph. The walk visits every type that can influence generated source and hashes declaration
 /// text for source types and assembly identities for metadata types.
 /// </summary>
+internal readonly struct ReachableFingerprintResult
+{
+    public ReachableFingerprintResult(string content, string full)
+    {
+        Content = content;
+        Full = full;
+    }
+
+    /// <summary>Fingerprint of semantic content; stable across positional-only edits.</summary>
+    public string Content { get; }
+
+    /// <summary>Content plus declaration positions; used to refresh diagnostic locations.</summary>
+    public string Full { get; }
+}
+
 internal static class ReachableFingerprint
 {
-    private const string FormatVersion = "reachable-fingerprint-v1";
+    private const string FormatVersion = "reachable-fingerprint-v2";
     private const string UseConverterAttribute = "NbtSharp.NbtUseConverterAttribute";
 
     private static readonly SymbolDisplayFormat FullyQualified = SymbolDisplayFormat.FullyQualifiedFormat;
 
-    public static string Compute(
+    public static ReachableFingerprintResult Compute(
         INamedTypeSymbol contextType,
         ImmutableArray<RootType> roots,
         Compilation compilation)
@@ -51,7 +66,35 @@ internal static class ReachableFingerprint
             AddType(ref hash, type, pending);
         }
 
-        return hash.ToHex();
+        var content = hash.ToHex();
+        var positions = StableHash.Create();
+        positions.Add("positions-v1");
+        var positionEntries = visited
+            .SelectMany(static type => type.DeclaringSyntaxReferences.Select(reference => (Type: type, Reference: reference)))
+            .Select(static entry => (
+                TypeName: entry.Type.ToDisplayString(FullyQualified),
+                entry.Reference.SyntaxTree.FilePath,
+                entry.Reference.Span.Start,
+                entry.Reference.Span.Length))
+            .OrderBy(static entry => entry.TypeName, StringComparer.Ordinal)
+            .ThenBy(static entry => entry.FilePath, StringComparer.Ordinal)
+            .ThenBy(static entry => entry.Start)
+            .ThenBy(static entry => entry.Length)
+            .ToArray();
+        positions.Add(positionEntries.Length);
+        foreach (var entry in positionEntries)
+        {
+            positions.Add(entry.TypeName);
+            positions.Add(entry.FilePath);
+            positions.Add(entry.Start);
+            positions.Add(entry.Length);
+        }
+
+        var full = StableHash.Create();
+        full.Add("full-fingerprint-v1");
+        full.Add(content);
+        full.Add(positions.ToHex());
+        return new ReachableFingerprintResult(content, full.ToHex());
     }
 
     public static string Combine(INamedTypeSymbol contextType, IEnumerable<string> fingerprints)
@@ -151,6 +194,18 @@ internal static class ReachableFingerprint
         hash.Add(named.IsAbstract);
         hash.Add(named.IsStatic);
         hash.Add(named.IsSealed);
+        for (var containingType = named.ContainingType;
+             containingType is not null;
+             containingType = containingType.ContainingType)
+        {
+            hash.Add("containing");
+            hash.Add(containingType.ToDisplayString(FullyQualified));
+            hash.Add((int)containingType.DeclaredAccessibility);
+            hash.Add(containingType.IsFileLocal);
+            hash.Add(containingType.IsGenericType);
+        }
+
+        hash.Add(-1);
         hash.Add(named.BaseType?.ToDisplayString(FullyQualified));
         hash.Add(named.AllInterfaces.Length);
         foreach (var interfaceType in named.AllInterfaces

@@ -3,9 +3,10 @@ using System.Collections.Concurrent;
 namespace NbtSharp.SourceGeneration;
 
 /// <summary>
-/// Caches symbol-free prepared contexts by their input dependency fingerprint. The cache prevents
-/// repeated graph construction when the same context is prepared again by another compilation or
-/// driver instance.
+/// Caches symbol-free prepared contexts by their content fingerprint. The cache prevents repeated
+/// graph construction when the same context is prepared again by another compilation or driver
+/// instance; positional-only changes deliberately reuse the cached spec unless it contains
+/// diagnostics, whose locations must be refreshed.
 /// </summary>
 internal static class ContextSpecCache
 {
@@ -13,10 +14,10 @@ internal static class ContextSpecCache
     private static readonly ConcurrentDictionary<string, PreparedContext> Entries =
         new(StringComparer.Ordinal);
 
-    public static bool TryGet(string inputFingerprint, out PreparedContext prepared) =>
-        Entries.TryGetValue(inputFingerprint, out prepared!);
+    public static bool TryGet(string contentFingerprint, out PreparedContext prepared) =>
+        Entries.TryGetValue(contentFingerprint, out prepared!);
 
-    public static void Add(string inputFingerprint, PreparedContext prepared)
+    public static void Add(string contentFingerprint, PreparedContext prepared)
     {
         if (Entries.Count >= Capacity)
         {
@@ -27,7 +28,7 @@ internal static class ContextSpecCache
             }
         }
 
-        Entries[inputFingerprint] = prepared;
+        Entries[contentFingerprint] = prepared;
     }
 
     internal static void ResetForTests() => Entries.Clear();
