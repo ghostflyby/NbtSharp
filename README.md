@@ -129,8 +129,9 @@ internal sealed class Player
 With no argument, the member's converter is resolved from `options.Converters` at runtime, preserving
 the normal converter precedence. With a converter type, the generated code creates that converter
 directly and uses it for the member; this form takes precedence over `options.Converters`. An explicit
-`NbtConverter<T>` is AOT-safe when the converter itself is AOT-safe. The converter type must be a closed, non-abstract type
-derived from `NbtConverter<T>` whose `T` matches the member type (or a `NbtConverterFactory`), with a
+`NbtConverter<T>` is AOT-safe when the converter itself is AOT-safe. The converter type must be a
+closed, non-abstract type derived from `NbtConverter<T>` whose `T` matches the member type (or a
+`NbtConverterFactory`), with a
 public parameterless constructor. A converter for `Guid` therefore does not automatically apply to a
 `Guid?` member; use runtime resolution or a nullable-aware converter. Marked members remain normal DTO
 members, so required/null/constructor semantics are unchanged. Fields also require `[NbtInclude]`.
@@ -151,8 +152,8 @@ Prepared contexts are symbol-free and cached per context by a reachability finge
 compilation changes skip both graph construction and source emission, while changes to a context or
 any reachable declaration invalidate only that context. The transform input still carries symbols for
 semantic analysis, but every cached prepared/generated stage is symbol-free. Fingerprints hash each
-reachable declaration's text, so editing an unrelated declaration in the same file does not invalidate
-the context.
+reachable declaration's text and track positions separately, so editing an unrelated declaration in
+the same file does not regenerate the context; positional shifts only re-check diagnostics.
 
 Required members are strict: every required member that is part of the mapping must be present in
 the compound, otherwise deserialization throws `NbtException`. A required mapped member whose value
