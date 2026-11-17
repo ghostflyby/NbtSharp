@@ -108,7 +108,10 @@ internal struct NbtImmutableArrayBuilder<TElement> :
 
     public void Add(TElement element) => _builder.Add(element);
 
-    public ImmutableArray<TElement> Complete() => _builder.MoveToImmutable();
+    public ImmutableArray<TElement> Complete() =>
+        _builder.Count == _builder.Capacity
+            ? _builder.MoveToImmutable()
+            : _builder.ToImmutable();
 }
 
 internal struct NbtImmutableListBuilder<TCollection, TElement> :

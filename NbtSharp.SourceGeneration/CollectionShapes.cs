@@ -35,6 +35,7 @@ internal enum MapShape
     Dictionary,
     ReadOnlyDictionary,
     ImmutableDictionary,
+    ImmutableSortedDictionary,
     FrozenDictionary,
     Generated,
 }
@@ -131,7 +132,9 @@ internal static class CollectionShapeClassifier
         {
             shape = definition.Name is "ImmutableDictionary" or "IImmutableDictionary"
                 ? MapShape.ImmutableDictionary
-                : MapShape.None;
+                : definition.Name == "ImmutableSortedDictionary"
+                    ? MapShape.ImmutableSortedDictionary
+                    : MapShape.None;
         }
         else if (ns == FrozenNamespace)
         {

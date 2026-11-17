@@ -435,59 +435,86 @@ internal static class CollectionPatterns
     {
         var typeName = Fq(type);
         var elementName = Fq(elementType);
+        var listType = $"global::System.Collections.Generic.List<{elementName}>";
         var addMethod = FindInsertMethod(type, elementType, contextAssembly);
+        var capacityConstructor = IsBlockingCollection(type)
+            ? null
+            : FindCapacityConstructor(type, contextAssembly);
+        var parameterlessConstructor = FindParameterlessConstructor(type, contextAssembly);
+        var enumerableConstructor = FindEnumerableConstructor(type, elementType, contextAssembly);
+        var arrayConstructor = FindArrayConstructor(type, elementType, contextAssembly);
+
         if (addMethod is not null && !addMethod.Name.Equals("Push", StringComparison.Ordinal))
         {
-            var capacityConstructor = FindConstructor(type, "int", contextAssembly);
-            var parameterlessConstructor = FindParameterlessConstructor(type, contextAssembly);
-            var create = capacityConstructor is not null && parameterlessConstructor is not null
-                ? $"__state = count == 0 ? new {typeName}() : new {typeName}(count);"
-                : capacityConstructor is not null
-                    ? $"__state = new {typeName}(count);"
-                    : $"__state = new {typeName}();";
-            return new GeneratedBuilderSpec(
-                isMap: false,
-                typeName,
-                ImmutableArray.Create(create),
-                ImmutableArray.Create($"__state.{addMethod.Name}(item);"),
-                containsKeyExpression: null,
-                ImmutableArray.Create("return __state;"));
+            if (capacityConstructor is not null || parameterlessConstructor is not null)
+            {
+                var create = capacityConstructor is not null && parameterlessConstructor is not null
+                    ? $"__state = count == 0 ? new {typeName}() : new {typeName}(count);"
+                    : capacityConstructor is not null
+                        ? $"__state = new {typeName}(count);"
+                        : $"__state = new {typeName}();";
+                return new GeneratedBuilderSpec(
+                    isMap: false,
+                    typeName,
+                    ImmutableArray.Create(create),
+                    ImmutableArray.Create($"__state.{addMethod.Name}(item);"),
+                    containsKeyExpression: null,
+                    ImmutableArray.Create("return __state;"));
+            }
         }
 
         if (addMethod?.Name == "Push")
         {
-            var pushConstructor = FindConstructor(type, "int", contextAssembly) ??
-                FindParameterlessConstructor(type, contextAssembly);
-            if (pushConstructor is null)
+            var pushConstructor = capacityConstructor ?? parameterlessConstructor;
+            if (pushConstructor is not null)
             {
-                return null;
+                var construction = pushConstructor.Parameters.Length == 0
+                    ? $"new {typeName}()"
+                    : $"new {typeName}(__state.Count)";
+                return new GeneratedBuilderSpec(
+                    isMap: false,
+                    listType,
+                    ImmutableArray.Create($"__state = new {listType}(count);"),
+                    ImmutableArray.Create("__state.Add(item);"),
+                    containsKeyExpression: null,
+                    ImmutableArray.Create(
+                        $"var __result = {construction};",
+                        "for (var __index = __state.Count - 1; __index >= 0; __index--)",
+                        "{",
+                        "    __result.Push(__state[__index]);",
+                        "}",
+                        "return __result;"));
             }
 
-            var construction = pushConstructor.Parameters.Length == 0
-                ? $"new {typeName}()"
-                : $"new {typeName}(__state.Count)";
-            var listType = $"global::System.Collections.Generic.List<{elementName}>";
-            return new GeneratedBuilderSpec(
-                isMap: false,
-                listType,
-                ImmutableArray.Create($"__state = new {listType}(count);"),
-                ImmutableArray.Create("__state.Add(item);"),
-                containsKeyExpression: null,
-                ImmutableArray.Create(
-                    $"var __result = {construction};",
-                    "for (var __index = __state.Count - 1; __index >= 0; __index--)",
-                    "{",
-                    "    __result.Push(__state[__index]);",
-                    "}",
-                    "return __result;"));
+            if (enumerableConstructor is not null)
+            {
+                return new GeneratedBuilderSpec(
+                    isMap: false,
+                    listType,
+                    ImmutableArray.Create($"__state = new {listType}(count);"),
+                    ImmutableArray.Create("__state.Add(item);"),
+                    containsKeyExpression: null,
+                    ImmutableArray.Create(
+                        "__state.Reverse();",
+                        $"return new {typeName}(__state);"));
+            }
+
+            if (arrayConstructor is not null)
+            {
+                return new GeneratedBuilderSpec(
+                    isMap: false,
+                    listType,
+                    ImmutableArray.Create($"__state = new {listType}(count);"),
+                    ImmutableArray.Create("__state.Add(item);"),
+                    containsKeyExpression: null,
+                    ImmutableArray.Create(
+                        "__state.Reverse();",
+                        $"return new {typeName}(__state.ToArray());"));
+            }
         }
 
-        if (FindConstructor(type, "IEnumerable", contextAssembly) is not null ||
-            FindConstructor(type, typeof(IReadOnlyList<>).Name, contextAssembly) is not null ||
-            FindConstructor(type, typeof(IList<>).Name, contextAssembly) is not null ||
-            FindConstructor(type, typeof(ICollection<>).Name, contextAssembly) is not null)
+        if (enumerableConstructor is not null)
         {
-            var listType = $"global::System.Collections.Generic.List<{elementName}>";
             return new GeneratedBuilderSpec(
                 isMap: false,
                 listType,
@@ -497,9 +524,8 @@ internal static class CollectionPatterns
                 ImmutableArray.Create($"return new {typeName}(__state);"));
         }
 
-        if (FindArrayConstructor(type, elementType, contextAssembly) is not null)
+        if (arrayConstructor is not null)
         {
-            var listType = $"global::System.Collections.Generic.List<{elementName}>";
             return new GeneratedBuilderSpec(
                 isMap: false,
                 listType,
@@ -525,29 +551,34 @@ internal static class CollectionPatterns
             return null;
         }
 
-        if (FindParameterlessConstructor(type, contextAssembly) is not null ||
-            FindConstructor(type, "int", contextAssembly) is not null ||
-            FindComparerConstructor(type, contextAssembly) is not null)
+        var indexer = FindIndexerSetter(type, valueType, contextAssembly);
+        var addMethod = FindMapAddMethod(type, valueType, contextAssembly);
+        var addLine = indexer is not null
+            ? "__state[key] = value;"
+            : addMethod is not null
+                ? "__state.Add(key, value);"
+                : dictionaryInterface.StartsWith(
+                    "global::System.Collections.Generic.IDictionary",
+                    StringComparison.Ordinal)
+                    ? $"(({dictionaryInterface})__state)[key] = value;"
+                    : null;
+        if (addLine is null)
         {
-            var parameterless = FindParameterlessConstructor(type, contextAssembly);
-            var comparerConstructor = FindComparerConstructor(type, contextAssembly);
+            return null;
+        }
+
+        var parameterless = FindParameterlessConstructor(type, contextAssembly);
+        var capacityConstructor = FindCapacityConstructor(type, contextAssembly);
+        var comparerConstructor = FindComparerConstructor(type, contextAssembly);
+        if (parameterless is not null ||
+            capacityConstructor is not null ||
+            comparerConstructor is not null)
+        {
             var construction = comparerConstructor is not null
                 ? $"new {typeName}(global::System.StringComparer.Ordinal)"
                 : parameterless is not null
                     ? $"new {typeName}()"
                     : $"new {typeName}(0)";
-            var addLine = dictionaryInterface.StartsWith(
-                "global::System.Collections.Generic.IDictionary",
-                StringComparison.Ordinal)
-                ? $"(({dictionaryInterface})__state)[key] = value;"
-                : HasInstanceMethod(
-                    type,
-                    "Add",
-                    SpecialType.System_String,
-                    valueType,
-                    contextAssembly)
-                    ? "__state.Add(key, value);"
-                    : $"(({dictionaryInterface})__state)[key] = value;";
             var containsKey = HasInstanceMethod(
                 type,
                 "ContainsKey",
@@ -564,9 +595,7 @@ internal static class CollectionPatterns
                 ImmutableArray.Create("return __state;"));
         }
 
-        if (FindConstructor(type, "IDictionary", contextAssembly) is not null ||
-            FindConstructor(type, "IReadOnlyDictionary", contextAssembly) is not null ||
-            FindConstructor(type, "IEnumerable", contextAssembly) is not null)
+        if (FindMapConstructor(type, valueType, contextAssembly) is not null)
         {
             var dictionaryType =
                 $"global::System.Collections.Generic.Dictionary<string, {valueName}>";
@@ -578,6 +607,58 @@ internal static class CollectionPatterns
                 ImmutableArray.Create("__state[key] = value;"),
                 "__state.ContainsKey(key)",
                 ImmutableArray.Create($"return new {typeName}(__state);"));
+        }
+
+        return null;
+    }
+
+    private static IPropertySymbol? FindIndexerSetter(
+        INamedTypeSymbol type,
+        ITypeSymbol valueType,
+        IAssemblySymbol contextAssembly)
+    {
+        foreach (var current in Hierarchy(type))
+        {
+            foreach (var property in current.GetMembers().OfType<IPropertySymbol>())
+            {
+                if (!property.IsIndexer ||
+                    property.Parameters.Length != 1 ||
+                    property.Parameters[0].Type.SpecialType != SpecialType.System_String ||
+                    !SymbolEqualityComparer.Default.Equals(property.Type, valueType) ||
+                    property.SetMethod is null ||
+                    !IsAccessible(property.SetMethod, contextAssembly))
+                {
+                    continue;
+                }
+
+                return property;
+            }
+        }
+
+        return null;
+    }
+
+    private static IMethodSymbol? FindMapAddMethod(
+        INamedTypeSymbol type,
+        ITypeSymbol valueType,
+        IAssemblySymbol contextAssembly)
+    {
+        foreach (var current in Hierarchy(type))
+        {
+            var method = current.GetMembers("Add")
+                .OfType<IMethodSymbol>()
+                .FirstOrDefault(candidate =>
+                    !candidate.IsStatic &&
+                    IsAccessible(candidate, contextAssembly) &&
+                    candidate.Parameters.Length == 2 &&
+                    candidate.Parameters[0].Type.SpecialType == SpecialType.System_String &&
+                    SymbolEqualityComparer.Default.Equals(
+                        candidate.Parameters[1].Type,
+                        valueType));
+            if (method is not null)
+            {
+                return method;
+            }
         }
 
         return null;
@@ -604,14 +685,27 @@ internal static class CollectionPatterns
         INamedTypeSymbol type,
         string name,
         ITypeSymbol argumentType,
-        IAssemblySymbol contextAssembly) =>
-        type.GetMembers(name)
-            .OfType<IMethodSymbol>()
-            .FirstOrDefault(method =>
-                !method.IsStatic &&
-                IsAccessible(method, contextAssembly) &&
-                method.Parameters.Length == 1 &&
-                SymbolEqualityComparer.Default.Equals(method.Parameters[0].Type, argumentType));
+        IAssemblySymbol contextAssembly)
+    {
+        foreach (var current in Hierarchy(type))
+        {
+            var method = current.GetMembers(name)
+                .OfType<IMethodSymbol>()
+                .FirstOrDefault(candidate =>
+                    !candidate.IsStatic &&
+                    IsAccessible(candidate, contextAssembly) &&
+                    candidate.Parameters.Length == 1 &&
+                    SymbolEqualityComparer.Default.Equals(
+                        candidate.Parameters[0].Type,
+                        argumentType));
+            if (method is not null)
+            {
+                return method;
+            }
+        }
+
+        return null;
+    }
 
     private static bool HasInstanceMethod(
         INamedTypeSymbol type,
@@ -625,40 +719,79 @@ internal static class CollectionPatterns
         string name,
         SpecialType argumentType,
         IAssemblySymbol contextAssembly) =>
-        type.GetMembers(name)
-            .OfType<IMethodSymbol>()
-            .Any(method =>
-                !method.IsStatic &&
-                IsAccessible(method, contextAssembly) &&
-                method.Parameters.Length == 1 &&
-                method.Parameters[0].Type.SpecialType == argumentType);
+        Hierarchy(type).Any(current =>
+            current.GetMembers(name)
+                .OfType<IMethodSymbol>()
+                .Any(method =>
+                    !method.IsStatic &&
+                    IsAccessible(method, contextAssembly) &&
+                    method.Parameters.Length == 1 &&
+                    method.Parameters[0].Type.SpecialType == argumentType));
 
-    private static bool HasInstanceMethod(
+    private static IMethodSymbol? FindCapacityConstructor(
         INamedTypeSymbol type,
-        string name,
-        SpecialType firstArgumentType,
-        ITypeSymbol secondArgumentType,
-        IAssemblySymbol contextAssembly) =>
-        type.GetMembers(name)
-            .OfType<IMethodSymbol>()
-            .Any(method =>
-                !method.IsStatic &&
-                IsAccessible(method, contextAssembly) &&
-                method.Parameters.Length == 2 &&
-                method.Parameters[0].Type.SpecialType == firstArgumentType &&
-                SymbolEqualityComparer.Default.Equals(
-                    method.Parameters[1].Type,
-                    secondArgumentType));
-
-    private static IMethodSymbol? FindConstructor(
-        INamedTypeSymbol type,
-        string parameterTypeName,
         IAssemblySymbol contextAssembly) =>
         type.InstanceConstructors.FirstOrDefault(constructor =>
             IsAccessible(constructor, contextAssembly) &&
             constructor.Parameters.Length == 1 &&
-            (constructor.Parameters[0].Type.Name == parameterTypeName ||
-             constructor.Parameters[0].Type.ToDisplayString(FullyQualified) == parameterTypeName));
+            constructor.Parameters[0].Type.SpecialType == SpecialType.System_Int32);
+
+    private static IMethodSymbol? FindEnumerableConstructor(
+        INamedTypeSymbol type,
+        ITypeSymbol elementType,
+        IAssemblySymbol contextAssembly) =>
+        type.InstanceConstructors.FirstOrDefault(constructor =>
+            IsAccessible(constructor, contextAssembly) &&
+            constructor.Parameters.Length == 1 &&
+            IsSequenceConstructorParameter(constructor.Parameters[0].Type, elementType));
+
+    private static bool IsSequenceConstructorParameter(ITypeSymbol parameterType, ITypeSymbol elementType) =>
+        parameterType is INamedTypeSymbol named &&
+        named.TypeArguments.Length == 1 &&
+        SymbolEqualityComparer.Default.Equals(named.TypeArguments[0], elementType) &&
+        named.OriginalDefinition.ContainingNamespace?.ToDisplayString() == GenericNamespace &&
+        named.OriginalDefinition.Name is
+            "IEnumerable" or "IReadOnlyList" or "IReadOnlyCollection" or "ICollection" or "IList" or "List";
+
+    private static IMethodSymbol? FindMapConstructor(
+        INamedTypeSymbol type,
+        ITypeSymbol valueType,
+        IAssemblySymbol contextAssembly) =>
+        type.InstanceConstructors.FirstOrDefault(constructor =>
+            IsAccessible(constructor, contextAssembly) &&
+            constructor.Parameters.Length == 1 &&
+            IsMapConstructorParameter(constructor.Parameters[0].Type, valueType));
+
+    private static bool IsMapConstructorParameter(ITypeSymbol parameterType, ITypeSymbol valueType)
+    {
+        if (parameterType is not INamedTypeSymbol named)
+        {
+            return false;
+        }
+
+        var definition = named.OriginalDefinition;
+        if (IsNamed(definition, GenericNamespace, "IEnumerable", 1))
+        {
+            return IsStringValuePair(named.TypeArguments[0], valueType);
+        }
+
+        if (IsNamed(definition, GenericNamespace, "IDictionary", 2) ||
+            IsNamed(definition, GenericNamespace, "IReadOnlyDictionary", 2) ||
+            IsNamed(definition, GenericNamespace, "Dictionary", 2) ||
+            IsNamed(definition, ObjectModelNamespace, "ReadOnlyDictionary", 2))
+        {
+            return named.TypeArguments[0].SpecialType == SpecialType.System_String &&
+                   SymbolEqualityComparer.Default.Equals(named.TypeArguments[1], valueType);
+        }
+
+        return false;
+    }
+
+    private static bool IsStringValuePair(ITypeSymbol type, ITypeSymbol valueType) =>
+        type is INamedTypeSymbol named &&
+        IsNamed(named.OriginalDefinition, GenericNamespace, "KeyValuePair", 2) &&
+        named.TypeArguments[0].SpecialType == SpecialType.System_String &&
+        SymbolEqualityComparer.Default.Equals(named.TypeArguments[1], valueType);
 
     private static IMethodSymbol? FindArrayConstructor(
         INamedTypeSymbol type,
@@ -691,6 +824,11 @@ internal static class CollectionPatterns
         named.TypeArguments[0].SpecialType == SpecialType.System_String &&
         named.OriginalDefinition.ContainingNamespace?.ToDisplayString() == GenericNamespace &&
         named.OriginalDefinition.Name is "IComparer" or "IEqualityComparer";
+
+    private static bool IsBlockingCollection(INamedTypeSymbol type) =>
+        type.Name == "BlockingCollection" &&
+        type.Arity == 1 &&
+        type.ContainingNamespace?.ToDisplayString() == "System.Collections.Concurrent";
 
     private static string? MapInterface(INamedTypeSymbol type, ITypeSymbol valueType)
     {
@@ -734,6 +872,14 @@ internal static class CollectionPatterns
         return null;
     }
 
+    private static IEnumerable<INamedTypeSymbol> Hierarchy(INamedTypeSymbol type)
+    {
+        for (var current = type; current is not null; current = current.BaseType)
+        {
+            yield return current;
+        }
+    }
+
     private static IEnumerable<INamedTypeSymbol> SelfAndInterfaces(INamedTypeSymbol type)
     {
         if (type.TypeKind == TypeKind.Interface)
@@ -747,13 +893,32 @@ internal static class CollectionPatterns
         }
     }
 
-    private static bool IsAccessible(ISymbol symbol, IAssemblySymbol contextAssembly) =>
-        symbol.DeclaredAccessibility switch
+    private static bool IsAccessible(ISymbol symbol, IAssemblySymbol contextAssembly)
+    {
+        for (ISymbol? current = symbol; current is not null; current = current.ContainingType)
+        {
+            if (!IsAccessible(
+                    current.DeclaredAccessibility,
+                    current.ContainingAssembly,
+                    contextAssembly))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsAccessible(
+        Accessibility accessibility,
+        IAssemblySymbol? containingAssembly,
+        IAssemblySymbol contextAssembly) =>
+        accessibility switch
         {
             Accessibility.Public => true,
-            Accessibility.Internal => SymbolEqualityComparer.Default.Equals(
-                symbol.ContainingAssembly,
-                contextAssembly),
+            Accessibility.Internal or Accessibility.ProtectedOrInternal =>
+                containingAssembly is not null &&
+                SymbolEqualityComparer.Default.Equals(containingAssembly, contextAssembly),
             _ => false,
         };
 

@@ -110,8 +110,9 @@ internal struct NbtSortedListBuilder<TValue> :
     public SortedList<string, TValue> Complete() => _list;
 }
 
-internal struct NbtImmutableSortedDictionaryBuilder<TValue> :
-    INbtMapBuilder<ImmutableSortedDictionary<string, TValue>, TValue>
+internal struct NbtImmutableSortedDictionaryBuilder<TCollection, TValue> :
+    INbtMapBuilder<TCollection, TValue>
+    where TCollection : IEnumerable<KeyValuePair<string, TValue>>
 {
     private ImmutableSortedDictionary<string, TValue>.Builder _builder;
 
@@ -123,7 +124,7 @@ internal struct NbtImmutableSortedDictionaryBuilder<TValue> :
 
     public void Add(string key, TValue value) => _builder[key] = value;
 
-    public ImmutableSortedDictionary<string, TValue> Complete() => _builder.ToImmutable();
+    public TCollection Complete() => (TCollection)(object)_builder.ToImmutable();
 }
 
 /// <summary>

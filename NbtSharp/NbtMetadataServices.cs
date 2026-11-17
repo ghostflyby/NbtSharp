@@ -241,6 +241,17 @@ public static class NbtMetadataServices
             TCollection,
             TValue>();
 
+    /// <summary>Creates a converter for an immutable sorted dictionary.</summary>
+    /// <typeparam name="TCollection">The declared dictionary type.</typeparam>
+    /// <typeparam name="TValue">The dictionary value type.</typeparam>
+    /// <returns>The converter.</returns>
+    public static NbtConverter<TCollection> CreateImmutableSortedDictionaryConverter<TCollection, TValue>()
+        where TCollection : IEnumerable<KeyValuePair<string, TValue>> =>
+        new NbtMapConverter<
+            NbtImmutableSortedDictionaryBuilder<TCollection, TValue>,
+            TCollection,
+            TValue>();
+
     /// <summary>Creates a converter for <see cref="FrozenDictionary{TKey,TValue}"/>.</summary>
     /// <typeparam name="TValue">The dictionary value type.</typeparam>
     /// <returns>The converter.</returns>

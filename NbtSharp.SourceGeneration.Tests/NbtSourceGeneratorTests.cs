@@ -603,6 +603,172 @@ public sealed class NbtSourceGeneratorTests
     }
 
     [Fact]
+    public void ReportsCollectionWithoutUsableConstruction()
+    {
+        var result = Run("""
+            using System;
+            using System.Collections;
+            using System.Collections.Generic;
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Player
+            {
+                public MyCol<int> Values { get; set; } = new(Comparer<int>.Default);
+            }
+
+            internal sealed class MyCol<T> : IEnumerable<T>
+            {
+                public MyCol(IComparer<T> comparer)
+                {
+                }
+
+                public void Add(T item)
+                {
+                }
+
+                public IEnumerator<T> GetEnumerator() =>
+                    ((IEnumerable<T>)Array.Empty<T>()).GetEnumerator();
+
+                IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+            }
+            """);
+
+        Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG011");
+    }
+
+    [Fact]
+    public void ReportsReadOnlyMapWithoutMutation()
+    {
+        var result = Run("""
+            using System.Collections;
+            using System.Collections.Generic;
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Player
+            {
+                public MyMap Values { get; set; } = new();
+            }
+
+            internal sealed class MyMap : IReadOnlyDictionary<string, int>
+            {
+                private readonly Dictionary<string, int> _inner = [];
+
+                public int this[string key] => _inner[key];
+
+                public IEnumerable<string> Keys => _inner.Keys;
+
+                public IEnumerable<int> Values => _inner.Values;
+
+                public int Count => _inner.Count;
+
+                public bool ContainsKey(string key) => _inner.ContainsKey(key);
+
+                public bool TryGetValue(string key, out int value) =>
+                    _inner.TryGetValue(key, out value);
+
+                public IEnumerator<KeyValuePair<string, int>> GetEnumerator() =>
+                    _inner.GetEnumerator();
+
+                IEnumerator IEnumerable.GetEnumerator() => _inner.GetEnumerator();
+            }
+            """);
+
+        Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG011");
+    }
+
+    [Fact]
+    public void RebuildsWhenNonGenericCollectionElementTypeChanges()
+    {
+        var parseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
+        var contextTree = CSharpSyntaxTree.ParseText(
+            """
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+            """,
+            parseOptions,
+            cancellationToken: TestContext.Current.CancellationToken);
+        var dtoTree = CSharpSyntaxTree.ParseText(
+            """
+            internal sealed class Player
+            {
+                public ItemBag Items { get; set; } = new();
+            }
+            """,
+            parseOptions,
+            cancellationToken: TestContext.Current.CancellationToken);
+        var itemTree = CSharpSyntaxTree.ParseText(
+            """
+            internal sealed class Item
+            {
+                public int Health { get; set; }
+            }
+            """,
+            parseOptions,
+            cancellationToken: TestContext.Current.CancellationToken);
+        var bagTree = CSharpSyntaxTree.ParseText(
+            """
+            using System.Collections;
+            using System.Collections.Generic;
+
+            internal sealed class ItemBag : IEnumerable<Item>
+            {
+                private readonly List<Item> _items = [];
+                public void Add(Item item) => _items.Add(item);
+                public IEnumerator<Item> GetEnumerator() => _items.GetEnumerator();
+                IEnumerator IEnumerable.GetEnumerator() => _items.GetEnumerator();
+            }
+            """,
+            parseOptions,
+            cancellationToken: TestContext.Current.CancellationToken);
+        var compilation = CSharpCompilation.Create(
+            "GeneratorTests",
+            [contextTree, dtoTree, itemTree, bagTree],
+            References,
+            new CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable));
+        var driver = CreateTrackingDriver(parseOptions);
+        ContextSpecCache.ResetForTests();
+        ContextEmitter.ContextSpecBuilder.ResetGraphBuildCountForTests();
+
+        driver = driver.RunGenerators(compilation, TestContext.Current.CancellationToken);
+        Assert.Equal(1, ContextEmitter.ContextSpecBuilder.GraphBuildCount);
+
+        var changedItemTree = CSharpSyntaxTree.ParseText(
+            """
+            internal sealed class Item
+            {
+                public int Health { get; set; }
+
+                public int Armor { get; set; }
+            }
+            """,
+            parseOptions,
+            cancellationToken: TestContext.Current.CancellationToken);
+        driver.RunGenerators(
+            compilation.ReplaceSyntaxTree(itemTree, changedItemTree),
+            TestContext.Current.CancellationToken);
+
+        Assert.True(
+            ContextEmitter.ContextSpecBuilder.GraphBuildCount > 1,
+            "Changing an element of a non-generic collection wrapper must rebuild the graph.");
+    }
+
+    [Fact]
     public void OnlyRebuildsChangedContextInLargeCompilation()
     {
         const int contextCount = 300;

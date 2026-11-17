@@ -286,6 +286,7 @@ static NbtSharp.NbtMetadataServices.CreateImmutableHashSetConverter<TCollection,
 static NbtSharp.NbtMetadataServices.CreateImmutableListConverter<TCollection, TElement>() -> NbtSharp.NbtConverter<TCollection>!
 static NbtSharp.NbtMetadataServices.CreateImmutableQueueConverter<TCollection, TElement>() -> NbtSharp.NbtConverter<TCollection>!
 static NbtSharp.NbtMetadataServices.CreateImmutableStackConverter<TCollection, TElement>() -> NbtSharp.NbtConverter<TCollection>!
+static NbtSharp.NbtMetadataServices.CreateImmutableSortedDictionaryConverter<TCollection, TValue>() -> NbtSharp.NbtConverter<TCollection>!
 static NbtSharp.NbtMetadataServices.CreateLinkedListConverter<TElement>() -> NbtSharp.NbtConverter<System.Collections.Generic.LinkedList<TElement>!>!
 static NbtSharp.NbtMetadataServices.CreateListBackedCollectionConverter<TCollection, TElement>() -> NbtSharp.NbtConverter<TCollection>!
 static NbtSharp.NbtMetadataServices.CreateMapConverter<TCollection, TValue, TBuilder>() -> NbtSharp.NbtConverter<TCollection>!

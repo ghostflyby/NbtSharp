@@ -133,6 +133,16 @@ internal static class ReachableFingerprint
 
         if (IsCollectionType(named))
         {
+            if (CollectionPatterns.TryGetMapTypes(named, out var keyType, out var valueType))
+            {
+                pending.Push(keyType);
+                pending.Push(valueType);
+            }
+            else if (CollectionPatterns.TryGetSequenceElementType(named, out var elementType))
+            {
+                pending.Push(elementType);
+            }
+
             return;
         }
 
@@ -286,7 +296,6 @@ internal static class ReachableFingerprint
             return;
         }
 
-        var hasAttribute = false;
         foreach (var attribute in type.GetAttributes())
         {
             if (attribute.AttributeClass?.ToDisplayString() != CollectionBuilderAttributeName)
@@ -294,7 +303,6 @@ internal static class ReachableFingerprint
                 continue;
             }
 
-            hasAttribute = true;
             if (attribute.ConstructorArguments.Length >= 1 &&
                 attribute.ConstructorArguments[0].Value is ITypeSymbol builderType)
             {
@@ -304,7 +312,7 @@ internal static class ReachableFingerprint
             break;
         }
 
-        if (!hasAttribute && IsCollectionType(named))
+        if (IsCollectionType(named))
         {
             var companion = CollectionPatterns.FindCompanionType(named.OriginalDefinition);
             if (companion is not null)

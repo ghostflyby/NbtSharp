@@ -37,6 +37,7 @@ internal sealed class NbtReflectionMapConverter<TCollection, TValue> :
 
     [UnconditionalSuppressMessage("Aot", "IL2060", Justification = "Reflection is confined to the annotated reflection resolver path.")]
     [UnconditionalSuppressMessage("Aot", "IL2070", Justification = "Reflection is confined to the annotated reflection resolver path.")]
+    [UnconditionalSuppressMessage("Aot", "IL2087", Justification = "Reflection is confined to the annotated reflection resolver path.")]
     private sealed class MapPlan
     {
         private readonly ConstructorInfo? _constructor;
@@ -46,6 +47,7 @@ internal sealed class NbtReflectionMapConverter<TCollection, TValue> :
         private readonly ConstructorInfo? _defaultConstructor;
         private readonly PropertyInfo? _indexer;
         private readonly MethodInfo? _add;
+        private readonly bool _constructorTakesComparer;
 
         private MapPlan(
             ConstructorInfo? constructor,
@@ -54,7 +56,8 @@ internal sealed class NbtReflectionMapConverter<TCollection, TValue> :
             bool factoryTakesArray,
             ConstructorInfo? defaultConstructor,
             PropertyInfo? indexer,
-            MethodInfo? add)
+            MethodInfo? add,
+            bool constructorTakesComparer)
         {
             _constructor = constructor;
             _constructorTakesArray = constructorTakesArray;
@@ -63,6 +66,7 @@ internal sealed class NbtReflectionMapConverter<TCollection, TValue> :
             _defaultConstructor = defaultConstructor;
             _indexer = indexer;
             _add = add;
+            _constructorTakesComparer = constructorTakesComparer;
         }
 
         public static MapPlan Create(Type collectionType, Type valueType)
@@ -79,7 +83,15 @@ internal sealed class NbtReflectionMapConverter<TCollection, TValue> :
                     out var factory,
                     out var factoryTakesArray))
             {
-                return new MapPlan(null, false, factory, factoryTakesArray, null, null, null);
+                return new MapPlan(
+                    null,
+                    false,
+                    factory,
+                    factoryTakesArray,
+                    null,
+                    null,
+                    null,
+                    false);
             }
 
             var companion = collectionType.Assembly.GetType(
@@ -102,7 +114,58 @@ internal sealed class NbtReflectionMapConverter<TCollection, TValue> :
                      out factory,
                      out factoryTakesArray)))
             {
-                return new MapPlan(null, false, factory, factoryTakesArray, null, null, null);
+                return new MapPlan(
+                    null,
+                    false,
+                    factory,
+                    factoryTakesArray,
+                    null,
+                    null,
+                    null,
+                    false);
+            }
+
+            var indexer = collectionType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                .FirstOrDefault(property =>
+                    property.GetIndexParameters() is [{ ParameterType: var keyType }] &&
+                    keyType == typeof(string) &&
+                    property.PropertyType == valueType &&
+                    property.SetMethod is not null);
+            var add = collectionType.GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                .FirstOrDefault(method =>
+                    method.Name == "Add" &&
+                    !method.IsStatic &&
+                    method.GetParameters() is
+                        [{ ParameterType: var keyType }, { ParameterType: var valueParameterType }] &&
+                    keyType == typeof(string) &&
+                    valueParameterType == valueType);
+            var comparerConstructor = FindComparerConstructor(collectionType);
+            if (comparerConstructor is not null && (indexer is not null || add is not null))
+            {
+                return new MapPlan(
+                    null,
+                    false,
+                    null,
+                    false,
+                    comparerConstructor,
+                    indexer,
+                    add,
+                    true);
+            }
+
+            var defaultConstructor = collectionType.GetConstructor(Type.EmptyTypes);
+            if ((defaultConstructor is not null || collectionType.IsValueType) &&
+                (indexer is not null || add is not null))
+            {
+                return new MapPlan(
+                    null,
+                    false,
+                    null,
+                    false,
+                    defaultConstructor,
+                    indexer,
+                    add,
+                    false);
             }
 
             var constructors = collectionType.GetConstructors(BindingFlags.Public | BindingFlags.Instance);
@@ -116,45 +179,27 @@ internal sealed class NbtReflectionMapConverter<TCollection, TValue> :
                 var parameterType = constructor.GetParameters()[0].ParameterType;
                 if (parameterType == pairType.MakeArrayType())
                 {
-                    return new MapPlan(constructor, true, null, false, null, null, null);
+                    return new MapPlan(constructor, true, null, false, null, null, null, false);
                 }
 
                 if (parameterType.IsAssignableFrom(typeof(Dictionary<string, TValue>)))
                 {
-                    return new MapPlan(constructor, false, null, false, null, null, null);
-                }
-            }
-
-            var defaultConstructor = collectionType.GetConstructor(Type.EmptyTypes);
-            if (defaultConstructor is not null)
-            {
-                var indexer = collectionType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                    .FirstOrDefault(property =>
-                        property.GetIndexParameters() is [{ ParameterType: var keyType }] &&
-                        keyType == typeof(string) &&
-                        property.PropertyType == valueType &&
-                        property.SetMethod is not null);
-                if (indexer is not null)
-                {
-                    return new MapPlan(null, false, null, false, defaultConstructor, indexer, null);
-                }
-
-                var add = collectionType.GetMethods(BindingFlags.Public | BindingFlags.Instance)
-                    .FirstOrDefault(method =>
-                        method.Name == "Add" &&
-                        !method.IsStatic &&
-                        method.GetParameters() is
-                            [{ ParameterType: var keyType }, { ParameterType: var valueParameterType }] &&
-                        keyType == typeof(string) &&
-                        valueParameterType == valueType);
-                if (add is not null)
-                {
-                    return new MapPlan(null, false, null, false, defaultConstructor, null, add);
+                    return new MapPlan(constructor, false, null, false, null, null, null, false);
                 }
             }
 
             throw new NotSupportedException(
                 $"No supported construction pattern was found for {collectionType}.");
+        }
+
+        private static ConstructorInfo? FindComparerConstructor(Type collectionType)
+        {
+            var comparerType = typeof(IComparer<>).MakeGenericType(typeof(string));
+            var equalityComparerType = typeof(IEqualityComparer<>).MakeGenericType(typeof(string));
+            return collectionType.GetConstructors(BindingFlags.Public | BindingFlags.Instance)
+                .FirstOrDefault(constructor =>
+                    constructor.GetParameters() is [{ ParameterType: var parameterType }] &&
+                    (parameterType == comparerType || parameterType == equalityComparerType));
         }
 
         public object Create(Dictionary<string, TValue> values)
@@ -175,7 +220,11 @@ internal sealed class NbtReflectionMapConverter<TCollection, TValue> :
                     [_constructorTakesArray ? values.ToArray() : values])!;
             }
 
-            var result = NbtReflectionInvoke.Invoke(_defaultConstructor, null, [])!;
+            var result = _constructorTakesComparer
+                ? NbtReflectionInvoke.Invoke(_defaultConstructor, null, [StringComparer.Ordinal])!
+                : _defaultConstructor is not null
+                    ? NbtReflectionInvoke.Invoke(_defaultConstructor, null, [])!
+                    : Activator.CreateInstance(typeof(TCollection))!;
             foreach (var pair in values)
             {
                 if (_indexer is not null)

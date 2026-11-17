@@ -334,7 +334,10 @@ internal static class NbtBuiltInConverters
             converter = CreateMap(
                 type,
                 arguments[1],
-                MakeGeneric(typeof(NbtImmutableSortedDictionaryBuilder<>), arguments[1]));
+                MakeGeneric(
+                    typeof(NbtImmutableSortedDictionaryBuilder<,>),
+                    type,
+                    arguments[1]));
             return true;
         }
 
@@ -358,8 +361,13 @@ internal static class NbtBuiltInConverters
             return false;
         }
 
-        if (TryGetMapTypes(type, out var valueType))
+        if (TryGetMapTypes(type, out var keyType, out var valueType))
         {
+            if (keyType != typeof(string))
+            {
+                return false;
+            }
+
             try
             {
                 converter = CreateGeneric(typeof(NbtReflectionMapConverter<,>), type, valueType);
@@ -391,7 +399,7 @@ internal static class NbtBuiltInConverters
     }
 
     [UnconditionalSuppressMessage("Aot", "IL2070", Justification = "Reflection is confined to the annotated reflection resolver path.")]
-    private static bool TryGetMapTypes(Type type, out Type valueType)
+    private static bool TryGetMapTypes(Type type, out Type keyType, out Type valueType)
     {
         foreach (var candidate in type.GetInterfaces())
         {
@@ -401,15 +409,16 @@ internal static class NbtBuiltInConverters
             }
 
             var definition = candidate.GetGenericTypeDefinition();
-            if ((definition == typeof(IDictionary<,>) ||
-                 definition == typeof(IReadOnlyDictionary<,>)) &&
-                candidate.GetGenericArguments()[0] == typeof(string))
+            if (definition == typeof(IDictionary<,>) ||
+                definition == typeof(IReadOnlyDictionary<,>))
             {
+                keyType = candidate.GetGenericArguments()[0];
                 valueType = candidate.GetGenericArguments()[1];
                 return true;
             }
         }
 
+        keyType = null!;
         valueType = null!;
         return false;
     }

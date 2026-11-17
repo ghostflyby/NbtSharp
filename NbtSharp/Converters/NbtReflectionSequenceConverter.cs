@@ -41,6 +41,7 @@ internal sealed class NbtReflectionSequenceConverter<TCollection, TElement> :
 
     [UnconditionalSuppressMessage("Aot", "IL2060", Justification = "Reflection is confined to the annotated reflection resolver path.")]
     [UnconditionalSuppressMessage("Aot", "IL2070", Justification = "Reflection is confined to the annotated reflection resolver path.")]
+    [UnconditionalSuppressMessage("Aot", "IL2087", Justification = "Reflection is confined to the annotated reflection resolver path.")]
     private sealed class SequencePlan
     {
         private readonly ConstructorInfo? _constructor;
@@ -71,6 +72,12 @@ internal sealed class NbtReflectionSequenceConverter<TCollection, TElement> :
 
         public static SequencePlan Create(Type collectionType, Type elementType)
         {
+            var addMethods = new[] { "Add", "Enqueue", "Push" }
+                .Select(name => (Name: name, Method: FindMutator(collectionType, name, elementType)))
+                .Where(static pair => pair.Method is not null)
+                .ToArray();
+            var stackLike = addMethods.Any(static pair => pair.Name == "Push") &&
+                            addMethods.All(static pair => pair.Name is not ("Add" or "Enqueue"));
             var attribute = collectionType.GetCustomAttribute<CollectionBuilderAttribute>();
             if (attribute is not null &&
                 TryFindFactory(
@@ -81,7 +88,14 @@ internal sealed class NbtReflectionSequenceConverter<TCollection, TElement> :
                     out var factory,
                     out var factoryTakesArray))
             {
-                return new SequencePlan(null, false, factory, factoryTakesArray, null, null, false);
+                return new SequencePlan(
+                    null,
+                    false,
+                    factory,
+                    factoryTakesArray,
+                    null,
+                    null,
+                    stackLike);
             }
 
             var companion = collectionType.Assembly.GetType(
@@ -102,7 +116,31 @@ internal sealed class NbtReflectionSequenceConverter<TCollection, TElement> :
                      out factory,
                      out factoryTakesArray)))
             {
-                return new SequencePlan(null, false, factory, factoryTakesArray, null, null, false);
+                return new SequencePlan(
+                    null,
+                    false,
+                    factory,
+                    factoryTakesArray,
+                    null,
+                    null,
+                    stackLike);
+            }
+
+            var defaultConstructor = collectionType.GetConstructor(Type.EmptyTypes);
+            if ((defaultConstructor is not null || collectionType.IsValueType) &&
+                addMethods.Length != 0)
+            {
+                var add = addMethods.FirstOrDefault(static pair => pair.Name == "Add").Method ??
+                          addMethods.FirstOrDefault(static pair => pair.Name == "Enqueue").Method ??
+                          addMethods.FirstOrDefault(static pair => pair.Name == "Push").Method;
+                return new SequencePlan(
+                    null,
+                    false,
+                    null,
+                    false,
+                    defaultConstructor,
+                    add,
+                    stackLike);
             }
 
             var constructors = collectionType.GetConstructors(BindingFlags.Public | BindingFlags.Instance);
@@ -116,37 +154,26 @@ internal sealed class NbtReflectionSequenceConverter<TCollection, TElement> :
                 var parameterType = constructor.GetParameters()[0].ParameterType;
                 if (parameterType == elementType.MakeArrayType())
                 {
-                    return new SequencePlan(constructor, true, null, false, null, null, false);
+                    return new SequencePlan(
+                        constructor,
+                        true,
+                        null,
+                        false,
+                        null,
+                        null,
+                        stackLike);
                 }
 
                 if (parameterType.IsAssignableFrom(typeof(List<TElement>)))
                 {
-                    return new SequencePlan(constructor, false, null, false, null, null, false);
-                }
-            }
-
-            var defaultConstructor = collectionType.GetConstructor(Type.EmptyTypes);
-            if (defaultConstructor is not null)
-            {
-                foreach (var name in new[] { "Add", "Enqueue", "Push" })
-                {
-                    var add = collectionType.GetMethods(BindingFlags.Public | BindingFlags.Instance)
-                        .FirstOrDefault(method =>
-                            method.Name == name &&
-                            !method.IsStatic &&
-                            method.GetParameters().Length == 1 &&
-                            method.GetParameters()[0].ParameterType == elementType);
-                    if (add is not null)
-                    {
-                        return new SequencePlan(
-                            null,
-                            false,
-                            null,
-                            false,
-                            defaultConstructor,
-                            add,
-                            name == "Push");
-                    }
+                    return new SequencePlan(
+                        constructor,
+                        false,
+                        null,
+                        false,
+                        null,
+                        null,
+                        stackLike);
                 }
             }
 
@@ -154,10 +181,23 @@ internal sealed class NbtReflectionSequenceConverter<TCollection, TElement> :
                 $"No supported construction pattern was found for {collectionType}.");
         }
 
+        private static MethodInfo? FindMutator(Type collectionType, string name, Type elementType) =>
+            collectionType.GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                .FirstOrDefault(method =>
+                    method.Name == name &&
+                    !method.IsStatic &&
+                    method.GetParameters() is [{ ParameterType: var parameterType }] &&
+                    parameterType == elementType);
+
         public object Create(List<TElement> elements)
         {
             if (_factory is not null)
             {
+                if (_reverse)
+                {
+                    elements.Reverse();
+                }
+
                 return NbtReflectionInvoke.Invoke(
                     _factory,
                     null,
@@ -166,13 +206,20 @@ internal sealed class NbtReflectionSequenceConverter<TCollection, TElement> :
 
             if (_constructor is not null)
             {
+                if (_reverse)
+                {
+                    elements.Reverse();
+                }
+
                 return NbtReflectionInvoke.Invoke(
                     _constructor,
                     null,
                     [_constructorTakesArray ? elements.ToArray() : elements])!;
             }
 
-            var result = NbtReflectionInvoke.Invoke(_defaultConstructor, null, [])!;
+            var result = _defaultConstructor is not null
+                ? NbtReflectionInvoke.Invoke(_defaultConstructor, null, [])!
+                : Activator.CreateInstance(typeof(TCollection))!;
             if (_reverse)
             {
                 for (var index = elements.Count - 1; index >= 0; index--)

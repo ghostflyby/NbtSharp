@@ -38,6 +38,7 @@ public sealed class CollectionShapeSourceGenerationTests
                 StringComparer.Ordinal,
                 new Dictionary<string, int> { ["f"] = 6, ["e"] = 5 }),
             Custom = new CustomCollection<int>([3, 4]),
+            Derived = new DerivedIntCollection { 1, 2 },
         };
         value.Blocking.TryAdd(1);
         value.Blocking.TryAdd(2);
@@ -59,8 +60,10 @@ public sealed class CollectionShapeSourceGenerationTests
         Assert.Equal([1, 2], copy.ImmutableSortedSet.ToArray());
         Assert.Equal(5, copy.ImmutableSortedMap["e"]);
         Assert.Equal(6, copy.ImmutableSortedMap["f"]);
+        Assert.Same(StringComparer.Ordinal, copy.ImmutableSortedMap.KeyComparer);
         Assert.Equal([1, 2], copy.Blocking.OrderBy(static item => item));
         Assert.Equal([3, 4], copy.Custom.ToArray());
+        Assert.Equal([1, 2], copy.Derived.ToArray());
     }
 
     [Fact]
@@ -222,6 +225,8 @@ internal sealed class SourceGenCollectionShapes
 
     public CustomCollection<int> Custom { get; set; } = new([]);
 
+    public DerivedIntCollection Derived { get; set; } = new();
+
     public FrozenSet<int> FrozenSet { get; set; } = new HashSet<int>().ToFrozenSet();
 
     public FrozenDictionary<string, int> FrozenDictionary { get; set; } =
@@ -248,4 +253,8 @@ internal static class CustomCollectionFactory
 {
     public static CustomCollection<T> Create<T>(ReadOnlySpan<T> items) =>
         new(items.ToArray());
+}
+
+internal sealed class DerivedIntCollection : Collection<int>
+{
 }

@@ -454,6 +454,9 @@ internal sealed partial class ContextEmitter
         MapShape.ImmutableDictionary =>
             $"{MetadataServices}.CreateImmutableDictionaryConverter<" +
             $"{entry.TypeName}, {entry.ValueTypeName!}>()",
+        MapShape.ImmutableSortedDictionary =>
+            $"{MetadataServices}.CreateImmutableSortedDictionaryConverter<" +
+            $"{entry.TypeName}, {entry.ValueTypeName!}>()",
         MapShape.FrozenDictionary =>
             $"{MetadataServices}.CreateFrozenDictionaryConverter<{entry.ValueTypeName!}>()",
         MapShape.Generated =>

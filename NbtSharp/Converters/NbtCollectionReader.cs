@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.Frozen;
 using System.Collections.Immutable;
 using System.Collections.ObjectModel;
@@ -102,7 +103,7 @@ internal static class NbtCollectionReader
     {
         var count = ValidateListStart<TElement>(ref reader, options);
         var builder = default(TBuilder);
-        builder.Create(count);
+        builder.Create(Math.Min(count, PreallocationLimit));
         if (count > 0)
         {
             var converter = options.GetConverter(typeof(TElement));
@@ -461,11 +462,21 @@ internal static class NbtCollectionReader
                 definition == typeof(Collection<>) ||
                 definition == typeof(ObservableCollection<>) ||
                 definition == typeof(ReadOnlyCollection<>) ||
+                definition == typeof(SortedSet<>) ||
+                definition == typeof(ConcurrentBag<>) ||
+                definition == typeof(ConcurrentQueue<>) ||
+                definition == typeof(ConcurrentStack<>) ||
+                definition == typeof(BlockingCollection<>) ||
                 definition == typeof(ImmutableArray<>) ||
                 definition == typeof(ImmutableList<>) ||
                 definition == typeof(IImmutableList<>) ||
                 definition == typeof(ImmutableHashSet<>) ||
                 definition == typeof(IImmutableSet<>) ||
+                definition == typeof(ImmutableQueue<>) ||
+                definition == typeof(IImmutableQueue<>) ||
+                definition == typeof(ImmutableStack<>) ||
+                definition == typeof(IImmutableStack<>) ||
+                definition == typeof(ImmutableSortedSet<>) ||
                 definition == typeof(FrozenSet<>))
             {
                 tagType = NbtTagType.List;
@@ -476,8 +487,12 @@ internal static class NbtCollectionReader
                  definition == typeof(IDictionary<,>) ||
                  definition == typeof(IReadOnlyDictionary<,>) ||
                  definition == typeof(ReadOnlyDictionary<,>) ||
+                 definition == typeof(SortedDictionary<,>) ||
+                 definition == typeof(SortedList<,>) ||
+                 definition == typeof(ConcurrentDictionary<,>) ||
                  definition == typeof(ImmutableDictionary<,>) ||
                  definition == typeof(IImmutableDictionary<,>) ||
+                 definition == typeof(ImmutableSortedDictionary<,>) ||
                  definition == typeof(FrozenDictionary<,>)) &&
                 arguments[0] == typeof(string))
             {

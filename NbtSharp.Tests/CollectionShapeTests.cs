@@ -129,6 +129,10 @@ public sealed class CollectionShapeTests
         blocking.TryAdd(1);
         blocking.TryAdd(2);
 
+        var immutableSortedSetCopy = RoundTrip(immutableSortedSet);
+        var immutableSortedMapCopy = RoundTrip(immutableSortedMap);
+        var blockingCopy = RoundTrip(blocking);
+
         Assert.Equal(1, RoundTrip(concurrentMap)["a"]);
         Assert.Equal([1, 2], RoundTrip(bag).OrderBy(static value => value));
         Assert.Equal([1, 2], RoundTrip(concurrentQueue).ToArray());
@@ -142,10 +146,36 @@ public sealed class CollectionShapeTests
         Assert.Equal([1, 2], RoundTrip<IImmutableQueue<int>>(immutableQueue).ToArray());
         Assert.Equal([2, 1], RoundTrip(immutableStack).ToArray());
         Assert.Equal([2, 1], RoundTrip<IImmutableStack<int>>(immutableStack).ToArray());
-        Assert.Equal([1, 2], RoundTrip(immutableSortedSet).ToArray());
-        Assert.Equal(5, RoundTrip(immutableSortedMap)["e"]);
-        Assert.Equal(6, RoundTrip(immutableSortedMap)["f"]);
-        Assert.Equal([1, 2], RoundTrip(blocking).OrderBy(static value => value));
+        Assert.Equal([1, 2], immutableSortedSetCopy.ToArray());
+        Assert.Equal(5, immutableSortedMapCopy["e"]);
+        Assert.Equal(6, immutableSortedMapCopy["f"]);
+        Assert.Same(StringComparer.Ordinal, immutableSortedMapCopy.KeyComparer);
+        Assert.Equal([1, 2], blockingCopy.OrderBy(static value => value));
+    }
+
+    [Fact]
+    public void StructCollectionUsesAddPattern()
+    {
+        var value = new StructIntCollection();
+        value.Add(1);
+        value.Add(2);
+
+        Assert.Equal([1, 2], RoundTrip(value).ToArray());
+    }
+
+    [Fact]
+    public void NonStringKeyMapsAreRejected()
+    {
+        Assert.Throws<NotSupportedException>(() =>
+            NbtSerializer.Serialize(new Dictionary<int, int> { [1] = 2 }, "root"));
+    }
+
+    [Fact]
+    public void ReflectionKeepsStackOrderForConstructorPushTypes()
+    {
+        var value = new ConstructorStack<int>([1, 2]);
+
+        Assert.Equal([2, 1], RoundTrip(value).ToArray());
     }
 
     [Fact]
@@ -205,4 +235,38 @@ internal sealed class ConstructedCustomCollection<T> : IReadOnlyList<T>
 
 internal sealed class CustomStringMap : Dictionary<string, int>
 {
+}
+
+internal struct StructIntCollection : IEnumerable<int>
+{
+    private List<int>? _items;
+
+    public void Add(int item) => (_items ??= []).Add(item);
+
+    public IEnumerator<int> GetEnumerator() => (_items ?? []).GetEnumerator();
+
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+}
+
+internal sealed class ConstructorStack<T> : IEnumerable<T>
+{
+    private readonly List<T> _items = [];
+
+    public ConstructorStack(IEnumerable<T> items)
+    {
+        foreach (var item in items)
+        {
+            _items.Insert(0, item);
+        }
+    }
+
+    public ConstructorStack<T> Push(T item)
+    {
+        _items.Insert(0, item);
+        return this;
+    }
+
+    public IEnumerator<T> GetEnumerator() => _items.GetEnumerator();
+
+    IEnumerator IEnumerable.GetEnumerator() => _items.GetEnumerator();
 }
