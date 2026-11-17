@@ -32,7 +32,7 @@ internal static class NbtDomConverters
                 case NbtTagType.Double:
                     return reader.GetDouble();
                 case NbtTagType.ByteArray:
-                    return MemoryMarshal.Cast<byte, sbyte>(reader.GetByteArray().AsSpan()).ToArray();
+                    return reader.GetSByteArray();
                 case NbtTagType.String:
                     return reader.GetString();
                 case NbtTagType.List:

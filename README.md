@@ -266,11 +266,11 @@ whose length is known before the list header is written. `IList<T>`, `ICollectio
 `IEnumerable<T>` are not automatically supported; materialize to `List<T>` or provide a custom
 converter that writes the list header and elements itself.
 
-On read, arrays without a dedicated NBT array tag are allocated once at the declared list length
-instead of being built through `List<T>`, and `sbyte[]` is read directly without an intermediate
-`byte[]`. Lists at or below 4096 elements are filled through `CollectionsMarshal` span access;
-larger declared lengths grow as elements are read. Stream-backed arrays also grow from a bounded
-capacity, so a truncated payload cannot force a large upfront allocation.
+On read, arrays with fixed-width element tags are allocated once at the declared list length instead
+of being built through `List<T>`; variable-size element arrays and stream-backed reads grow from a
+bounded capacity, so malformed or partially buffered input cannot force a large upfront allocation.
+`sbyte[]` is read directly without an intermediate `byte[]`. Lists at or below 4096 elements are
+filled through `CollectionsMarshal` span access; larger declared lengths grow as elements are read.
 
 The generic writer encodes an empty collection as `TAG_List<TAG_End>`, which every supported target
 collection accepts. An empty list with a concrete element type is checked against the requested element type

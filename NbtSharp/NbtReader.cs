@@ -327,10 +327,6 @@ public ref struct NbtReader
 
     internal bool IsStreamBacked => _stream is not null;
 
-    // Every list element occupies at least one byte, so a declared element count is a lower bound
-    // for the remaining payload. This rejects truncated lists before a caller allocates for them.
-    internal void EnsureCollectionPayloadFits(int count) => EnsurePayloadFits(count);
-
     /// <summary>Reads the current value as an integer array.</summary>
     public int[] GetInt32Array()
     {

@@ -53,11 +53,14 @@ internal static class NbtCollectionReader
             return [];
         }
 
-        reader.EnsureCollectionPayloadFits(count);
-
-        // A stream cannot be validated up front, so grow from a bounded initial capacity instead
-        // of committing memory for a declared length that may never arrive.
-        var initialCapacity = reader.IsStreamBacked ? Math.Min(count, PreallocationLimit) : count;
+        // Only fixed-width element tags have an exact payload-size check. Variable-size elements
+        // (compound, string, list, arrays) are bounded by a minimum size, so grow from a bounded
+        // capacity to keep malformed or still-partial input from forcing a large allocation.
+        var allocateDeclaredCount = !reader.IsStreamBacked &&
+            IsFixedWidthListElement(reader.ListElementType);
+        var initialCapacity = allocateDeclaredCount
+            ? count
+            : Math.Min(count, PreallocationLimit);
         var elements = new TElement[initialCapacity];
         var converter = options.GetConverter(typeof(TElement));
         var typedConverter = converter as NbtConverter<TElement>;
@@ -84,6 +87,15 @@ internal static class NbtCollectionReader
         ReadListEnd(ref reader);
         return elements;
     }
+
+    private static bool IsFixedWidthListElement(NbtTagType elementType) =>
+        elementType is
+            NbtTagType.Byte or
+            NbtTagType.Short or
+            NbtTagType.Int or
+            NbtTagType.Long or
+            NbtTagType.Float or
+            NbtTagType.Double;
 
     private static int ValidateListStart<TElement>(ref NbtReader reader, NbtSerializerOptions options)
     {

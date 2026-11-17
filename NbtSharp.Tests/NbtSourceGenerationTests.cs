@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Globalization;
+using System.IO.Pipelines;
 
 namespace NbtSharp.Tests;
 
@@ -221,6 +222,61 @@ public sealed class NbtSourceGenerationTests
         Assert.Equal("one", copy[0].Id);
         Assert.Equal(2, copy[1].Count);
     }
+
+    [Fact]
+    public void LargeVariableSizeArraysRoundTripFromStream()
+    {
+        var context = SourceGenerationContext.Default;
+        var value = CreateItems(5000);
+        using var stream = new MemoryStream(
+            NbtSerializer.Serialize(value, context.ArrayOfSourceGenItem, "root"));
+
+        var copy = NbtSerializer.Deserialize(stream, context.ArrayOfSourceGenItem);
+
+        Assert.Equal(value.Length, copy.Length);
+        Assert.Equal(value[0].Id, copy[0].Id);
+        Assert.Equal(value[4096].Id, copy[4096].Id);
+        Assert.Equal(value[^1].Count, copy[^1].Count);
+    }
+
+    [Fact]
+    public async Task LargeVariableSizeArraysRoundTripFromAsyncPipe()
+    {
+        var context = SourceGenerationContext.Default;
+        var value = CreateItems(5000);
+        var data = NbtSerializer.Serialize(value, context.ArrayOfSourceGenItem, "root");
+        using var stream = new MemoryStream(data);
+        var reader = PipeReader.Create(stream);
+
+        var copy = await NbtSerializer.DeserializeAsync(
+            reader,
+            context.ArrayOfSourceGenItem,
+            TestContext.Current.CancellationToken);
+
+        await reader.CompleteAsync();
+        Assert.Equal(value.Length, copy.Length);
+        Assert.Equal(value[4096].Id, copy[4096].Id);
+        Assert.Equal(value[^1].Id, copy[^1].Id);
+    }
+
+    [Fact]
+    public void TruncatedVariableSizeArraysFromStreamAreTruncated()
+    {
+        var context = SourceGenerationContext.Default;
+        var value = CreateItems(5000);
+        var data = NbtSerializer.Serialize(value, context.ArrayOfSourceGenItem, "root");
+        using var stream = new MemoryStream(data[..^8]);
+
+        var exception = Assert.Throws<NbtException>(() =>
+            NbtSerializer.Deserialize(stream, context.ArrayOfSourceGenItem));
+
+        Assert.True(exception.IsTruncated);
+    }
+
+    private static SourceGenItem[] CreateItems(int count) =>
+        Enumerable.Range(0, count)
+            .Select(static index => new SourceGenItem { Id = "item" + index, Count = index })
+            .ToArray();
 
     [Fact]
     public void SupportsClosedGenericDtoTypes()
@@ -529,6 +585,22 @@ public sealed class NbtSourceGenerationTests
 
         Assert.Equal(6, root["Health"] is int stored ? stored : 0);
         Assert.Equal(5, copy.Health);
+    }
+
+    [Fact]
+    public void CustomStringConvertersDisableGeneratedFastPath()
+    {
+        var options = new NbtSerializerOptions();
+        options.Converters.Add(PrefixStringConverter.Instance);
+        var context = new SourceGenerationContext(options);
+        var value = new SourceGenScalars { Text = "text" };
+
+        var data = NbtSerializer.Serialize(value, context.SourceGenScalars, "root");
+        var root = (NbtCompound)NbtSerializer.Deserialize(data).Value.Value!;
+        var copy = NbtSerializer.Deserialize(data, context.SourceGenScalars);
+
+        Assert.Equal("custom:text", root["Text"] is string stored ? stored : "");
+        Assert.Equal("text", copy.Text);
     }
 
     [Fact]
@@ -1439,6 +1511,34 @@ internal sealed class PlusOneInt32Converter : NbtConverter<int>
         out NbtTagType tagType)
     {
         tagType = NbtTagType.Int;
+        return true;
+    }
+}
+
+internal sealed class PrefixStringConverter : NbtConverter<string>
+{
+    public static readonly PrefixStringConverter Instance = new();
+
+    private const string Prefix = "custom:";
+
+    public override string Read(ref NbtReader reader, NbtSerializerOptions options)
+    {
+        var value = reader.GetString();
+        return value.StartsWith(Prefix, StringComparison.Ordinal) ? value[Prefix.Length..] : value;
+    }
+
+    public override void Write(
+        ref NbtWriter writer,
+        string value,
+        NbtSerializerOptions options) =>
+        writer.WriteString(Prefix + value);
+
+    public override bool TryGetTagType(
+        string value,
+        NbtSerializerOptions options,
+        out NbtTagType tagType)
+    {
+        tagType = NbtTagType.String;
         return true;
     }
 }
