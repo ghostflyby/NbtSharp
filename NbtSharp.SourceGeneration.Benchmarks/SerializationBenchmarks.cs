@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using BenchmarkDotNet.Attributes;
 
 namespace NbtSharp.SourceGeneration.Benchmarks;
@@ -13,6 +14,8 @@ public class SerializationBenchmarks
     private byte[] _arrayData = null!;
     private ArrayAllocationDto _allocationArrays = null!;
     private byte[] _allocationArrayData = null!;
+    private CollectionShapeDto _collectionShapes = null!;
+    private byte[] _collectionShapeData = null!;
 
     [GlobalSetup]
     public void Setup()
@@ -81,6 +84,20 @@ public class SerializationBenchmarks
             _allocationArrays,
             SerializationContext.Default.ArrayAllocationDto,
             "root");
+
+        _collectionShapes = new CollectionShapeDto
+        {
+            Set = new HashSet<int>(Enumerable.Range(0, 1024)),
+            Queue = new Queue<int>(Enumerable.Range(0, 1024)),
+            Stack = new Stack<int>(Enumerable.Range(0, 1024)),
+            ImmutableArray = [.. Enumerable.Range(0, 1024)],
+            ImmutableList = ImmutableList.CreateRange(Enumerable.Range(0, 1024)),
+            ListInterface = Enumerable.Range(0, 1024).ToList(),
+        };
+        _collectionShapeData = NbtSerializer.Serialize(
+            _collectionShapes,
+            SerializationContext.Default.CollectionShapeDto,
+            "root");
     }
 
     [Benchmark(Baseline = true)]
@@ -115,12 +132,26 @@ public class SerializationBenchmarks
         NbtSerializer.Deserialize(
             _allocationArrayData,
             SerializationContext.Default.ArrayAllocationDto);
+
+    [Benchmark]
+    public byte[] CollectionShapesSerialize() =>
+        NbtSerializer.Serialize(
+            _collectionShapes,
+            SerializationContext.Default.CollectionShapeDto,
+            "root");
+
+    [Benchmark]
+    public CollectionShapeDto CollectionShapesDeserialize() =>
+        NbtSerializer.Deserialize(
+            _collectionShapeData,
+            SerializationContext.Default.CollectionShapeDto);
 }
 
 [NbtSerializable(typeof(ScalarDto))]
 [NbtSerializable(typeof(NullableScalarDto))]
 [NbtSerializable(typeof(ArrayDto))]
 [NbtSerializable(typeof(ArrayAllocationDto))]
+[NbtSerializable(typeof(CollectionShapeDto))]
 internal partial class SerializationContext : NbtSerializerContext
 {
 }
@@ -219,4 +250,19 @@ public sealed class ArrayValue
     public int Id { get; set; }
 
     public long Value { get; set; }
+}
+
+public sealed class CollectionShapeDto
+{
+    public HashSet<int> Set { get; set; } = [];
+
+    public Queue<int> Queue { get; set; } = new();
+
+    public Stack<int> Stack { get; set; } = new();
+
+    public ImmutableArray<int> ImmutableArray { get; set; }
+
+    public ImmutableList<int> ImmutableList { get; set; } = ImmutableList<int>.Empty;
+
+    public IReadOnlyList<int> ListInterface { get; set; } = [];
 }

@@ -1,3 +1,7 @@
+using System.Collections.Concurrent;
+using System.Collections.Frozen;
+using System.Collections.Immutable;
+using System.Collections.ObjectModel;
 using System.Diagnostics.CodeAnalysis;
 using NbtSharp.Converters;
 
@@ -65,6 +69,11 @@ internal static class NbtBuiltInConverters
 
         if (!type.IsGenericType || type.IsGenericTypeDefinition)
         {
+            if (TryCreateReflectionFallback(type, out converter))
+            {
+                return true;
+            }
+
             converter = null!;
             return false;
         }
@@ -77,26 +86,399 @@ internal static class NbtBuiltInConverters
             return true;
         }
 
-        if (definition == typeof(List<>) ||
-            definition == typeof(IReadOnlyList<>) ||
-            definition == typeof(IReadOnlyCollection<>))
+        if (IsListBacked(definition))
         {
-            converter = CreateGeneric(typeof(NbtReadOnlyCollectionConverter<,>), type, arguments[0]);
+            converter = CreateGeneric(
+                typeof(NbtListBackedCollectionConverter<,>),
+                type,
+                arguments[0]);
             return true;
         }
 
-        if ((definition == typeof(Dictionary<,>) ||
-             definition == typeof(IDictionary<,>) ||
-             definition == typeof(IReadOnlyDictionary<,>)) &&
+        if (IsSetBacked(definition))
+        {
+            converter = CreateSequence(
+                type,
+                arguments[0],
+                MakeGeneric(typeof(NbtSetBuilder<,>), type, arguments[0]));
+            return true;
+        }
+
+        if (definition == typeof(Queue<>))
+        {
+            converter = CreateSequence(
+                type,
+                arguments[0],
+                MakeGeneric(typeof(NbtQueueBuilder<>), arguments[0]));
+            return true;
+        }
+
+        if (definition == typeof(Stack<>))
+        {
+            converter = CreateSequence(
+                type,
+                arguments[0],
+                MakeGeneric(typeof(NbtStackBuilder<>), arguments[0]));
+            return true;
+        }
+
+        if (definition == typeof(LinkedList<>))
+        {
+            converter = CreateSequence(
+                type,
+                arguments[0],
+                MakeGeneric(typeof(NbtLinkedListBuilder<>), arguments[0]));
+            return true;
+        }
+
+        if (definition == typeof(Collection<>))
+        {
+            converter = CreateSequence(
+                type,
+                arguments[0],
+                MakeGeneric(typeof(NbtCollectionBuilder<>), arguments[0]));
+            return true;
+        }
+
+        if (definition == typeof(ObservableCollection<>))
+        {
+            converter = CreateSequence(
+                type,
+                arguments[0],
+                MakeGeneric(typeof(NbtObservableCollectionBuilder<>), arguments[0]));
+            return true;
+        }
+
+        if (definition == typeof(ReadOnlyCollection<>))
+        {
+            converter = CreateSequence(
+                type,
+                arguments[0],
+                MakeGeneric(typeof(NbtReadOnlyCollectionBuilder<>), arguments[0]));
+            return true;
+        }
+
+        if (definition == typeof(ImmutableArray<>))
+        {
+            converter = CreateGeneric(typeof(NbtImmutableArrayConverter<>), arguments[0]);
+            return true;
+        }
+
+        if (definition == typeof(ImmutableList<>) || definition == typeof(IImmutableList<>))
+        {
+            converter = CreateSequence(
+                type,
+                arguments[0],
+                MakeGeneric(typeof(NbtImmutableListBuilder<,>), type, arguments[0]));
+            return true;
+        }
+
+        if (definition == typeof(ImmutableHashSet<>) || definition == typeof(IImmutableSet<>))
+        {
+            converter = CreateSequence(
+                type,
+                arguments[0],
+                MakeGeneric(typeof(NbtImmutableHashSetBuilder<,>), type, arguments[0]));
+            return true;
+        }
+
+        if (definition == typeof(FrozenSet<>))
+        {
+            converter = CreateSequence(
+                type,
+                arguments[0],
+                MakeGeneric(typeof(NbtFrozenSetBuilder<>), arguments[0]));
+            return true;
+        }
+
+        if (definition == typeof(ConcurrentBag<>))
+        {
+            converter = CreateSequence(
+                type,
+                arguments[0],
+                MakeGeneric(typeof(NbtConcurrentBagBuilder<>), arguments[0]));
+            return true;
+        }
+
+        if (definition == typeof(ConcurrentQueue<>))
+        {
+            converter = CreateSequence(
+                type,
+                arguments[0],
+                MakeGeneric(typeof(NbtConcurrentQueueBuilder<>), arguments[0]));
+            return true;
+        }
+
+        if (definition == typeof(ConcurrentStack<>))
+        {
+            converter = CreateSequence(
+                type,
+                arguments[0],
+                MakeGeneric(typeof(NbtConcurrentStackBuilder<>), arguments[0]));
+            return true;
+        }
+
+        if (definition == typeof(SortedSet<>))
+        {
+            converter = CreateSequence(
+                type,
+                arguments[0],
+                MakeGeneric(typeof(NbtSortedSetBuilder<>), arguments[0]));
+            return true;
+        }
+
+        if (definition == typeof(BlockingCollection<>))
+        {
+            converter = CreateSequence(
+                type,
+                arguments[0],
+                MakeGeneric(typeof(NbtBlockingCollectionBuilder<>), arguments[0]));
+            return true;
+        }
+
+        if (definition == typeof(ImmutableQueue<>) || definition == typeof(IImmutableQueue<>))
+        {
+            converter = CreateSequence(
+                type,
+                arguments[0],
+                MakeGeneric(typeof(NbtImmutableQueueBuilder<,>), type, arguments[0]));
+            return true;
+        }
+
+        if (definition == typeof(ImmutableStack<>) || definition == typeof(IImmutableStack<>))
+        {
+            converter = CreateSequence(
+                type,
+                arguments[0],
+                MakeGeneric(typeof(NbtImmutableStackBuilder<,>), type, arguments[0]));
+            return true;
+        }
+
+        if (definition == typeof(ImmutableSortedSet<>))
+        {
+            converter = CreateSequence(
+                type,
+                arguments[0],
+                MakeGeneric(typeof(NbtImmutableSortedSetBuilder<>), arguments[0]));
+            return true;
+        }
+
+        if (IsDictionaryBacked(definition) && arguments[0] == typeof(string))
+        {
+            converter = CreateMap(
+                type,
+                arguments[1],
+                MakeGeneric(typeof(NbtDictionaryBuilder<,>), type, arguments[1]));
+            return true;
+        }
+
+        if (definition == typeof(ReadOnlyDictionary<,>) && arguments[0] == typeof(string))
+        {
+            converter = CreateMap(
+                type,
+                arguments[1],
+                MakeGeneric(typeof(NbtReadOnlyDictionaryBuilder<>), arguments[1]));
+            return true;
+        }
+
+        if ((definition == typeof(ImmutableDictionary<,>) ||
+             definition == typeof(IImmutableDictionary<,>)) &&
             arguments[0] == typeof(string))
         {
-            converter = CreateGeneric(typeof(NbtDictionaryConverter<,>), type, arguments[1]);
+            converter = CreateMap(
+                type,
+                arguments[1],
+                MakeGeneric(typeof(NbtImmutableDictionaryBuilder<,>), type, arguments[1]));
+            return true;
+        }
+
+        if (definition == typeof(FrozenDictionary<,>) && arguments[0] == typeof(string))
+        {
+            converter = CreateMap(
+                type,
+                arguments[1],
+                MakeGeneric(typeof(NbtFrozenDictionaryBuilder<>), arguments[1]));
+            return true;
+        }
+
+        if (definition == typeof(ConcurrentDictionary<,>) && arguments[0] == typeof(string))
+        {
+            converter = CreateMap(
+                type,
+                arguments[1],
+                MakeGeneric(typeof(NbtConcurrentDictionaryBuilder<>), arguments[1]));
+            return true;
+        }
+
+        if (definition == typeof(SortedDictionary<,>) && arguments[0] == typeof(string))
+        {
+            converter = CreateMap(
+                type,
+                arguments[1],
+                MakeGeneric(typeof(NbtSortedDictionaryBuilder<>), arguments[1]));
+            return true;
+        }
+
+        if (definition == typeof(SortedList<,>) && arguments[0] == typeof(string))
+        {
+            converter = CreateMap(
+                type,
+                arguments[1],
+                MakeGeneric(typeof(NbtSortedListBuilder<>), arguments[1]));
+            return true;
+        }
+
+        if (definition == typeof(ImmutableSortedDictionary<,>) &&
+            arguments[0] == typeof(string))
+        {
+            converter = CreateMap(
+                type,
+                arguments[1],
+                MakeGeneric(typeof(NbtImmutableSortedDictionaryBuilder<>), arguments[1]));
+            return true;
+        }
+
+        if (TryCreateReflectionFallback(type, out converter))
+        {
             return true;
         }
 
         converter = null!;
         return false;
     }
+
+    [RequiresUnreferencedCode("Building closed collection converters from runtime types is not trimming-safe.")]
+    [RequiresDynamicCode("Building closed collection converters from runtime types requires runtime code generation.")]
+    private static bool TryCreateReflectionFallback(Type type, out NbtConverter converter)
+    {
+        converter = null!;
+        if (type.IsInterface || type.IsAbstract || type.IsGenericTypeDefinition ||
+            type.ContainsGenericParameters)
+        {
+            return false;
+        }
+
+        if (TryGetMapTypes(type, out var valueType))
+        {
+            try
+            {
+                converter = CreateGeneric(typeof(NbtReflectionMapConverter<,>), type, valueType);
+                return true;
+            }
+            catch (Exception ex) when (ex is System.Reflection.TargetInvocationException or ArgumentException)
+            {
+                return false;
+            }
+        }
+
+        if (TryGetSequenceElementType(type, out var elementType))
+        {
+            try
+            {
+                converter = CreateGeneric(
+                    typeof(NbtReflectionSequenceConverter<,>),
+                    type,
+                    elementType);
+                return true;
+            }
+            catch (Exception ex) when (ex is System.Reflection.TargetInvocationException or ArgumentException)
+            {
+                return false;
+            }
+        }
+
+        return false;
+    }
+
+    [UnconditionalSuppressMessage("Aot", "IL2070", Justification = "Reflection is confined to the annotated reflection resolver path.")]
+    private static bool TryGetMapTypes(Type type, out Type valueType)
+    {
+        foreach (var candidate in type.GetInterfaces())
+        {
+            if (!candidate.IsGenericType)
+            {
+                continue;
+            }
+
+            var definition = candidate.GetGenericTypeDefinition();
+            if ((definition == typeof(IDictionary<,>) ||
+                 definition == typeof(IReadOnlyDictionary<,>)) &&
+                candidate.GetGenericArguments()[0] == typeof(string))
+            {
+                valueType = candidate.GetGenericArguments()[1];
+                return true;
+            }
+        }
+
+        valueType = null!;
+        return false;
+    }
+
+    [UnconditionalSuppressMessage("Aot", "IL2070", Justification = "Reflection is confined to the annotated reflection resolver path.")]
+    private static bool TryGetSequenceElementType(Type type, out Type elementType)
+    {
+        foreach (var candidate in type.GetInterfaces())
+        {
+            if (candidate.IsGenericType &&
+                candidate.GetGenericTypeDefinition() == typeof(IEnumerable<>))
+            {
+                elementType = candidate.GetGenericArguments()[0];
+                return true;
+            }
+        }
+
+        elementType = null!;
+        return false;
+    }
+
+    private static bool IsListBacked(Type definition) =>
+        definition == typeof(List<>) ||
+        definition == typeof(IEnumerable<>) ||
+        definition == typeof(ICollection<>) ||
+        definition == typeof(IList<>) ||
+        definition == typeof(IReadOnlyList<>) ||
+        definition == typeof(IReadOnlyCollection<>);
+
+    private static bool IsSetBacked(Type definition) =>
+        definition == typeof(HashSet<>) ||
+        definition == typeof(ISet<>) ||
+        definition == typeof(IReadOnlySet<>);
+
+    private static bool IsDictionaryBacked(Type definition) =>
+        definition == typeof(Dictionary<,>) ||
+        definition == typeof(IDictionary<,>) ||
+        definition == typeof(IReadOnlyDictionary<,>);
+
+    [RequiresUnreferencedCode("Building closed collection converters from runtime types is not trimming-safe.")]
+    [RequiresDynamicCode("Building closed collection converters from runtime types requires runtime code generation.")]
+    private static NbtConverter CreateSequence(
+        Type collectionType,
+        Type elementType,
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)]
+        Type builderType)
+    {
+        var converterType = typeof(NbtSequenceConverter<,,>)
+            .MakeGenericType(collectionType, elementType, builderType);
+        return (NbtConverter)Activator.CreateInstance(converterType)!;
+    }
+
+    [RequiresUnreferencedCode("Building closed collection converters from runtime types is not trimming-safe.")]
+    [RequiresDynamicCode("Building closed collection converters from runtime types requires runtime code generation.")]
+    private static NbtConverter CreateMap(
+        Type collectionType,
+        Type valueType,
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)]
+        Type builderType)
+    {
+        var converterType = typeof(NbtMapConverter<,,>)
+            .MakeGenericType(builderType, collectionType, valueType);
+        return (NbtConverter)Activator.CreateInstance(converterType)!;
+    }
+
+    [RequiresUnreferencedCode("Building closed collection converters from runtime types is not trimming-safe.")]
+    [RequiresDynamicCode("Building closed collection converters from runtime types requires runtime code generation.")]
+    private static Type MakeGeneric(Type definition, params Type[] arguments) =>
+        definition.MakeGenericType(arguments);
 
     [RequiresUnreferencedCode("Building closed collection converters from runtime types is not trimming-safe.")]
     [RequiresDynamicCode("Building closed collection converters from runtime types requires runtime code generation.")]

@@ -11,8 +11,10 @@ namespace NbtSharp.SourceGeneration;
 /// </summary>
 internal static class ReachableFingerprint
 {
-    private const string FormatVersion = "reachable-fingerprint-v4";
+    private const string FormatVersion = "reachable-fingerprint-v6";
     private const string UseConverterAttribute = "NbtSharp.NbtUseConverterAttribute";
+    private const string CollectionBuilderAttributeName =
+        "System.Runtime.CompilerServices.CollectionBuilderAttribute";
 
     private static readonly SymbolDisplayFormat FullyQualified = SymbolDisplayFormat.FullyQualifiedFormat;
 
@@ -75,6 +77,7 @@ internal static class ReachableFingerprint
         AddAssemblyIdentity(ref hash, type);
         AddDeclarationHashes(ref hash, type);
         AddAttributes(ref hash, type);
+        AddCollectionBuilderTypes(type, pending);
 
         switch (type)
         {
@@ -115,11 +118,6 @@ internal static class ReachableFingerprint
             return;
         }
 
-        if (IsStoppedType(named))
-        {
-            return;
-        }
-
         if (named.IsGenericType)
         {
             foreach (var argument in named.TypeArguments)
@@ -133,7 +131,12 @@ internal static class ReachableFingerprint
             }
         }
 
-        if (IsCollectionShape(named))
+        if (IsCollectionType(named))
+        {
+            return;
+        }
+
+        if (IsStoppedType(named))
         {
             return;
         }
@@ -269,6 +272,48 @@ internal static class ReachableFingerprint
         hash.Add(Convert.ToString(constant.Value, CultureInfo.InvariantCulture));
     }
 
+    private static bool IsCollectionType(INamedTypeSymbol named) =>
+        CollectionShapeClassifier.IsCollectionOrMap(named) ||
+        CollectionPatterns.TryGetMapTypes(named, out _, out _) ||
+        CollectionPatterns.TryGetSequenceElementType(named, out _);
+
+    private static void AddCollectionBuilderTypes(
+        ITypeSymbol type,
+        Stack<ITypeSymbol> pending)
+    {
+        if (type is not INamedTypeSymbol named)
+        {
+            return;
+        }
+
+        var hasAttribute = false;
+        foreach (var attribute in type.GetAttributes())
+        {
+            if (attribute.AttributeClass?.ToDisplayString() != CollectionBuilderAttributeName)
+            {
+                continue;
+            }
+
+            hasAttribute = true;
+            if (attribute.ConstructorArguments.Length >= 1 &&
+                attribute.ConstructorArguments[0].Value is ITypeSymbol builderType)
+            {
+                pending.Push(builderType);
+            }
+
+            break;
+        }
+
+        if (!hasAttribute && IsCollectionType(named))
+        {
+            var companion = CollectionPatterns.FindCompanionType(named.OriginalDefinition);
+            if (companion is not null)
+            {
+                pending.Push(companion);
+            }
+        }
+    }
+
     private static void AddExplicitConverterType(ISymbol symbol, Stack<ITypeSymbol> pending)
     {
         foreach (var attribute in symbol.GetAttributes())
@@ -336,23 +381,6 @@ internal static class ReachableFingerprint
         }
     }
 
-    private static bool IsCollectionShape(INamedTypeSymbol named)
-    {
-        if (!named.IsGenericType)
-        {
-            return false;
-        }
-
-        var definition = named.OriginalDefinition;
-        return IsNamed(definition, "System", "Nullable", 1) ||
-               IsNamed(definition, "System.Collections.Generic", "List", 1) ||
-               IsNamed(definition, "System.Collections.Generic", "IReadOnlyList", 1) ||
-               IsNamed(definition, "System.Collections.Generic", "IReadOnlyCollection", 1) ||
-               IsNamed(definition, "System.Collections.Generic", "Dictionary", 2) ||
-               IsNamed(definition, "System.Collections.Generic", "IDictionary", 2) ||
-               IsNamed(definition, "System.Collections.Generic", "IReadOnlyDictionary", 2);
-    }
-
     private static bool IsStoppedType(INamedTypeSymbol named)
     {
         if (named.SpecialType != SpecialType.None)
@@ -386,9 +414,4 @@ internal static class ReachableFingerprint
             "global::System.Half" or
             "global::System.Numerics.BigInteger";
     }
-
-    private static bool IsNamed(INamedTypeSymbol type, string ns, string name, int arity) =>
-        type.Name == name &&
-        type.Arity == arity &&
-        type.ContainingNamespace?.ToDisplayString() == ns;
 }

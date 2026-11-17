@@ -1,3 +1,6 @@
+using System.Collections.Frozen;
+using System.Collections.Immutable;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
 using NbtSharp.Converters;
@@ -19,23 +22,157 @@ public static class NbtMetadataServices
     public static NbtConverter<TElement[]> CreateArrayConverter<TElement>() =>
         new NbtArrayConverter<TElement>();
 
+    /// <summary>Creates a converter backed by a generated sequence builder.</summary>
+    /// <typeparam name="TCollection">The declared collection type.</typeparam>
+    /// <typeparam name="TElement">The element type.</typeparam>
+    /// <typeparam name="TBuilder">The builder type implemented by generated code.</typeparam>
+    /// <returns>The converter.</returns>
+    public static NbtConverter<TCollection> CreateSequenceConverter<TCollection, TElement, TBuilder>()
+        where TCollection : IEnumerable<TElement>
+        where TBuilder : struct, INbtSequenceBuilder<TCollection, TElement> =>
+        new NbtSequenceConverter<TCollection, TElement, TBuilder>();
+
+    /// <summary>Creates a converter backed by a generated map builder.</summary>
+    /// <typeparam name="TCollection">The declared dictionary type.</typeparam>
+    /// <typeparam name="TValue">The value type.</typeparam>
+    /// <typeparam name="TBuilder">The builder type implemented by generated code.</typeparam>
+    /// <returns>The converter.</returns>
+    public static NbtConverter<TCollection> CreateMapConverter<TCollection, TValue, TBuilder>()
+        where TCollection : IEnumerable<KeyValuePair<string, TValue>>
+        where TBuilder : struct, INbtMapBuilder<TCollection, TValue> =>
+        new NbtMapConverter<TBuilder, TCollection, TValue>();
+
+    /// <summary>Creates a converter for a list-backed collection or collection interface.</summary>
+    /// <typeparam name="TCollection">The declared collection type.</typeparam>
+    /// <typeparam name="TElement">The element type.</typeparam>
+    /// <returns>The converter.</returns>
+    public static NbtConverter<TCollection> CreateListBackedCollectionConverter<TCollection, TElement>()
+        where TCollection : IEnumerable<TElement> =>
+        new NbtListBackedCollectionConverter<TCollection, TElement>();
+
     /// <summary>Creates a converter for <see cref="List{T}"/>.</summary>
     /// <typeparam name="TElement">The element type.</typeparam>
     /// <returns>The converter.</returns>
     public static NbtConverter<List<TElement>> CreateListConverter<TElement>() =>
-        new NbtReadOnlyCollectionConverter<List<TElement>, TElement>();
+        new NbtListBackedCollectionConverter<List<TElement>, TElement>();
 
     /// <summary>Creates a converter for <see cref="IReadOnlyList{T}"/>.</summary>
     /// <typeparam name="TElement">The element type.</typeparam>
     /// <returns>The converter.</returns>
     public static NbtConverter<IReadOnlyList<TElement>> CreateReadOnlyListConverter<TElement>() =>
-        new NbtReadOnlyCollectionConverter<IReadOnlyList<TElement>, TElement>();
+        new NbtListBackedCollectionConverter<IReadOnlyList<TElement>, TElement>();
 
     /// <summary>Creates a converter for <see cref="IReadOnlyCollection{T}"/>.</summary>
     /// <typeparam name="TElement">The element type.</typeparam>
     /// <returns>The converter.</returns>
     public static NbtConverter<IReadOnlyCollection<TElement>> CreateReadOnlyCollectionConverter<TElement>() =>
-        new NbtReadOnlyCollectionConverter<IReadOnlyCollection<TElement>, TElement>();
+        new NbtListBackedCollectionConverter<IReadOnlyCollection<TElement>, TElement>();
+
+    /// <summary>Creates a converter for a hash-set-backed collection or set interface.</summary>
+    /// <typeparam name="TCollection">The declared collection type.</typeparam>
+    /// <typeparam name="TElement">The element type.</typeparam>
+    /// <returns>The converter.</returns>
+    public static NbtConverter<TCollection> CreateSetBackedCollectionConverter<TCollection, TElement>()
+        where TCollection : IEnumerable<TElement> =>
+        new NbtSequenceConverter<TCollection, TElement, NbtSetBuilder<TCollection, TElement>>();
+
+    /// <summary>Creates a converter for <see cref="Queue{T}"/>.</summary>
+    /// <typeparam name="TElement">The element type.</typeparam>
+    /// <returns>The converter.</returns>
+    public static NbtConverter<Queue<TElement>> CreateQueueConverter<TElement>() =>
+        new NbtSequenceConverter<Queue<TElement>, TElement, NbtQueueBuilder<TElement>>();
+
+    /// <summary>Creates a converter for <see cref="Stack{T}"/>.</summary>
+    /// <typeparam name="TElement">The element type.</typeparam>
+    /// <returns>The converter.</returns>
+    public static NbtConverter<Stack<TElement>> CreateStackConverter<TElement>() =>
+        new NbtSequenceConverter<Stack<TElement>, TElement, NbtStackBuilder<TElement>>();
+
+    /// <summary>Creates a converter for <see cref="LinkedList{T}"/>.</summary>
+    /// <typeparam name="TElement">The element type.</typeparam>
+    /// <returns>The converter.</returns>
+    public static NbtConverter<LinkedList<TElement>> CreateLinkedListConverter<TElement>() =>
+        new NbtSequenceConverter<LinkedList<TElement>, TElement, NbtLinkedListBuilder<TElement>>();
+
+    /// <summary>Creates a converter for <see cref="Collection{T}"/>.</summary>
+    /// <typeparam name="TElement">The element type.</typeparam>
+    /// <returns>The converter.</returns>
+    public static NbtConverter<Collection<TElement>> CreateCollectionConverter<TElement>() =>
+        new NbtSequenceConverter<Collection<TElement>, TElement, NbtCollectionBuilder<TElement>>();
+
+    /// <summary>Creates a converter for <see cref="ObservableCollection{T}"/>.</summary>
+    /// <typeparam name="TElement">The element type.</typeparam>
+    /// <returns>The converter.</returns>
+    public static NbtConverter<ObservableCollection<TElement>> CreateObservableCollectionConverter<TElement>() =>
+        new NbtSequenceConverter<
+            ObservableCollection<TElement>,
+            TElement,
+            NbtObservableCollectionBuilder<TElement>>();
+
+    /// <summary>Creates a converter for <see cref="ReadOnlyCollection{T}"/>.</summary>
+    /// <typeparam name="TElement">The element type.</typeparam>
+    /// <returns>The converter.</returns>
+    public static NbtConverter<ReadOnlyCollection<TElement>> CreateReadOnlyCollectionWrapperConverter<TElement>() =>
+        new NbtSequenceConverter<
+            ReadOnlyCollection<TElement>,
+            TElement,
+            NbtReadOnlyCollectionBuilder<TElement>>();
+
+    /// <summary>Creates a converter for <see cref="ImmutableArray{T}"/>.</summary>
+    /// <typeparam name="TElement">The element type.</typeparam>
+    /// <returns>The converter.</returns>
+    public static NbtConverter<ImmutableArray<TElement>> CreateImmutableArrayConverter<TElement>() =>
+        new NbtImmutableArrayConverter<TElement>();
+
+    /// <summary>Creates a converter for an immutable list or immutable-list interface.</summary>
+    /// <typeparam name="TCollection">The declared collection type.</typeparam>
+    /// <typeparam name="TElement">The element type.</typeparam>
+    /// <returns>The converter.</returns>
+    public static NbtConverter<TCollection> CreateImmutableListConverter<TCollection, TElement>()
+        where TCollection : IEnumerable<TElement> =>
+        new NbtSequenceConverter<
+            TCollection,
+            TElement,
+            NbtImmutableListBuilder<TCollection, TElement>>();
+
+    /// <summary>Creates a converter for an immutable hash set or immutable-set interface.</summary>
+    /// <typeparam name="TCollection">The declared collection type.</typeparam>
+    /// <typeparam name="TElement">The element type.</typeparam>
+    /// <returns>The converter.</returns>
+    public static NbtConverter<TCollection> CreateImmutableHashSetConverter<TCollection, TElement>()
+        where TCollection : IEnumerable<TElement> =>
+        new NbtSequenceConverter<
+            TCollection,
+            TElement,
+            NbtImmutableHashSetBuilder<TCollection, TElement>>();
+
+    /// <summary>Creates a converter for an immutable queue or immutable-queue interface.</summary>
+    /// <typeparam name="TCollection">The declared collection type.</typeparam>
+    /// <typeparam name="TElement">The element type.</typeparam>
+    /// <returns>The converter.</returns>
+    public static NbtConverter<TCollection> CreateImmutableQueueConverter<TCollection, TElement>()
+        where TCollection : IEnumerable<TElement> =>
+        new NbtSequenceConverter<
+            TCollection,
+            TElement,
+            NbtImmutableQueueBuilder<TCollection, TElement>>();
+
+    /// <summary>Creates a converter for an immutable stack or immutable-stack interface.</summary>
+    /// <typeparam name="TCollection">The declared collection type.</typeparam>
+    /// <typeparam name="TElement">The element type.</typeparam>
+    /// <returns>The converter.</returns>
+    public static NbtConverter<TCollection> CreateImmutableStackConverter<TCollection, TElement>()
+        where TCollection : IEnumerable<TElement> =>
+        new NbtSequenceConverter<
+            TCollection,
+            TElement,
+            NbtImmutableStackBuilder<TCollection, TElement>>();
+
+    /// <summary>Creates a converter for <see cref="FrozenSet{T}"/>.</summary>
+    /// <typeparam name="TElement">The element type.</typeparam>
+    /// <returns>The converter.</returns>
+    public static NbtConverter<FrozenSet<TElement>> CreateFrozenSetConverter<TElement>() =>
+        new NbtSequenceConverter<FrozenSet<TElement>, TElement, NbtFrozenSetBuilder<TElement>>();
 
     /// <summary>Creates a converter for a nullable value type.</summary>
     /// <typeparam name="T">The underlying value type.</typeparam>
@@ -44,17 +181,34 @@ public static class NbtMetadataServices
         where T : struct =>
         new NbtNullableConverter<T>();
 
+    /// <summary>Creates a converter for a dictionary-backed map or dictionary interface.</summary>
+    /// <typeparam name="TCollection">The declared dictionary type.</typeparam>
+    /// <typeparam name="TValue">The value type.</typeparam>
+    /// <returns>The converter.</returns>
+    public static NbtConverter<TCollection> CreateDictionaryBackedConverter<TCollection, TValue>()
+        where TCollection : IEnumerable<KeyValuePair<string, TValue>> =>
+        new NbtMapConverter<
+            NbtDictionaryBuilder<TCollection, TValue>,
+            TCollection,
+            TValue>();
+
     /// <summary>Creates a converter for <see cref="Dictionary{TKey,TValue}"/> with string keys.</summary>
     /// <typeparam name="TValue">The dictionary value type.</typeparam>
     /// <returns>The converter.</returns>
     public static NbtConverter<Dictionary<string, TValue>> CreateDictionaryConverter<TValue>() =>
-        new NbtDictionaryConverter<Dictionary<string, TValue>, TValue>();
+        new NbtMapConverter<
+            NbtDictionaryBuilder<Dictionary<string, TValue>, TValue>,
+            Dictionary<string, TValue>,
+            TValue>();
 
     /// <summary>Creates a converter for <see cref="IDictionary{TKey,TValue}"/> with string keys.</summary>
     /// <typeparam name="TValue">The dictionary value type.</typeparam>
     /// <returns>The converter.</returns>
     public static NbtConverter<IDictionary<string, TValue>> CreateIDictionaryConverter<TValue>() =>
-        new NbtDictionaryConverter<IDictionary<string, TValue>, TValue>();
+        new NbtMapConverter<
+            NbtDictionaryBuilder<IDictionary<string, TValue>, TValue>,
+            IDictionary<string, TValue>,
+            TValue>();
 
     /// <summary>
     /// Creates a converter for <see cref="IReadOnlyDictionary{TKey,TValue}"/> with string keys.
@@ -62,7 +216,39 @@ public static class NbtMetadataServices
     /// <typeparam name="TValue">The dictionary value type.</typeparam>
     /// <returns>The converter.</returns>
     public static NbtConverter<IReadOnlyDictionary<string, TValue>> CreateIReadOnlyDictionaryConverter<TValue>() =>
-        new NbtDictionaryConverter<IReadOnlyDictionary<string, TValue>, TValue>();
+        new NbtMapConverter<
+            NbtDictionaryBuilder<IReadOnlyDictionary<string, TValue>, TValue>,
+            IReadOnlyDictionary<string, TValue>,
+            TValue>();
+
+    /// <summary>Creates a converter for <see cref="ReadOnlyDictionary{TKey,TValue}"/>.</summary>
+    /// <typeparam name="TValue">The dictionary value type.</typeparam>
+    /// <returns>The converter.</returns>
+    public static NbtConverter<ReadOnlyDictionary<string, TValue>> CreateReadOnlyDictionaryConverter<TValue>() =>
+        new NbtMapConverter<
+            NbtReadOnlyDictionaryBuilder<TValue>,
+            ReadOnlyDictionary<string, TValue>,
+            TValue>();
+
+    /// <summary>Creates a converter for an immutable dictionary or dictionary interface.</summary>
+    /// <typeparam name="TCollection">The declared dictionary type.</typeparam>
+    /// <typeparam name="TValue">The dictionary value type.</typeparam>
+    /// <returns>The converter.</returns>
+    public static NbtConverter<TCollection> CreateImmutableDictionaryConverter<TCollection, TValue>()
+        where TCollection : IEnumerable<KeyValuePair<string, TValue>> =>
+        new NbtMapConverter<
+            NbtImmutableDictionaryBuilder<TCollection, TValue>,
+            TCollection,
+            TValue>();
+
+    /// <summary>Creates a converter for <see cref="FrozenDictionary{TKey,TValue}"/>.</summary>
+    /// <typeparam name="TValue">The dictionary value type.</typeparam>
+    /// <returns>The converter.</returns>
+    public static NbtConverter<FrozenDictionary<string, TValue>> CreateFrozenDictionaryConverter<TValue>() =>
+        new NbtMapConverter<
+            NbtFrozenDictionaryBuilder<TValue>,
+            FrozenDictionary<string, TValue>,
+            TValue>();
 
     /// <summary>Reads one value and attaches <paramref name="pathSegment"/> to failures.</summary>
     /// <typeparam name="T">The value type.</typeparam>

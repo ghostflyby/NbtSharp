@@ -1,3 +1,6 @@
+using System.Collections.Frozen;
+using System.Collections.Immutable;
+using System.Collections.ObjectModel;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 
@@ -86,6 +89,119 @@ internal static class NbtCollectionReader
 
         ReadListEnd(ref reader);
         return elements;
+    }
+
+    /// <summary>
+    /// Reads a list into a collection produced by <typeparamref name="TBuilder"/>.
+    /// </summary>
+    public static TCollection ReadCollection<TBuilder, TCollection, TElement>(
+        ref NbtReader reader,
+        NbtSerializerOptions options)
+        where TCollection : IEnumerable<TElement>
+        where TBuilder : struct, INbtSequenceBuilder<TCollection, TElement>
+    {
+        var count = ValidateListStart<TElement>(ref reader, options);
+        var builder = default(TBuilder);
+        builder.Create(count);
+        if (count > 0)
+        {
+            var converter = options.GetConverter(typeof(TElement));
+            var typedConverter = converter as NbtConverter<TElement>;
+            for (var index = 0; index < count; index++)
+            {
+                builder.Add(
+                    ReadElement(
+                        ref reader,
+                        options,
+                        converter,
+                        typedConverter,
+                        index));
+            }
+        }
+
+        ReadListEnd(ref reader);
+        return builder.Complete();
+    }
+
+    /// <summary>
+    /// Reads a compound into a string-keyed dictionary.
+    /// </summary>
+    public static Dictionary<string, TValue> ReadMap<TValue>(
+        ref NbtReader reader,
+        NbtSerializerOptions options)
+    {
+        if (reader.TokenType != NbtTokenType.StartCompound)
+        {
+            throw new NbtException(
+                $"Expected TAG_Compound but the current token is {reader.TokenType} ({reader.TagType}).")
+            {
+                BytePosition = reader.BytesConsumed,
+                ExpectedTagType = NbtTagType.Compound,
+                ActualTagType = reader.TagType,
+            };
+        }
+
+        var dictionary = new Dictionary<string, TValue>(StringComparer.Ordinal);
+        NbtConverter? converter = null;
+        NbtConverter<TValue>? typedConverter = null;
+        while (reader.Read())
+        {
+            if (reader.TokenType == NbtTokenType.EndCompound)
+            {
+                return dictionary;
+            }
+
+            var name = reader.Name;
+            if (name is null)
+            {
+                throw new NbtException("A compound member has no name.")
+                {
+                    BytePosition = reader.BytesConsumed,
+                };
+            }
+
+            if (options.RejectDuplicateCompoundNames && dictionary.ContainsKey(name))
+            {
+                throw new NbtException($"The compound contains the duplicate member '{name}'.")
+                {
+                    BytePosition = reader.BytesConsumed,
+                    Path = "." + name,
+                };
+            }
+
+            if (converter is null)
+            {
+                converter = options.GetConverter(typeof(TValue));
+                typedConverter = converter as NbtConverter<TValue>;
+            }
+
+            try
+            {
+                dictionary[name] = typedConverter is not null
+                    ? NbtSerializer.DeserializeValueCore(
+                        ref reader,
+                        typedConverter,
+                        options,
+                        pathSegment: null)
+                    : (TValue)NbtSerializer.DeserializeValueCore(
+                        ref reader,
+                        typeof(TValue),
+                        converter,
+                        options,
+                        pathSegment: null)!;
+            }
+            catch (NbtException ex)
+            {
+                NbtSerializer.PrependPath(ex, "." + name);
+                throw;
+            }
+        }
+
+        throw new NbtException("The compound was not terminated.")
+        {
+            IsTruncated = true,
+            BytePosition = reader.BytesConsumed,
+        };
     }
 
     private static bool IsFixedWidthListElement(NbtTagType elementType) =>
@@ -331,8 +447,26 @@ internal static class NbtCollectionReader
             }
 
             if (definition == typeof(List<>) ||
+                definition == typeof(IEnumerable<>) ||
+                definition == typeof(ICollection<>) ||
+                definition == typeof(IList<>) ||
                 definition == typeof(IReadOnlyList<>) ||
-                definition == typeof(IReadOnlyCollection<>))
+                definition == typeof(IReadOnlyCollection<>) ||
+                definition == typeof(HashSet<>) ||
+                definition == typeof(ISet<>) ||
+                definition == typeof(IReadOnlySet<>) ||
+                definition == typeof(Queue<>) ||
+                definition == typeof(Stack<>) ||
+                definition == typeof(LinkedList<>) ||
+                definition == typeof(Collection<>) ||
+                definition == typeof(ObservableCollection<>) ||
+                definition == typeof(ReadOnlyCollection<>) ||
+                definition == typeof(ImmutableArray<>) ||
+                definition == typeof(ImmutableList<>) ||
+                definition == typeof(IImmutableList<>) ||
+                definition == typeof(ImmutableHashSet<>) ||
+                definition == typeof(IImmutableSet<>) ||
+                definition == typeof(FrozenSet<>))
             {
                 tagType = NbtTagType.List;
                 return true;
@@ -340,7 +474,11 @@ internal static class NbtCollectionReader
 
             if ((definition == typeof(Dictionary<,>) ||
                  definition == typeof(IDictionary<,>) ||
-                 definition == typeof(IReadOnlyDictionary<,>)) &&
+                 definition == typeof(IReadOnlyDictionary<,>) ||
+                 definition == typeof(ReadOnlyDictionary<,>) ||
+                 definition == typeof(ImmutableDictionary<,>) ||
+                 definition == typeof(IImmutableDictionary<,>) ||
+                 definition == typeof(FrozenDictionary<,>)) &&
                 arguments[0] == typeof(string))
             {
                 tagType = NbtTagType.Compound;

@@ -35,6 +35,15 @@ NbtSharp.NbtUseConverterAttribute
 NbtSharp.NbtUseConverterAttribute.ConverterType.get -> System.Type?
 NbtSharp.NbtUseConverterAttribute.NbtUseConverterAttribute() -> void
 NbtSharp.NbtUseConverterAttribute.NbtUseConverterAttribute(System.Type! converterType) -> void
+NbtSharp.INbtMapBuilder<TCollection, TValue>
+NbtSharp.INbtMapBuilder<TCollection, TValue>.Add(string! key, TValue value) -> void
+NbtSharp.INbtMapBuilder<TCollection, TValue>.Complete() -> TCollection
+NbtSharp.INbtMapBuilder<TCollection, TValue>.ContainsKey(string! key) -> bool
+NbtSharp.INbtMapBuilder<TCollection, TValue>.Create() -> void
+NbtSharp.INbtSequenceBuilder<TCollection, TElement>
+NbtSharp.INbtSequenceBuilder<TCollection, TElement>.Add(TElement element) -> void
+NbtSharp.INbtSequenceBuilder<TCollection, TElement>.Complete() -> TCollection
+NbtSharp.INbtSequenceBuilder<TCollection, TElement>.Create(int count) -> void
 NbtSharp.NbtReader.BytesConsumed.get -> long
 NbtSharp.NbtReader.CurrentDepth.get -> int
 NbtSharp.NbtReader.GetByteArray() -> byte[]!
@@ -264,13 +273,33 @@ NbtSharp.NbtTypeInfo.Options.get -> NbtSharp.NbtSerializerOptions!
 NbtSharp.NbtTypeInfo<T>.NbtTypeInfo(NbtSharp.NbtConverter<T>! converter, NbtSharp.NbtSerializerOptions? options) -> void
 static NbtSharp.NbtMetadataServices.CompoundNotTerminated(NbtSharp.NbtReader reader) -> NbtSharp.NbtException!
 static NbtSharp.NbtMetadataServices.CreateArrayConverter<TElement>() -> NbtSharp.NbtConverter<TElement[]!>!
+static NbtSharp.NbtMetadataServices.CreateCollectionConverter<TElement>() -> NbtSharp.NbtConverter<System.Collections.ObjectModel.Collection<TElement>!>!
+static NbtSharp.NbtMetadataServices.CreateDictionaryBackedConverter<TCollection, TValue>() -> NbtSharp.NbtConverter<TCollection>!
 static NbtSharp.NbtMetadataServices.CreateDictionaryConverter<TValue>() -> NbtSharp.NbtConverter<System.Collections.Generic.Dictionary<string!, TValue>!>!
+static NbtSharp.NbtMetadataServices.CreateFrozenDictionaryConverter<TValue>() -> NbtSharp.NbtConverter<System.Collections.Frozen.FrozenDictionary<string!, TValue>!>!
+static NbtSharp.NbtMetadataServices.CreateFrozenSetConverter<TElement>() -> NbtSharp.NbtConverter<System.Collections.Frozen.FrozenSet<TElement>!>!
 static NbtSharp.NbtMetadataServices.CreateIDictionaryConverter<TValue>() -> NbtSharp.NbtConverter<System.Collections.Generic.IDictionary<string!, TValue>!>!
 static NbtSharp.NbtMetadataServices.CreateIReadOnlyDictionaryConverter<TValue>() -> NbtSharp.NbtConverter<System.Collections.Generic.IReadOnlyDictionary<string!, TValue>!>!
+static NbtSharp.NbtMetadataServices.CreateImmutableArrayConverter<TElement>() -> NbtSharp.NbtConverter<System.Collections.Immutable.ImmutableArray<TElement>>!
+static NbtSharp.NbtMetadataServices.CreateImmutableDictionaryConverter<TCollection, TValue>() -> NbtSharp.NbtConverter<TCollection>!
+static NbtSharp.NbtMetadataServices.CreateImmutableHashSetConverter<TCollection, TElement>() -> NbtSharp.NbtConverter<TCollection>!
+static NbtSharp.NbtMetadataServices.CreateImmutableListConverter<TCollection, TElement>() -> NbtSharp.NbtConverter<TCollection>!
+static NbtSharp.NbtMetadataServices.CreateImmutableQueueConverter<TCollection, TElement>() -> NbtSharp.NbtConverter<TCollection>!
+static NbtSharp.NbtMetadataServices.CreateImmutableStackConverter<TCollection, TElement>() -> NbtSharp.NbtConverter<TCollection>!
+static NbtSharp.NbtMetadataServices.CreateLinkedListConverter<TElement>() -> NbtSharp.NbtConverter<System.Collections.Generic.LinkedList<TElement>!>!
+static NbtSharp.NbtMetadataServices.CreateListBackedCollectionConverter<TCollection, TElement>() -> NbtSharp.NbtConverter<TCollection>!
+static NbtSharp.NbtMetadataServices.CreateMapConverter<TCollection, TValue, TBuilder>() -> NbtSharp.NbtConverter<TCollection>!
 static NbtSharp.NbtMetadataServices.CreateListConverter<TElement>() -> NbtSharp.NbtConverter<System.Collections.Generic.List<TElement>!>!
 static NbtSharp.NbtMetadataServices.CreateNullableConverter<T>() -> NbtSharp.NbtConverter<T?>!
+static NbtSharp.NbtMetadataServices.CreateObservableCollectionConverter<TElement>() -> NbtSharp.NbtConverter<System.Collections.ObjectModel.ObservableCollection<TElement>!>!
+static NbtSharp.NbtMetadataServices.CreateQueueConverter<TElement>() -> NbtSharp.NbtConverter<System.Collections.Generic.Queue<TElement>!>!
 static NbtSharp.NbtMetadataServices.CreateReadOnlyCollectionConverter<TElement>() -> NbtSharp.NbtConverter<System.Collections.Generic.IReadOnlyCollection<TElement>!>!
+static NbtSharp.NbtMetadataServices.CreateReadOnlyCollectionWrapperConverter<TElement>() -> NbtSharp.NbtConverter<System.Collections.ObjectModel.ReadOnlyCollection<TElement>!>!
+static NbtSharp.NbtMetadataServices.CreateReadOnlyDictionaryConverter<TValue>() -> NbtSharp.NbtConverter<System.Collections.ObjectModel.ReadOnlyDictionary<string!, TValue>!>!
 static NbtSharp.NbtMetadataServices.CreateReadOnlyListConverter<TElement>() -> NbtSharp.NbtConverter<System.Collections.Generic.IReadOnlyList<TElement>!>!
+static NbtSharp.NbtMetadataServices.CreateSetBackedCollectionConverter<TCollection, TElement>() -> NbtSharp.NbtConverter<TCollection>!
+static NbtSharp.NbtMetadataServices.CreateSequenceConverter<TCollection, TElement, TBuilder>() -> NbtSharp.NbtConverter<TCollection>!
+static NbtSharp.NbtMetadataServices.CreateStackConverter<TElement>() -> NbtSharp.NbtConverter<System.Collections.Generic.Stack<TElement>!>!
 static NbtSharp.NbtMetadataServices.DuplicateMember(NbtSharp.NbtReader reader, string! name) -> NbtSharp.NbtException!
 static NbtSharp.NbtMetadataServices.ExpectedTag(NbtSharp.NbtReader reader, NbtSharp.NbtTagType expected) -> NbtSharp.NbtException!
 static NbtSharp.NbtMetadataServices.MissingMemberName(NbtSharp.NbtReader reader) -> NbtSharp.NbtException!

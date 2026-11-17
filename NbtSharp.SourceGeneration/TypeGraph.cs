@@ -7,13 +7,9 @@ internal enum TypeEntryKind
 {
     Object,
     Array,
-    List,
-    ReadOnlyList,
-    ReadOnlyCollection,
     Nullable,
-    Dictionary,
-    IDictionary,
-    IReadOnlyDictionary,
+    Collection,
+    Map,
     Enum,
 }
 
@@ -35,6 +31,8 @@ internal sealed class TypeEntry
 
     public string ConverterName { get; set; } = "";
 
+    public string? BuilderName { get; set; }
+
     public string? PublicPropertyName { get; set; }
 
     public bool IsRoot { get; set; }
@@ -43,7 +41,13 @@ internal sealed class TypeEntry
 
     public ITypeSymbol? ElementType { get; set; }
 
+    public CollectionShape CollectionShape { get; set; }
+
+    public GeneratedBuilderSpec? GeneratedBuilder { get; set; }
+
     public ITypeSymbol? ValueType { get; set; }
+
+    public MapShape MapShape { get; set; }
 
     public ITypeSymbol? UnderlyingType { get; set; }
 }
@@ -266,28 +270,7 @@ internal sealed class TypeGraph
                 return nullableEntry;
             }
 
-            if (IsNamed(definition, "System.Collections.Generic", "List", 1) ||
-                IsNamed(definition, "System.Collections.Generic", "IReadOnlyList", 1) ||
-                IsNamed(definition, "System.Collections.Generic", "IReadOnlyCollection", 1))
-            {
-                var kind = IsNamed(definition, "System.Collections.Generic", "List", 1)
-                    ? TypeEntryKind.List
-                    : IsNamed(definition, "System.Collections.Generic", "IReadOnlyList", 1)
-                        ? TypeEntryKind.ReadOnlyList
-                        : TypeEntryKind.ReadOnlyCollection;
-                var element = named.TypeArguments[0];
-                var collectionEntry = new TypeEntry(type, kind)
-                {
-                    ElementType = element,
-                };
-                Register(collectionEntry);
-                AddType(element, location, $"element type of {type.ToDisplayString(FullyQualified)}");
-                return collectionEntry;
-            }
-
-            if (IsNamed(definition, "System.Collections.Generic", "Dictionary", 2) ||
-                IsNamed(definition, "System.Collections.Generic", "IDictionary", 2) ||
-                IsNamed(definition, "System.Collections.Generic", "IReadOnlyDictionary", 2))
+            if (CollectionShapeClassifier.TryGetMap(definition, out var mapShape))
             {
                 if (named.TypeArguments[0].SpecialType != SpecialType.System_String)
                 {
@@ -300,19 +283,96 @@ internal sealed class TypeGraph
                     return null;
                 }
 
-                var kind = IsNamed(definition, "System.Collections.Generic", "Dictionary", 2)
-                    ? TypeEntryKind.Dictionary
-                    : IsNamed(definition, "System.Collections.Generic", "IDictionary", 2)
-                        ? TypeEntryKind.IDictionary
-                        : TypeEntryKind.IReadOnlyDictionary;
                 var value = named.TypeArguments[1];
-                var dictionaryEntry = new TypeEntry(type, kind)
+                var mapEntry = new TypeEntry(type, TypeEntryKind.Map)
                 {
+                    MapShape = mapShape,
                     ValueType = value,
                 };
-                Register(dictionaryEntry);
+                Register(mapEntry);
                 AddType(value, location, $"value type of {type.ToDisplayString(FullyQualified)}");
-                return dictionaryEntry;
+                return mapEntry;
+            }
+
+            if (CollectionShapeClassifier.TryGetSequence(definition, out var collectionShape))
+            {
+                var element = named.TypeArguments[0];
+                var collectionEntry = new TypeEntry(type, TypeEntryKind.Collection)
+                {
+                    CollectionShape = collectionShape,
+                    ElementType = element,
+                };
+                Register(collectionEntry);
+                AddType(element, location, $"element type of {type.ToDisplayString(FullyQualified)}");
+                return collectionEntry;
+            }
+        }
+
+        if (named.TypeKind is TypeKind.Class or TypeKind.Struct && !named.IsAbstract)
+        {
+            if (CollectionPatterns.TryGetMapTypes(named, out var keyType, out var valueType))
+            {
+                if (keyType.SpecialType != SpecialType.System_String)
+                {
+                    Report(
+                        Diagnostics.UnsupportedType,
+                        location,
+                        type.ToDisplayString(FullyQualified),
+                        "has a dictionary key type other than string");
+                    HasErrors = true;
+                    return null;
+                }
+
+                var builder = CollectionPatterns.TryCreateMap(
+                    named,
+                    valueType,
+                    _contextAssembly);
+                if (builder is null)
+                {
+                    Report(
+                        Diagnostics.UnsupportedCollection,
+                        location,
+                        type.ToDisplayString(FullyQualified));
+                    HasErrors = true;
+                    return null;
+                }
+
+                var mapEntry = new TypeEntry(type, TypeEntryKind.Map)
+                {
+                    MapShape = MapShape.Generated,
+                    ValueType = valueType,
+                    GeneratedBuilder = builder,
+                };
+                Register(mapEntry);
+                AddType(valueType, location, $"value type of {type.ToDisplayString(FullyQualified)}");
+                return mapEntry;
+            }
+
+            if (CollectionPatterns.TryGetSequenceElementType(named, out var elementType))
+            {
+                var builder = CollectionPatterns.TryCreateSequence(
+                    named,
+                    elementType,
+                    _contextAssembly);
+                if (builder is null)
+                {
+                    Report(
+                        Diagnostics.UnsupportedCollection,
+                        location,
+                        type.ToDisplayString(FullyQualified));
+                    HasErrors = true;
+                    return null;
+                }
+
+                var collectionEntry = new TypeEntry(type, TypeEntryKind.Collection)
+                {
+                    CollectionShape = CollectionShape.Generated,
+                    ElementType = elementType,
+                    GeneratedBuilder = builder,
+                };
+                Register(collectionEntry);
+                AddType(elementType, location, $"element type of {type.ToDisplayString(FullyQualified)}");
+                return collectionEntry;
             }
         }
 

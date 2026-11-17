@@ -434,6 +434,175 @@ public sealed class NbtSourceGeneratorTests
     }
 
     [Fact]
+    public void RebuildsGraphWhenInterfaceElementTypeChanges()
+    {
+        var parseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
+        var contextTree = CSharpSyntaxTree.ParseText(
+            """
+            using System.Collections.Generic;
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+            """,
+            parseOptions,
+            cancellationToken: TestContext.Current.CancellationToken);
+        var dtoTree = CSharpSyntaxTree.ParseText(
+            """
+            using System.Collections.Generic;
+
+            internal sealed class Player
+            {
+                public IReadOnlyList<Item> Items { get; set; } = [];
+            }
+            """,
+            parseOptions,
+            cancellationToken: TestContext.Current.CancellationToken);
+        var itemTree = CSharpSyntaxTree.ParseText(
+            """
+            internal sealed class Item
+            {
+                public int Health { get; set; }
+            }
+            """,
+            parseOptions,
+            cancellationToken: TestContext.Current.CancellationToken);
+        var compilation = CSharpCompilation.Create(
+            "GeneratorTests",
+            [contextTree, dtoTree, itemTree],
+            References,
+            new CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable));
+        var driver = CreateTrackingDriver(parseOptions);
+        ContextSpecCache.ResetForTests();
+        ContextEmitter.ContextSpecBuilder.ResetGraphBuildCountForTests();
+
+        driver = driver.RunGenerators(compilation, TestContext.Current.CancellationToken);
+        Assert.Equal(1, ContextEmitter.ContextSpecBuilder.GraphBuildCount);
+
+        var changedItemTree = CSharpSyntaxTree.ParseText(
+            """
+            internal sealed class Item
+            {
+                public int Health { get; set; }
+
+                public int Armor { get; set; }
+            }
+            """,
+            parseOptions,
+            cancellationToken: TestContext.Current.CancellationToken);
+        driver = driver.RunGenerators(
+            compilation.ReplaceSyntaxTree(itemTree, changedItemTree),
+            TestContext.Current.CancellationToken);
+
+        Assert.True(
+            ContextEmitter.ContextSpecBuilder.GraphBuildCount > 1,
+            "Changing an element type reached through a collection interface must rebuild the graph.");
+        Assert.Contains(
+            "Armor",
+            GetGeneratedSource(driver.GetRunResult()),
+            StringComparison.Ordinal);
+        Assert.Contains(
+            GetReasons(driver.GetRunResult(), "NbtPreparedContexts"),
+            static reason => reason is IncrementalStepRunReason.New or IncrementalStepRunReason.Modified);
+    }
+
+    [Fact]
+    public void RebuildsWhenCollectionBuilderMethodChanges()
+    {
+        var parseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
+        var contextTree = CSharpSyntaxTree.ParseText(
+            """
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+            """,
+            parseOptions,
+            cancellationToken: TestContext.Current.CancellationToken);
+        var dtoTree = CSharpSyntaxTree.ParseText(
+            """
+            internal sealed class Player
+            {
+                public CustomBox<int> Items { get; set; } = new([]);
+            }
+            """,
+            parseOptions,
+            cancellationToken: TestContext.Current.CancellationToken);
+        var boxTree = CSharpSyntaxTree.ParseText(
+            """
+            using System.Collections;
+            using System.Collections.Generic;
+            using System.Runtime.CompilerServices;
+
+            [CollectionBuilder(typeof(BoxFactory), "Create")]
+            internal sealed class CustomBox<T> : IEnumerable<T>
+            {
+                private readonly T[] _items;
+                public CustomBox(T[] items) => _items = items;
+                public IEnumerator<T> GetEnumerator() => ((IEnumerable<T>)_items).GetEnumerator();
+                IEnumerator IEnumerable.GetEnumerator() => _items.GetEnumerator();
+            }
+
+            internal static class BoxFactory
+            {
+                public static CustomBox<T> Create<T>(T[] items) => new(items);
+            }
+            """,
+            parseOptions,
+            cancellationToken: TestContext.Current.CancellationToken);
+        var compilation = CSharpCompilation.Create(
+            "GeneratorTests",
+            [contextTree, dtoTree, boxTree],
+            References,
+            new CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable));
+        var driver = CreateTrackingDriver(parseOptions);
+        ContextSpecCache.ResetForTests();
+        ContextEmitter.ContextSpecBuilder.ResetGraphBuildCountForTests();
+
+        driver = driver.RunGenerators(compilation, TestContext.Current.CancellationToken);
+        Assert.Equal(1, ContextEmitter.ContextSpecBuilder.GraphBuildCount);
+
+        var changedBoxTree = CSharpSyntaxTree.ParseText(
+            """
+            using System.Collections;
+            using System.Collections.Generic;
+            using System.Runtime.CompilerServices;
+
+            [CollectionBuilder(typeof(BoxFactory), "Create")]
+            internal sealed class CustomBox<T> : IEnumerable<T>
+            {
+                private readonly T[] _items;
+                public CustomBox(T[] items) => _items = items;
+                public IEnumerator<T> GetEnumerator() => ((IEnumerable<T>)_items).GetEnumerator();
+                IEnumerator IEnumerable.GetEnumerator() => _items.GetEnumerator();
+            }
+
+            internal static class BoxFactory
+            {
+                // The builder implementation is part of the reachable fingerprint.
+                public static CustomBox<T> Create<T>(T[] items) => new(items);
+            }
+            """,
+            parseOptions,
+            cancellationToken: TestContext.Current.CancellationToken);
+        driver.RunGenerators(
+            compilation.ReplaceSyntaxTree(boxTree, changedBoxTree),
+            TestContext.Current.CancellationToken);
+
+        Assert.True(
+            ContextEmitter.ContextSpecBuilder.GraphBuildCount > 1,
+            "Changing a CollectionBuilderAttribute builder method must rebuild the graph.");
+    }
+
+    [Fact]
     public void OnlyRebuildsChangedContextInLargeCompilation()
     {
         const int contextCount = 300;
