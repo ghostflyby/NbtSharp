@@ -30,7 +30,7 @@ internal static class NbtArrayConverters
     private sealed class NbtSByteArrayConverter : NbtConverter<sbyte[]>
     {
         public override sbyte[] Read(ref NbtReader reader, NbtSerializerOptions options) =>
-            MemoryMarshal.Cast<byte, sbyte>(reader.GetByteArray().AsSpan()).ToArray();
+            reader.GetSByteArray();
 
         public override void Write(ref NbtWriter writer, sbyte[] value, NbtSerializerOptions options) =>
             writer.WriteByteArray(MemoryMarshal.Cast<sbyte, byte>(value.AsSpan()));
@@ -79,7 +79,7 @@ internal static class NbtArrayConverters
 internal sealed class NbtArrayConverter<TElement> : NbtConverter<TElement[]>
 {
     public override TElement[] Read(ref NbtReader reader, NbtSerializerOptions options) =>
-        NbtCollectionReader.ReadList<TElement>(ref reader, options).ToArray();
+        NbtCollectionReader.ReadArray<TElement>(ref reader, options);
 
     public override void Write(ref NbtWriter writer, TElement[] value, NbtSerializerOptions options) =>
         NbtCollectionWriter.WriteList(ref writer, value, options);

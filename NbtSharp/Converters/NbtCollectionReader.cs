@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.InteropServices;
 
 namespace NbtSharp.Converters;
 
@@ -6,11 +7,97 @@ namespace NbtSharp.Converters;
 [UnconditionalSuppressMessage("Aot", "IL3050", Justification = "Reached only through annotated serializer entry points.")]
 internal static class NbtCollectionReader
 {
+    // Avoid committing memory for a declared length that the payload may not actually contain;
+    // larger lists grow as elements are read.
+    private const int PreallocationLimit = 4096;
+
     /// <summary>
     /// Reads a list whose start token is current and returns its elements. The reader must be
     /// positioned on a <see cref="NbtTokenType.StartList"/> token.
     /// </summary>
     public static List<TElement> ReadList<TElement>(ref NbtReader reader, NbtSerializerOptions options)
+    {
+        var count = ValidateListStart<TElement>(ref reader, options);
+        if (count == 0)
+        {
+            ReadListEnd(ref reader);
+            return [];
+        }
+
+        if (count <= PreallocationLimit)
+        {
+            var list = new List<TElement>(count);
+            CollectionsMarshal.SetCount(list, count);
+            ReadElements(ref reader, options, CollectionsMarshal.AsSpan(list));
+            ReadListEnd(ref reader);
+            return list;
+        }
+
+        var growing = new List<TElement>();
+        ReadElements(ref reader, options, growing, count);
+        ReadListEnd(ref reader);
+        return growing;
+    }
+
+    /// <summary>
+    /// Reads a list whose start token is current into an array. In-memory input is allocated once at
+    /// the declared length; stream-backed input grows from a bounded capacity. The reader must be
+    /// positioned on a <see cref="NbtTokenType.StartList"/> token.
+    /// </summary>
+    public static TElement[] ReadArray<TElement>(ref NbtReader reader, NbtSerializerOptions options)
+    {
+        var count = ValidateListStart<TElement>(ref reader, options);
+        if (count == 0)
+        {
+            ReadListEnd(ref reader);
+            return [];
+        }
+
+        // Only fixed-width element tags have an exact payload-size check. Variable-size elements
+        // (compound, string, list, arrays) are bounded by a minimum size, so grow from a bounded
+        // capacity to keep malformed or still-partial input from forcing a large allocation.
+        var allocateDeclaredCount = !reader.IsStreamBacked &&
+            IsFixedWidthListElement(reader.ListElementType);
+        var initialCapacity = allocateDeclaredCount
+            ? count
+            : Math.Min(count, PreallocationLimit);
+        var elements = new TElement[initialCapacity];
+        var converter = options.GetConverter(typeof(TElement));
+        var typedConverter = converter as NbtConverter<TElement>;
+        var index = 0;
+        while (index < count)
+        {
+            if (index == elements.Length)
+            {
+                var newCapacity = (int)Math.Min(
+                    count,
+                    Math.Max((long)elements.Length * 2, elements.Length + 1));
+                Array.Resize(ref elements, newCapacity);
+            }
+
+            elements[index] = ReadElement(
+                ref reader,
+                options,
+                converter,
+                typedConverter,
+                index);
+            index++;
+        }
+
+        ReadListEnd(ref reader);
+        return elements;
+    }
+
+    private static bool IsFixedWidthListElement(NbtTagType elementType) =>
+        elementType is
+            NbtTagType.Byte or
+            NbtTagType.Short or
+            NbtTagType.Int or
+            NbtTagType.Long or
+            NbtTagType.Float or
+            NbtTagType.Double;
+
+    private static int ValidateListStart<TElement>(ref NbtReader reader, NbtSerializerOptions options)
     {
         if (reader.TokenType != NbtTokenType.StartList)
         {
@@ -40,48 +127,86 @@ internal static class NbtCollectionReader
             };
         }
 
-        var list = new List<TElement>(count <= 4096 ? count : 0);
-        NbtConverter? converter = null;
-        NbtConverter<TElement>? typedConverter = null;
-        if (count > 0)
-        {
-            converter = options.GetConverter(typeof(TElement));
-            typedConverter = converter as NbtConverter<TElement>;
-        }
+        return count;
+    }
 
+    private static void ReadElements<TElement>(
+        ref NbtReader reader,
+        NbtSerializerOptions options,
+        Span<TElement> destination)
+    {
+        var converter = options.GetConverter(typeof(TElement));
+        var typedConverter = converter as NbtConverter<TElement>;
+        for (var i = 0; i < destination.Length; i++)
+        {
+            destination[i] = ReadElement(
+                ref reader,
+                options,
+                converter,
+                typedConverter,
+                i);
+        }
+    }
+
+    private static void ReadElements<TElement>(
+        ref NbtReader reader,
+        NbtSerializerOptions options,
+        List<TElement> destination,
+        int count)
+    {
+        var converter = options.GetConverter(typeof(TElement));
+        var typedConverter = converter as NbtConverter<TElement>;
         for (var i = 0; i < count; i++)
         {
-            if (!reader.Read())
-            {
-                throw new NbtException("The list ended before all declared elements were read.")
-                {
-                    IsTruncated = true,
-                    BytePosition = reader.BytesConsumed,
-                };
-            }
+            destination.Add(ReadElement(
+                ref reader,
+                options,
+                converter,
+                typedConverter,
+                i));
+        }
+    }
 
-            try
+    private static TElement ReadElement<TElement>(
+        ref NbtReader reader,
+        NbtSerializerOptions options,
+        NbtConverter converter,
+        NbtConverter<TElement>? typedConverter,
+        int index)
+    {
+        if (!reader.Read())
+        {
+            throw new NbtException("The list ended before all declared elements were read.")
             {
-                list.Add(typedConverter is not null
-                    ? NbtSerializer.DeserializeValueCore(
-                        ref reader,
-                        typedConverter,
-                        options,
-                        pathSegment: null)
-                    : (TElement)NbtSerializer.DeserializeValueCore(
-                        ref reader,
-                        typeof(TElement),
-                        converter!,
-                        options,
-                        pathSegment: null)!);
-            }
-            catch (NbtException ex)
-            {
-                NbtSerializer.PrependPath(ex, $"[{i}]");
-                throw;
-            }
+                IsTruncated = true,
+                BytePosition = reader.BytesConsumed,
+            };
         }
 
+        try
+        {
+            return typedConverter is not null
+                ? NbtSerializer.DeserializeValueCore(
+                    ref reader,
+                    typedConverter,
+                    options,
+                    pathSegment: null)
+                : (TElement)NbtSerializer.DeserializeValueCore(
+                    ref reader,
+                    typeof(TElement),
+                    converter,
+                    options,
+                    pathSegment: null)!;
+        }
+        catch (NbtException ex)
+        {
+            NbtSerializer.PrependPath(ex, $"[{index}]");
+            throw;
+        }
+    }
+
+    private static void ReadListEnd(ref NbtReader reader)
+    {
         if (!reader.Read() || reader.TokenType != NbtTokenType.EndList)
         {
             throw new NbtException("The list was not terminated.")
@@ -90,8 +215,6 @@ internal static class NbtCollectionReader
                 BytePosition = reader.BytesConsumed,
             };
         }
-
-        return list;
     }
 
     private static bool HasCustomConverter(NbtSerializerOptions options, Type type)

@@ -1,4 +1,3 @@
 using BenchmarkDotNet.Running;
-using NbtSharp.SourceGeneration.Benchmarks;
 
-BenchmarkRunner.Run<GeneratorIncrementalityBenchmarks>();
+BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args);

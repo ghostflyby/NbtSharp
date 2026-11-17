@@ -19,6 +19,16 @@ internal enum ScalarKind
     Int64,
     Single,
     Double,
+    Boolean,
+    String,
+    NullableSByte,
+    NullableByte,
+    NullableInt16,
+    NullableInt32,
+    NullableInt64,
+    NullableSingle,
+    NullableDouble,
+    NullableBoolean,
 }
 
 /// <summary>

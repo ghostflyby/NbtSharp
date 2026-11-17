@@ -18,6 +18,9 @@
   <ItemGroup>
     <ProjectReference Include="..\NbtSharp\NbtSharp.csproj"/>
     <ProjectReference Include="..\NbtSharp.SourceGeneration\NbtSharp.SourceGeneration.csproj"/>
+    <ProjectReference Include="..\NbtSharp.SourceGeneration\NbtSharp.SourceGeneration.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false"/>
   </ItemGroup>
 
 </Project>

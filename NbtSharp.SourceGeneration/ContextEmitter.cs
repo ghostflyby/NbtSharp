@@ -803,7 +803,19 @@ internal sealed partial class ContextEmitter
         foreach (var member in model.Members)
         {
             var nbtName = SymbolDisplay.FormatLiteral(member.NbtName, quote: true);
-            var value = $"value.{member.EscapedClrName}";
+            var scalarKind = member.ScalarKind;
+            var hasNullCheck = member.CanBeNull &&
+                (member.IsRequired ||
+                 IsNullableScalar(scalarKind) ||
+                 scalarKind == ScalarKind.String);
+            var value = hasNullCheck
+                ? $"__m{member.Index}"
+                : $"value.{member.EscapedClrName}";
+            if (hasNullCheck)
+            {
+                _writer.WriteLine($"var __m{member.Index} = value.{member.EscapedClrName};");
+            }
+
             if (member.IsRequired && member.CanBeNull)
             {
                 _writer.WriteLine($"if ({value} is null)");
@@ -815,16 +827,39 @@ internal sealed partial class ContextEmitter
                 _writer.WriteLine("}");
             }
 
-            var scalarKind = member.ScalarKind;
             if (scalarKind != ScalarKind.None)
             {
                 var path = SymbolDisplay.FormatLiteral("." + member.NbtName, quote: true);
                 _writer.WriteLine("if (__direct)");
                 _writer.WriteLine("{");
                 _writer.Indent();
+                var needsNullFallback = !member.IsRequired &&
+                    (IsNullableScalar(scalarKind) || scalarKind == ScalarKind.String);
+                if (needsNullFallback)
+                {
+                    _writer.WriteLine($"if ({value} is null)");
+                    _writer.WriteLine("{");
+                    _writer.Indent();
+                    _writer.WriteLine("__path = null;");
+                    _writer.WriteLine(GetWriteMemberStatement(member, nbtName, value));
+                    _writer.WriteLine("__path = null;");
+                    _writer.Outdent();
+                    _writer.WriteLine("}");
+                    _writer.WriteLine("else");
+                    _writer.WriteLine("{");
+                    _writer.Indent();
+                }
+
                 _writer.WriteLine($"__path = {path};");
                 _writer.WriteLine(GetWriteStatement(scalarKind, nbtName, value));
                 _writer.WriteLine("__path = null;");
+
+                if (needsNullFallback)
+                {
+                    _writer.Outdent();
+                    _writer.WriteLine("}");
+                }
+
                 _writer.Outdent();
                 _writer.WriteLine("}");
                 _writer.WriteLine("else");
@@ -985,7 +1020,38 @@ internal sealed partial class ContextEmitter
         public string WriteStatement { get; }
     }
 
-    private static ScalarKind GetScalarKind(ITypeSymbol type) => type.SpecialType switch
+    private static ScalarKind GetScalarKind(ITypeSymbol type)
+    {
+        var kind = GetNonNullableScalarKind(type.SpecialType);
+        if (kind != ScalarKind.None)
+        {
+            return kind;
+        }
+
+        if (type is INamedTypeSymbol
+            {
+                OriginalDefinition.SpecialType: SpecialType.System_Nullable_T,
+            } nullable &&
+            nullable.TypeArguments.Length == 1)
+        {
+            return GetNonNullableScalarKind(nullable.TypeArguments[0].SpecialType) switch
+            {
+                ScalarKind.SByte => ScalarKind.NullableSByte,
+                ScalarKind.Byte => ScalarKind.NullableByte,
+                ScalarKind.Int16 => ScalarKind.NullableInt16,
+                ScalarKind.Int32 => ScalarKind.NullableInt32,
+                ScalarKind.Int64 => ScalarKind.NullableInt64,
+                ScalarKind.Single => ScalarKind.NullableSingle,
+                ScalarKind.Double => ScalarKind.NullableDouble,
+                ScalarKind.Boolean => ScalarKind.NullableBoolean,
+                _ => ScalarKind.None,
+            };
+        }
+
+        return ScalarKind.None;
+    }
+
+    private static ScalarKind GetNonNullableScalarKind(SpecialType type) => type switch
     {
         SpecialType.System_SByte => ScalarKind.SByte,
         SpecialType.System_Byte => ScalarKind.Byte,
@@ -994,32 +1060,60 @@ internal sealed partial class ContextEmitter
         SpecialType.System_Int64 => ScalarKind.Int64,
         SpecialType.System_Single => ScalarKind.Single,
         SpecialType.System_Double => ScalarKind.Double,
+        SpecialType.System_Boolean => ScalarKind.Boolean,
+        SpecialType.System_String => ScalarKind.String,
         _ => ScalarKind.None,
     };
 
-    private static string GetReadExpression(ScalarKind kind) => kind switch
+    private static bool IsNullableScalar(ScalarKind kind) =>
+        kind is >= ScalarKind.NullableSByte and <= ScalarKind.NullableBoolean;
+
+    private static ScalarKind GetUnderlyingScalarKind(ScalarKind kind) => kind switch
     {
-        ScalarKind.SByte => "reader.GetSByte()",
-        ScalarKind.Byte => "unchecked((byte)reader.GetSByte())",
-        ScalarKind.Int16 => "reader.GetInt16()",
-        ScalarKind.Int32 => "reader.GetInt32()",
-        ScalarKind.Int64 => "reader.GetInt64()",
-        ScalarKind.Single => "reader.GetSingle()",
-        ScalarKind.Double => "reader.GetDouble()",
-        _ => throw new InvalidOperationException($"Unsupported scalar kind {kind}."),
+        ScalarKind.NullableSByte => ScalarKind.SByte,
+        ScalarKind.NullableByte => ScalarKind.Byte,
+        ScalarKind.NullableInt16 => ScalarKind.Int16,
+        ScalarKind.NullableInt32 => ScalarKind.Int32,
+        ScalarKind.NullableInt64 => ScalarKind.Int64,
+        ScalarKind.NullableSingle => ScalarKind.Single,
+        ScalarKind.NullableDouble => ScalarKind.Double,
+        ScalarKind.NullableBoolean => ScalarKind.Boolean,
+        _ => kind,
     };
 
-    private static string GetWriteStatement(ScalarKind kind, string name, string value) => kind switch
+    private static string GetReadExpression(ScalarKind kind) =>
+        GetUnderlyingScalarKind(kind) switch
+        {
+            ScalarKind.SByte => "reader.GetSByte()",
+            ScalarKind.Byte => "unchecked((byte)reader.GetSByte())",
+            ScalarKind.Int16 => "reader.GetInt16()",
+            ScalarKind.Int32 => "reader.GetInt32()",
+            ScalarKind.Int64 => "reader.GetInt64()",
+            ScalarKind.Single => "reader.GetSingle()",
+            ScalarKind.Double => "reader.GetDouble()",
+            ScalarKind.Boolean => $"{MetadataServices}.ReadBoolean(ref reader)",
+            ScalarKind.String => "reader.GetString()",
+            _ => throw new InvalidOperationException($"Unsupported scalar kind {kind}."),
+        };
+
+    private static string GetWriteStatement(ScalarKind kind, string name, string value)
     {
-        ScalarKind.SByte => $"writer.WriteSByte({name}, {value});",
-        ScalarKind.Byte => $"writer.WriteSByte({name}, unchecked((sbyte){value}));",
-        ScalarKind.Int16 => $"writer.WriteInt16({name}, {value});",
-        ScalarKind.Int32 => $"writer.WriteInt32({name}, {value});",
-        ScalarKind.Int64 => $"writer.WriteInt64({name}, {value});",
-        ScalarKind.Single => $"writer.WriteSingle({name}, {value});",
-        ScalarKind.Double => $"writer.WriteDouble({name}, {value});",
-        _ => throw new InvalidOperationException($"Unsupported scalar kind {kind}."),
-    };
+        var underlying = GetUnderlyingScalarKind(kind);
+        var operand = IsNullableScalar(kind) ? $"{value}.Value" : value;
+        return underlying switch
+        {
+            ScalarKind.SByte => $"writer.WriteSByte({name}, {operand});",
+            ScalarKind.Byte => $"writer.WriteSByte({name}, unchecked((sbyte){operand}));",
+            ScalarKind.Int16 => $"writer.WriteInt16({name}, {operand});",
+            ScalarKind.Int32 => $"writer.WriteInt32({name}, {operand});",
+            ScalarKind.Int64 => $"writer.WriteInt64({name}, {operand});",
+            ScalarKind.Single => $"writer.WriteSingle({name}, {operand});",
+            ScalarKind.Double => $"writer.WriteDouble({name}, {operand});",
+            ScalarKind.Boolean => $"writer.WriteSByte({name}, {operand} ? (sbyte)1 : (sbyte)0);",
+            ScalarKind.String => $"writer.WriteString({name}, {operand});",
+            _ => throw new InvalidOperationException($"Unsupported scalar kind {kind}."),
+        };
+    }
 
     private static bool CanBeNull(ITypeSymbol type) =>
         type.IsReferenceType ||

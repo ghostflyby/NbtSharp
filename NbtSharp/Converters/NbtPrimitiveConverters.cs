@@ -46,20 +46,8 @@ internal static class NbtPrimitiveConverters
 
     private sealed class NbtBooleanConverter : NbtConverter<bool>
     {
-        public override bool Read(ref NbtReader reader, NbtSerializerOptions options)
-        {
-            var value = reader.GetSByte();
-            return value switch
-            {
-                0 => false,
-                1 => true,
-                _ => throw new NbtException($"A TAG_Byte boolean must be 0 or 1 but was {value}.")
-                {
-                    BytePosition = reader.BytesConsumed - sizeof(byte),
-                    ActualTagType = NbtTagType.Byte,
-                },
-            };
-        }
+        public override bool Read(ref NbtReader reader, NbtSerializerOptions options) =>
+            NbtMetadataServices.ReadBoolean(ref reader);
 
         public override void Write(ref NbtWriter writer, bool value, NbtSerializerOptions options) =>
             writer.WriteSByte(value ? (sbyte)1 : (sbyte)0);

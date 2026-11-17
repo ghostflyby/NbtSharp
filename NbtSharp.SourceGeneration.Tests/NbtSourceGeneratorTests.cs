@@ -976,6 +976,46 @@ public sealed class NbtSourceGeneratorTests
     }
 
     [Fact]
+    public void EmitsDirectPathsForBooleanStringAndNullableScalars()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Player
+            {
+                public bool Flag { get; set; }
+
+                public string Name { get; set; } = "";
+
+                public int? Count { get; set; }
+
+                public bool? OptionalFlag { get; set; }
+
+                public required int? RequiredCount { get; set; }
+            }
+            """);
+
+        AssertNoErrors(result);
+        Assert.Contains("NbtMetadataServices.ReadBoolean(ref reader)", result.GeneratedSource, StringComparison.Ordinal);
+        Assert.Contains("reader.GetString()", result.GeneratedSource, StringComparison.Ordinal);
+        Assert.Contains("reader.GetInt32()", result.GeneratedSource, StringComparison.Ordinal);
+        Assert.Contains("writer.WriteString(\"Name\", __m", result.GeneratedSource, StringComparison.Ordinal);
+        Assert.Contains(
+            "writer.WriteSByte(\"OptionalFlag\", __m",
+            result.GeneratedSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            ".Value ? (sbyte)1 : (sbyte)0",
+            result.GeneratedSource,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ReportsNonPartialContext()
     {
         var result = Run("""
