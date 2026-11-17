@@ -40,6 +40,7 @@ NbtSharp.NbtReader.CurrentDepth.get -> int
 NbtSharp.NbtReader.GetByteArray() -> byte[]!
 NbtSharp.NbtReader.GetInt32Array() -> int[]!
 NbtSharp.NbtReader.GetInt64Array() -> long[]!
+NbtSharp.NbtReader.GetSByteArray() -> sbyte[]!
 NbtSharp.NbtReader.ListLength.get -> int
 NbtSharp.NbtReader.NbtReader() -> void
 NbtSharp.NbtReader.NbtReader(System.Buffers.ReadOnlySequence<byte> data, NbtSharp.NbtReaderOptions options = default(NbtSharp.NbtReaderOptions)) -> void
@@ -276,6 +277,7 @@ static NbtSharp.NbtMetadataServices.MissingMemberName(NbtSharp.NbtReader reader)
 static NbtSharp.NbtMetadataServices.MissingRequiredMember(NbtSharp.NbtReader reader, string! name) -> NbtSharp.NbtException!
 static NbtSharp.NbtMetadataServices.NullRequiredMember(NbtSharp.NbtWriter writer, string! name) -> NbtSharp.NbtException!
 static NbtSharp.NbtMetadataServices.PrependPath(NbtSharp.NbtException! exception, string? segment) -> void
+static NbtSharp.NbtMetadataServices.ReadBoolean(ref NbtSharp.NbtReader reader) -> bool
 static NbtSharp.NbtMetadataServices.ReadValue<T>(ref NbtSharp.NbtReader reader, NbtSharp.NbtSerializerOptions! options, string? pathSegment) -> T
 static NbtSharp.NbtMetadataServices.ReadValueWithConverter<T>(ref NbtSharp.NbtReader reader, NbtSharp.NbtConverter! converter, NbtSharp.NbtSerializerOptions! options, string? pathSegment) -> T
 static NbtSharp.NbtMetadataServices.WriteMember<T>(ref NbtSharp.NbtWriter writer, string! name, T value, NbtSharp.NbtSerializerOptions! options) -> void

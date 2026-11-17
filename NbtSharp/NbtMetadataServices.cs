@@ -89,6 +89,24 @@ public static class NbtMetadataServices
                 pathSegment)!;
     }
 
+    /// <summary>Reads one boolean value encoded as a TAG_Byte with a value of 0 or 1.</summary>
+    /// <param name="reader">The reader positioned at the value's first token.</param>
+    /// <returns>The decoded boolean.</returns>
+    public static bool ReadBoolean(ref NbtReader reader)
+    {
+        var value = reader.GetSByte();
+        return value switch
+        {
+            0 => false,
+            1 => true,
+            _ => throw new NbtException($"A TAG_Byte boolean must be 0 or 1 but was {value}.")
+            {
+                BytePosition = reader.BytesConsumed - sizeof(byte),
+                ActualTagType = NbtTagType.Byte,
+            },
+        };
+    }
+
     /// <summary>Writes one named compound member.</summary>
     /// <typeparam name="T">The member type.</typeparam>
     /// <param name="writer">The writer that receives the member.</param>

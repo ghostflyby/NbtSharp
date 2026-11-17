@@ -10,8 +10,18 @@ namespace NbtSharp.Converters;
 internal sealed class NbtNullableConverter<T> : NbtConverter<T?>
     where T : struct
 {
-    public override T? Read(ref NbtReader reader, NbtSerializerOptions options) =>
-        NbtSerializer.DeserializeValue<T>(ref reader, options);
+    public override T? Read(ref NbtReader reader, NbtSerializerOptions options)
+    {
+        var converter = options.GetConverter(typeof(T));
+        return converter is NbtConverter<T> typed
+            ? NbtSerializer.DeserializeValueCore(ref reader, typed, options, pathSegment: null)
+            : (T?)NbtSerializer.DeserializeValueCore(
+                ref reader,
+                typeof(T),
+                converter,
+                options,
+                pathSegment: null);
+    }
 
     public override void Write(ref NbtWriter writer, T? value, NbtSerializerOptions options)
     {
@@ -20,7 +30,26 @@ internal sealed class NbtNullableConverter<T> : NbtConverter<T?>
             throw new NbtException("A null value cannot be written at this position.");
         }
 
-        NbtSerializer.SerializeValue(ref writer, value.Value, options);
+        var converter = options.GetConverter(typeof(T));
+        if (converter is NbtConverter<T> typed)
+        {
+            NbtSerializer.SerializeValueCore(
+                ref writer,
+                value.Value,
+                typed,
+                options,
+                pathSegment: null,
+                headerWritten: false);
+            return;
+        }
+
+        NbtSerializer.SerializeValueInternal(
+            ref writer,
+            value.Value,
+            typeof(T),
+            options,
+            pathSegment: null,
+            headerWritten: false);
     }
 
     public override bool TryGetTagType(T? value, NbtSerializerOptions options, out NbtTagType tagType)

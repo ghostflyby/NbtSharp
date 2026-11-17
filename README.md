@@ -147,7 +147,9 @@ The analyzer ships inside the `NbtSharp` package. The type-information overloads
 generated. Reflection remains available through `NbtReflectionTypeInfoResolver` for types that are
 not part of a generated context, and it also supports enum members through the built-in enum
 converter. When no custom converters are registered, generated object converters read and write
-scalar members directly; registering a custom converter disables that fast path for the operation.
+numeric, boolean, string, and nullable scalar members directly; registering a custom converter
+disables that fast path for the operation. Required reference and nullable members are captured
+once before their null check, so the property getter is not invoked twice.
 Each attributed context is prepared inside the incremental transform and emits a symbol-free
 `PreparedContext`; generated source is cached per prepared context. A content-keyed reachability
 fingerprint cache skips graph construction for unchanged contexts, and no symbol-carrying value is
@@ -264,6 +266,12 @@ whose length is known before the list header is written. `IList<T>`, `ICollectio
 `IEnumerable<T>` are not automatically supported; materialize to `List<T>` or provide a custom
 converter that writes the list header and elements itself.
 
+On read, arrays without a dedicated NBT array tag are allocated once at the declared list length
+instead of being built through `List<T>`, and `sbyte[]` is read directly without an intermediate
+`byte[]`. Lists at or below 4096 elements are filled through `CollectionsMarshal` span access;
+larger declared lengths grow as elements are read. Stream-backed arrays also grow from a bounded
+capacity, so a truncated payload cannot force a large upfront allocation.
+
 The generic writer encodes an empty collection as `TAG_List<TAG_End>`, which every supported target
 collection accepts. An empty list with a concrete element type is checked against the requested element type
 for built-in converters; custom converters and object-mapped element types are not inferred when
@@ -320,8 +328,9 @@ them. The writer does not roll back partial output if a converter throws.
 dotnet build NbtSharp.slnx
 dotnet test NbtSharp.slnx
 
-# Cold and unrelated-edit warm source generation benchmarks (100 and 300 contexts).
-dotnet run --project NbtSharp.SourceGeneration.Benchmarks/NbtSharp.SourceGeneration.Benchmarks.csproj -c Release
+# Source-generation cold/warm and runtime scalar/array serialization benchmarks.
+dotnet run --project NbtSharp.SourceGeneration.Benchmarks/NbtSharp.SourceGeneration.Benchmarks.csproj -c Release -- --filter '*GeneratorIncrementalityBenchmarks*'
+dotnet run --project NbtSharp.SourceGeneration.Benchmarks/NbtSharp.SourceGeneration.Benchmarks.csproj -c Release -- --filter '*SerializationBenchmarks*'
 ```
 
 Requires the .NET 11 SDK (see `global.json`). Tests run on xunit.v3 through

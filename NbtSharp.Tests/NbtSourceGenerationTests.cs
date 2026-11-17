@@ -174,6 +174,8 @@ public sealed class NbtSourceGenerationTests
             ReadOnlyNames = ["r"],
             ItemArray = [new SourceGenItem { Id = "array", Count = 4 }],
             OptionalNumber = 7,
+            OptionalFlag = true,
+            SByteValues = [-128, -1, 0, 127],
             Labels = ["x", "y"],
         };
 
@@ -197,6 +199,8 @@ public sealed class NbtSourceGenerationTests
         Assert.Equal(["r"], copy.ReadOnlyNames);
         Assert.Equal("array", copy.ItemArray[0].Id);
         Assert.Equal(7, copy.OptionalNumber);
+        Assert.True(copy.OptionalFlag);
+        Assert.Equal([-128, -1, 0, 127], copy.SByteValues);
         Assert.Equal(["x", "y"], copy.Labels);
     }
 
@@ -439,6 +443,76 @@ public sealed class NbtSourceGenerationTests
         Assert.Equal(-2.5, copy.Double);
         Assert.True(copy.Boolean);
         Assert.Equal("text", copy.Text);
+    }
+
+    [Fact]
+    public void DirectBooleanReadsKeepValidationAndErrorPaths()
+    {
+        var context = SourceGenerationContext.Default;
+        var data = NbtSerializer.Serialize(new NbtRoot(
+            "root",
+            new NbtCompound { ["Boolean"] = (sbyte)2 }));
+        var reflectionOptions = new NbtSerializerOptions
+        {
+            TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
+        };
+
+        var generated = Assert.Throws<NbtException>(() =>
+            NbtSerializer.Deserialize(data, context.SourceGenScalars));
+        var reflected = Assert.Throws<NbtException>(() =>
+            NbtSerializer.Deserialize<SourceGenScalars>(data, reflectionOptions));
+
+        Assert.Equal(reflected.Message, generated.Message);
+        Assert.Equal(reflected.Path, generated.Path);
+        Assert.Equal(reflected.BytePosition, generated.BytePosition);
+    }
+
+    [Fact]
+    public void DirectStringWritesHonorNullValueHandling()
+    {
+        var context = new SourceGenerationContext(new NbtSerializerOptions
+        {
+            NullValueHandling = NbtNullValueHandling.Throw,
+        });
+        var reflectionOptions = new NbtSerializerOptions
+        {
+            NullValueHandling = NbtNullValueHandling.Throw,
+            TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
+        };
+        var value = new SourceGenNullable { Required = 1, Optional = null };
+
+        var generated = Assert.Throws<NbtException>(() =>
+            NbtSerializer.Serialize(value, context.SourceGenNullable, "root"));
+        var reflected = Assert.Throws<NbtException>(() =>
+            NbtSerializer.Serialize(value, "root", reflectionOptions));
+
+        Assert.Equal(reflected.Message, generated.Message);
+        Assert.Equal(reflected.Path, generated.Path);
+    }
+
+    [Fact]
+    public void RequiredMemberGettersAreReadOnce()
+    {
+        var context = SourceGenerationContext.Default;
+        var value = new SourceGenSingleGetter { Name = "value" };
+
+        NbtSerializer.Serialize(value, context.SourceGenSingleGetter, "root");
+
+        Assert.Equal(1, value.Reads);
+    }
+
+    [Fact]
+    public void DirectNullableScalarWritesOmitNullMembers()
+    {
+        var context = SourceGenerationContext.Default;
+        var data = NbtSerializer.Serialize(
+            new SourceGenCollections { OptionalNumber = null, OptionalFlag = null },
+            context.SourceGenCollections,
+            "root");
+        var root = (NbtCompound)NbtSerializer.Deserialize(data).Value.Value!;
+
+        Assert.False(root.ContainsKey("OptionalNumber"));
+        Assert.False(root.ContainsKey("OptionalFlag"));
     }
 
     [Fact]
@@ -892,6 +966,7 @@ public sealed class NbtSourceGenerationTests
 [NbtSerializable(typeof(SourceGenScalars))]
 [NbtSerializable(typeof(SourceGenPrivateGetter))]
 [NbtSerializable(typeof(SourceGenRequiredNullable))]
+[NbtSerializable(typeof(SourceGenSingleGetter))]
 [NbtSerializable(typeof(SourceGenDefaultEnum))]
 [NbtSerializable(typeof(SourceGenEnumHolder))]
 [NbtSerializable(typeof(SourceGenConverterOptOut))]
@@ -1004,6 +1079,10 @@ internal sealed class SourceGenCollections
     public SourceGenItem[] ItemArray { get; init; } = [];
 
     public int? OptionalNumber { get; init; }
+
+    public bool? OptionalFlag { get; init; }
+
+    public sbyte[] SByteValues { get; init; } = [];
 
     public string[] Labels { get; init; } = [];
 }
@@ -1322,6 +1401,25 @@ internal sealed class SourceGenPrivateGetter
 internal sealed class SourceGenRequiredNullable
 {
     public required string? Name { get; init; }
+}
+
+internal sealed class SourceGenSingleGetter
+{
+    private string _name = "";
+
+    [NbtIgnore]
+    public int Reads { get; private set; }
+
+    public required string Name
+    {
+        get
+        {
+            Reads++;
+            return _name;
+        }
+
+        init => _name = value;
+    }
 }
 
 internal sealed class PlusOneInt32Converter : NbtConverter<int>

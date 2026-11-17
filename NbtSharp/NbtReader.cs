@@ -309,8 +309,27 @@ public ref struct NbtReader
         }
 
         var length = ReadArrayLength();
-        return ReadBytes(length);
+        return ReadByteLikeArray<byte>(length);
     }
+
+    /// <summary>Reads the current value as a signed byte array.</summary>
+    /// <remarks>The payload is read directly into the result array without a byte array copy.</remarks>
+    public sbyte[] GetSByteArray()
+    {
+        if (!Expect(NbtTagType.ByteArray))
+        {
+            return [];
+        }
+
+        var length = ReadArrayLength();
+        return ReadByteLikeArray<sbyte>(length);
+    }
+
+    internal bool IsStreamBacked => _stream is not null;
+
+    // Every list element occupies at least one byte, so a declared element count is a lower bound
+    // for the remaining payload. This rejects truncated lists before a caller allocates for them.
+    internal void EnsureCollectionPayloadFits(int count) => EnsurePayloadFits(count);
 
     /// <summary>Reads the current value as an integer array.</summary>
     public int[] GetInt32Array()
@@ -840,7 +859,9 @@ public ref struct NbtReader
         }
     }
 
-    private byte[] ReadBytes(int count)
+    // T is a one-byte primitive (byte or sbyte), so the payload byte count equals the element count.
+    private T[] ReadByteLikeArray<T>(int count)
+        where T : struct
     {
         if (count == 0)
         {
@@ -850,12 +871,12 @@ public ref struct NbtReader
         EnsurePayloadFits(count);
         if (_stream is null)
         {
-            var bytes = new byte[count];
-            ReadExactly(bytes);
-            return bytes;
+            var values = new T[count];
+            ReadExactly(MemoryMarshal.AsBytes(values.AsSpan()));
+            return values;
         }
 
-        var buffer = new byte[GetInitialArrayCapacity(count, sizeof(byte))];
+        var buffer = new T[GetInitialArrayCapacity(count, sizeof(byte))];
         var offset = 0;
         while (offset < count)
         {
@@ -868,7 +889,7 @@ public ref struct NbtReader
             }
 
             var take = Math.Min(buffer.Length - offset, count - offset);
-            ReadExactly(buffer.AsSpan(offset, take));
+            ReadExactly(MemoryMarshal.AsBytes(buffer.AsSpan(offset, take)));
             offset += take;
         }
 
