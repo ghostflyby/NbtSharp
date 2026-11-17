@@ -5,39 +5,25 @@ using Microsoft.CodeAnalysis;
 namespace NbtSharp.SourceGeneration;
 
 /// <summary>
-/// Computes a conservative dependency fingerprint for a context without constructing the type
-/// graph. The walk visits every type that can influence generated source and hashes declaration
-/// text for source types and assembly identities for metadata types.
+/// Computes a conservative content fingerprint for a context without constructing the type graph.
+/// The walk visits every type that can influence generated source and hashes declaration text for
+/// source types and assembly identities for metadata types.
 /// </summary>
-internal readonly struct ReachableFingerprintResult
-{
-    public ReachableFingerprintResult(string content, string full)
-    {
-        Content = content;
-        Full = full;
-    }
-
-    /// <summary>Fingerprint of semantic content; stable across positional-only edits.</summary>
-    public string Content { get; }
-
-    /// <summary>Content plus declaration positions; used to refresh diagnostic locations.</summary>
-    public string Full { get; }
-}
-
 internal static class ReachableFingerprint
 {
-    private const string FormatVersion = "reachable-fingerprint-v2";
+    private const string FormatVersion = "reachable-fingerprint-v4";
     private const string UseConverterAttribute = "NbtSharp.NbtUseConverterAttribute";
 
     private static readonly SymbolDisplayFormat FullyQualified = SymbolDisplayFormat.FullyQualifiedFormat;
 
-    public static ReachableFingerprintResult Compute(
+    public static string Compute(
         INamedTypeSymbol contextType,
         ImmutableArray<RootType> roots,
         Compilation compilation)
     {
         var hash = StableHash.Create();
         hash.Add(FormatVersion);
+        hash.Add(typeof(ReachableFingerprint).Assembly.ManifestModule.ModuleVersionId.ToString());
         hash.Add((int)compilation.Options.NullableContextOptions);
         hash.Add(contextType.ToDisplayString(FullyQualified));
         AddAssemblyIdentity(ref hash, contextType);
@@ -66,47 +52,6 @@ internal static class ReachableFingerprint
             AddType(ref hash, type, pending);
         }
 
-        var content = hash.ToHex();
-        var positions = StableHash.Create();
-        positions.Add("positions-v1");
-        var positionEntries = visited
-            .SelectMany(static type => type.DeclaringSyntaxReferences.Select(reference => (Type: type, Reference: reference)))
-            .Select(static entry => (
-                TypeName: entry.Type.ToDisplayString(FullyQualified),
-                entry.Reference.SyntaxTree.FilePath,
-                entry.Reference.Span.Start,
-                entry.Reference.Span.Length))
-            .OrderBy(static entry => entry.TypeName, StringComparer.Ordinal)
-            .ThenBy(static entry => entry.FilePath, StringComparer.Ordinal)
-            .ThenBy(static entry => entry.Start)
-            .ThenBy(static entry => entry.Length)
-            .ToArray();
-        positions.Add(positionEntries.Length);
-        foreach (var entry in positionEntries)
-        {
-            positions.Add(entry.TypeName);
-            positions.Add(entry.FilePath);
-            positions.Add(entry.Start);
-            positions.Add(entry.Length);
-        }
-
-        var full = StableHash.Create();
-        full.Add("full-fingerprint-v1");
-        full.Add(content);
-        full.Add(positions.ToHex());
-        return new ReachableFingerprintResult(content, full.ToHex());
-    }
-
-    public static string Combine(INamedTypeSymbol contextType, IEnumerable<string> fingerprints)
-    {
-        var hash = StableHash.Create();
-        hash.Add("context-merge-v1");
-        hash.Add(contextType.ToDisplayString(FullyQualified));
-        foreach (var fingerprint in fingerprints.OrderBy(static value => value, StringComparer.Ordinal))
-        {
-            hash.Add(fingerprint);
-        }
-
         return hash.ToHex();
     }
 
@@ -119,6 +64,13 @@ internal static class ReachableFingerprint
         hash.Add((int)type.SpecialType);
         hash.Add((int)type.DeclaredAccessibility);
         hash.Add(type.IsValueType);
+        hash.Add(type.IsRefLikeType);
+        if (type is INamedTypeSymbol namedType)
+        {
+            hash.Add(namedType.IsFileLocal);
+            hash.Add(namedType.IsUnboundGenericType);
+        }
+
         hash.Add(type.ToDisplayString(FullyQualified));
         AddAssemblyIdentity(ref hash, type);
         AddDeclarationHashes(ref hash, type);
@@ -353,6 +305,8 @@ internal static class ReachableFingerprint
 
     private static void AddAssemblyIdentity(ref StableHash hash, ITypeSymbol type)
     {
+        // Metadata types are tracked by assembly identity; a referenced assembly rebuilt with the same
+        // identity is assumed to be unchanged apart from the shape facts hashed by AddType.
         hash.Add(type.ContainingAssembly?.Identity.ToString());
     }
 

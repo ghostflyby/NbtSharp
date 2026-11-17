@@ -33,22 +33,35 @@ internal sealed partial class ContextEmitter
         _reportDiagnostic = static _ => { };
     }
 
-    public static PreparedContext Prepare(ContextModel model)
+    public static PreparedContext PrepareResolved(
+        ContextModel model,
+        string hintName,
+        string cacheKey)
     {
-        if (ContextSpecCache.TryGet(model.CacheKey, out var cached) &&
+        // The hint name is derived from the context display name, which is part of cacheKey, so a hit
+        // always has the same hint. Add rejects diagnostic-bearing specs; the length check is defense
+        // in depth in case the cache is populated from another path.
+        if (ContextSpecCache.TryGet(cacheKey, out var cached) &&
             cached.Diagnostics.Length == 0)
         {
             return cached;
         }
 
         var diagnostics = ImmutableArray.CreateBuilder<DiagnosticSpec>();
+        return PrepareCore(model, hintName, diagnostics);
+    }
+
+    private static PreparedContext PrepareCore(
+        ContextModel model,
+        string hintName,
+        ImmutableArray<DiagnosticSpec>.Builder diagnostics)
+    {
         var emitter = new ContextEmitter(model, diagnostics.Add);
         var contextType = model.ContextType;
-        var hintName = GetHintName(contextType);
 
         if (!emitter.Validate(contextType))
         {
-            return Cache(model, CreatePrepared(model, graph: null, hintName, diagnostics));
+            return Cache(model.CacheKey, CreatePrepared(model, graph: null, hintName, diagnostics));
         }
 
         emitter._graph = new TypeGraph(contextType.ContainingAssembly, emitter._reportDiagnostic);
@@ -67,16 +80,16 @@ internal sealed partial class ContextEmitter
 
         if (emitter._graph.HasErrors)
         {
-            return Cache(model, CreatePrepared(model, graph: null, hintName, diagnostics));
+            return Cache(model.CacheKey, CreatePrepared(model, graph: null, hintName, diagnostics));
         }
 
         emitter.AssignNames(contextType);
         if (emitter._hasNameErrors || emitter._graph.HasErrors)
         {
-            return Cache(model, CreatePrepared(model, graph: null, hintName, diagnostics));
+            return Cache(model.CacheKey, CreatePrepared(model, graph: null, hintName, diagnostics));
         }
 
-        return Cache(model, CreatePrepared(model, emitter._graph, hintName, diagnostics));
+        return Cache(model.CacheKey, CreatePrepared(model, emitter._graph, hintName, diagnostics));
     }
 
     public string EmitSource()
@@ -85,9 +98,9 @@ internal sealed partial class ContextEmitter
         return _writer.ToString();
     }
 
-    private static PreparedContext Cache(ContextModel model, PreparedContext prepared)
+    private static PreparedContext Cache(string cacheKey, PreparedContext prepared)
     {
-        ContextSpecCache.Add(model.CacheKey, prepared);
+        ContextSpecCache.Add(cacheKey, prepared);
         return prepared;
     }
 
@@ -1160,7 +1173,7 @@ internal sealed partial class ContextEmitter
         }
     }
 
-    private static string GetHintName(INamedTypeSymbol contextType)
+    internal static string GetHintName(INamedTypeSymbol contextType)
     {
         var builder = new StringBuilder();
         foreach (var character in contextType.ToDisplayString())

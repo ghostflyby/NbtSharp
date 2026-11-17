@@ -19,6 +19,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="NbtSharp.SourceGeneration.Benchmarks"/>
     <InternalsVisibleTo Include="NbtSharp.SourceGeneration.Tests"/>
   </ItemGroup>
 

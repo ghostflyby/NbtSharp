@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>false</IsTestProject>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" Version="0.16.0-preview.2"/>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NbtSharp\NbtSharp.csproj"/>
+    <ProjectReference Include="..\NbtSharp.SourceGeneration\NbtSharp.SourceGeneration.csproj"/>
+  </ItemGroup>
+
+</Project>
