@@ -98,7 +98,7 @@ internal static class Diagnostics
     public static readonly DiagnosticDescriptor UnsupportedCollection = new(
         "NBTSG011",
         "Unsupported collection type",
-        "The collection type '{0}' is not supported; use an array, List<T>, IReadOnlyList<T>, IReadOnlyCollection<T>, or a string-keyed dictionary",
+        "The collection type '{0}' is not supported; use a sequence or string-keyed map type, or provide a CollectionBuilderAttribute or a public constructor/Add pattern",
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);

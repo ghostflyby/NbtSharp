@@ -245,6 +245,12 @@ internal sealed partial class ContextEmitter
             entry.ConverterName = MakeUnique($"Converter_{index}", used);
             used.Add(entry.ConverterName);
 
+            if (entry.GeneratedBuilder is not null)
+            {
+                entry.BuilderName = MakeUnique($"Builder_{index}", used);
+                used.Add(entry.BuilderName);
+            }
+
             if (!entry.IsRoot)
             {
                 entry.AccessorName = MakeUnique($"TypeInfo{index}", used);
@@ -301,6 +307,15 @@ internal sealed partial class ContextEmitter
         }
 
         EmitGetTypeInfo();
+
+        foreach (var entry in spec.Entries)
+        {
+            if (entry.GeneratedBuilder is { } builder)
+            {
+                _writer.WriteLine();
+                EmitGeneratedBuilder(entry, builder);
+            }
+        }
 
         foreach (var entry in spec.Entries)
         {
@@ -379,21 +394,75 @@ internal sealed partial class ContextEmitter
         TypeEntryKind.Enum => $"new {entry.ConverterName}()",
         TypeEntryKind.Array =>
             $"{MetadataServices}.CreateArrayConverter<{entry.ElementTypeName!}>()",
-        TypeEntryKind.List =>
-            $"{MetadataServices}.CreateListConverter<{entry.ElementTypeName!}>()",
-        TypeEntryKind.ReadOnlyList =>
-            $"{MetadataServices}.CreateReadOnlyListConverter<{entry.ElementTypeName!}>()",
-        TypeEntryKind.ReadOnlyCollection =>
-            $"{MetadataServices}.CreateReadOnlyCollectionConverter<{entry.ElementTypeName!}>()",
+        TypeEntryKind.Collection => GetCollectionFactory(entry),
+        TypeEntryKind.Map => GetMapFactory(entry),
         TypeEntryKind.Nullable =>
             $"{MetadataServices}.CreateNullableConverter<{entry.UnderlyingTypeName!}>()",
-        TypeEntryKind.Dictionary =>
-            $"{MetadataServices}.CreateDictionaryConverter<{entry.ValueTypeName!}>()",
-        TypeEntryKind.IDictionary =>
-            $"{MetadataServices}.CreateIDictionaryConverter<{entry.ValueTypeName!}>()",
-        TypeEntryKind.IReadOnlyDictionary =>
-            $"{MetadataServices}.CreateIReadOnlyDictionaryConverter<{entry.ValueTypeName!}>()",
         _ => throw new InvalidOperationException($"Unknown entry kind {entry.Kind}."),
+    };
+
+    private string GetCollectionFactory(TypeSpec entry) => entry.CollectionShape switch
+    {
+        CollectionShape.List =>
+            $"{MetadataServices}.CreateListBackedCollectionConverter<" +
+            $"{entry.TypeName}, {entry.ElementTypeName!}>()",
+        CollectionShape.Set =>
+            $"{MetadataServices}.CreateSetBackedCollectionConverter<" +
+            $"{entry.TypeName}, {entry.ElementTypeName!}>()",
+        CollectionShape.Queue =>
+            $"{MetadataServices}.CreateQueueConverter<{entry.ElementTypeName!}>()",
+        CollectionShape.Stack =>
+            $"{MetadataServices}.CreateStackConverter<{entry.ElementTypeName!}>()",
+        CollectionShape.LinkedList =>
+            $"{MetadataServices}.CreateLinkedListConverter<{entry.ElementTypeName!}>()",
+        CollectionShape.Collection =>
+            $"{MetadataServices}.CreateCollectionConverter<{entry.ElementTypeName!}>()",
+        CollectionShape.ObservableCollection =>
+            $"{MetadataServices}.CreateObservableCollectionConverter<{entry.ElementTypeName!}>()",
+        CollectionShape.ReadOnlyCollection =>
+            $"{MetadataServices}.CreateReadOnlyCollectionWrapperConverter<{entry.ElementTypeName!}>()",
+        CollectionShape.ImmutableArray =>
+            $"{MetadataServices}.CreateImmutableArrayConverter<{entry.ElementTypeName!}>()",
+        CollectionShape.ImmutableList =>
+            $"{MetadataServices}.CreateImmutableListConverter<" +
+            $"{entry.TypeName}, {entry.ElementTypeName!}>()",
+        CollectionShape.ImmutableHashSet =>
+            $"{MetadataServices}.CreateImmutableHashSetConverter<" +
+            $"{entry.TypeName}, {entry.ElementTypeName!}>()",
+        CollectionShape.ImmutableQueue =>
+            $"{MetadataServices}.CreateImmutableQueueConverter<" +
+            $"{entry.TypeName}, {entry.ElementTypeName!}>()",
+        CollectionShape.ImmutableStack =>
+            $"{MetadataServices}.CreateImmutableStackConverter<" +
+            $"{entry.TypeName}, {entry.ElementTypeName!}>()",
+        CollectionShape.FrozenSet =>
+            $"{MetadataServices}.CreateFrozenSetConverter<{entry.ElementTypeName!}>()",
+        CollectionShape.Generated =>
+            $"{MetadataServices}.CreateSequenceConverter<" +
+            $"{entry.TypeName}, {entry.ElementTypeName!}, {entry.BuilderName!}>()",
+        _ => throw new InvalidOperationException(
+            $"Unknown collection shape {entry.CollectionShape}."),
+    };
+
+    private string GetMapFactory(TypeSpec entry) => entry.MapShape switch
+    {
+        MapShape.Dictionary =>
+            $"{MetadataServices}.CreateDictionaryBackedConverter<" +
+            $"{entry.TypeName}, {entry.ValueTypeName!}>()",
+        MapShape.ReadOnlyDictionary =>
+            $"{MetadataServices}.CreateReadOnlyDictionaryConverter<{entry.ValueTypeName!}>()",
+        MapShape.ImmutableDictionary =>
+            $"{MetadataServices}.CreateImmutableDictionaryConverter<" +
+            $"{entry.TypeName}, {entry.ValueTypeName!}>()",
+        MapShape.ImmutableSortedDictionary =>
+            $"{MetadataServices}.CreateImmutableSortedDictionaryConverter<" +
+            $"{entry.TypeName}, {entry.ValueTypeName!}>()",
+        MapShape.FrozenDictionary =>
+            $"{MetadataServices}.CreateFrozenDictionaryConverter<{entry.ValueTypeName!}>()",
+        MapShape.Generated =>
+            $"{MetadataServices}.CreateMapConverter<" +
+            $"{entry.TypeName}, {entry.ValueTypeName!}, {entry.BuilderName!}>()",
+        _ => throw new InvalidOperationException($"Unknown map shape {entry.MapShape}."),
     };
 
     private void EmitObjectConverter(TypeSpec entry, ObjectSpec model)
@@ -922,6 +991,84 @@ internal sealed partial class ContextEmitter
 
     private void Report(DiagnosticDescriptor descriptor, Location? location, params object[] arguments) =>
         _reportDiagnostic(DiagnosticSpec.Create(descriptor, location, arguments));
+
+    private void EmitGeneratedBuilder(TypeSpec entry, GeneratedBuilderSpec builder)
+    {
+        var interfaceName = builder.IsMap
+            ? $"global::NbtSharp.INbtMapBuilder<{entry.TypeName}, {entry.ValueTypeName!}>"
+            : $"global::NbtSharp.INbtSequenceBuilder<{entry.TypeName}, {entry.ElementTypeName!}>";
+        _writer.WriteLine($"private struct {entry.BuilderName} : {interfaceName}");
+        _writer.WriteLine("{");
+        _writer.Indent();
+        _writer.WriteLine($"private {builder.StorageTypeName} __state;");
+        _writer.WriteLine();
+
+        if (builder.IsMap)
+        {
+            _writer.WriteLine("public void Create()");
+            _writer.WriteLine("{");
+            _writer.Indent();
+            foreach (var line in builder.CreateLines)
+            {
+                _writer.WriteLine(line);
+            }
+
+            _writer.Outdent();
+            _writer.WriteLine("}");
+            _writer.WriteLine();
+            _writer.WriteLine(
+                $"public bool ContainsKey(string key) => {builder.ContainsKeyExpression!};");
+            _writer.WriteLine();
+            _writer.WriteLine($"public void Add(string key, {entry.ValueTypeName!} value)");
+            _writer.WriteLine("{");
+            _writer.Indent();
+            foreach (var line in builder.AddLines)
+            {
+                _writer.WriteLine(line);
+            }
+
+            _writer.Outdent();
+            _writer.WriteLine("}");
+        }
+        else
+        {
+            _writer.WriteLine("public void Create(int count)");
+            _writer.WriteLine("{");
+            _writer.Indent();
+            foreach (var line in builder.CreateLines)
+            {
+                _writer.WriteLine(line);
+            }
+
+            _writer.Outdent();
+            _writer.WriteLine("}");
+            _writer.WriteLine();
+            _writer.WriteLine($"public void Add({entry.ElementTypeName!} item)");
+            _writer.WriteLine("{");
+            _writer.Indent();
+            foreach (var line in builder.AddLines)
+            {
+                _writer.WriteLine(line);
+            }
+
+            _writer.Outdent();
+            _writer.WriteLine("}");
+        }
+
+        _writer.WriteLine();
+        _writer.WriteLine($"public {entry.TypeName} Complete()");
+        _writer.WriteLine("{");
+        _writer.Indent();
+        foreach (var line in builder.CompleteLines)
+        {
+            _writer.WriteLine(line);
+        }
+
+        _writer.Outdent();
+        _writer.WriteLine("}");
+        _writer.Outdent();
+        _writer.WriteLine("}");
+    }
 
     private void EmitEnumConverter(TypeSpec entry)
     {

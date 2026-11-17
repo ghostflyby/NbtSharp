@@ -77,6 +77,40 @@ internal sealed class ContextSpec
 }
 
 /// <summary>
+/// A symbol-free description of a collection builder emitted into the generated context.
+/// </summary>
+internal sealed class GeneratedBuilderSpec
+{
+    public GeneratedBuilderSpec(
+        bool isMap,
+        string storageTypeName,
+        ImmutableArray<string> createLines,
+        ImmutableArray<string> addLines,
+        string? containsKeyExpression,
+        ImmutableArray<string> completeLines)
+    {
+        IsMap = isMap;
+        StorageTypeName = storageTypeName;
+        CreateLines = createLines;
+        AddLines = addLines;
+        ContainsKeyExpression = containsKeyExpression;
+        CompleteLines = completeLines;
+    }
+
+    public bool IsMap { get; }
+
+    public string StorageTypeName { get; }
+
+    public ImmutableArray<string> CreateLines { get; }
+
+    public ImmutableArray<string> AddLines { get; }
+
+    public string? ContainsKeyExpression { get; }
+
+    public ImmutableArray<string> CompleteLines { get; }
+}
+
+/// <summary>
 /// A symbol-free description of one entry in a generated context.
 /// </summary>
 internal sealed class TypeSpec
@@ -100,6 +134,10 @@ internal sealed class TypeSpec
 
     public string ConverterName { get; set; } = "";
 
+    public string? BuilderName { get; set; }
+
+    public GeneratedBuilderSpec? GeneratedBuilder { get; set; }
+
     public string? PublicPropertyName { get; set; }
 
     public bool IsRoot { get; set; }
@@ -110,7 +148,11 @@ internal sealed class TypeSpec
 
     public string? ElementTypeName { get; set; }
 
+    public CollectionShape CollectionShape { get; set; }
+
     public string? ValueTypeName { get; set; }
+
+    public MapShape MapShape { get; set; }
 
     public string? UnderlyingTypeName { get; set; }
 
@@ -476,7 +518,7 @@ internal static class ContextSpecFingerprint
     public static string Compute(ContextSpec spec)
     {
         var hash = StableHash.Create();
-        hash.Add("context-spec-v1");
+        hash.Add("context-spec-v3");
         hash.Add(spec.HintName);
         hash.Add(spec.ContainingNamespace);
         hash.Add(spec.ContextName);
@@ -523,12 +565,30 @@ internal static class ContextSpecFingerprint
         hash.Add(entry.AccessorName);
         hash.Add(entry.BackingFieldName);
         hash.Add(entry.ConverterName);
+        hash.Add(entry.BuilderName);
         hash.Add(entry.PublicPropertyName);
         hash.Add(entry.IsRoot);
         hash.Add(entry.IsPubliclyAccessible);
         hash.Add(entry.ElementTypeName);
+        hash.Add((int)entry.CollectionShape);
         hash.Add(entry.ValueTypeName);
+        hash.Add((int)entry.MapShape);
         hash.Add(entry.UnderlyingTypeName);
+
+        if (entry.GeneratedBuilder is { } builder)
+        {
+            hash.Add("builder");
+            hash.Add(builder.IsMap);
+            hash.Add(builder.StorageTypeName);
+            AddStrings(ref hash, builder.CreateLines);
+            AddStrings(ref hash, builder.AddLines);
+            hash.Add(builder.ContainsKeyExpression);
+            AddStrings(ref hash, builder.CompleteLines);
+        }
+        else
+        {
+            hash.Add(-1);
+        }
 
         if (entry.EnumMapping is { } mapping)
         {

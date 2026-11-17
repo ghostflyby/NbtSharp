@@ -57,11 +57,15 @@ internal sealed partial class ContextEmitter
                 AccessorName = entry.AccessorName,
                 BackingFieldName = entry.BackingFieldName,
                 ConverterName = entry.ConverterName,
+                BuilderName = entry.BuilderName,
+                GeneratedBuilder = entry.GeneratedBuilder,
                 PublicPropertyName = entry.PublicPropertyName,
                 IsRoot = entry.IsRoot,
                 IsPubliclyAccessible = IsPubliclyAccessible(entry.Type),
                 ElementTypeName = entry.ElementType is null ? null : Fq(entry.ElementType),
+                CollectionShape = entry.CollectionShape,
                 ValueTypeName = entry.ValueType is null ? null : Fq(entry.ValueType),
+                MapShape = entry.MapShape,
                 UnderlyingTypeName = entry.UnderlyingType is null ? null : Fq(entry.UnderlyingType),
             };
 

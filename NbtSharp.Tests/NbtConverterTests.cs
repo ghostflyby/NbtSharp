@@ -120,22 +120,25 @@ public sealed class NbtConverterTests
     }
 
     [Fact]
-    public void EnumerableInterfacesMustBeMaterialized()
+    public void EnumerableInterfacesMaterializeOnWriteAndRead()
     {
         var sequence = LazyValues();
+        var materialized = LazyValues().ToList();
 
-        Assert.Throws<NotSupportedException>(() => NbtSerializer.Serialize(sequence, "root"));
-        Assert.Equal(new[] { 1, 2, 3 }, RoundTrip(sequence.ToList()));
+        Assert.Equal(new[] { 1, 2, 3 }, RoundTrip(sequence));
+        Assert.Equal(new[] { 1, 2, 3 }, RoundTrip(materialized));
     }
 
     [Fact]
-    public void CollectionInterfacesWithoutSizeGuaranteeAreUnsupported()
+    public void ListAndEnumerableInterfacesRoundTrip()
     {
         IList<int> list = new List<int> { 1 };
-        IEnumerable<int> sequence = new[] { 1 };
+        ICollection<int> collection = new List<int> { 2 };
+        IEnumerable<int> sequence = new[] { 3 };
 
-        Assert.Throws<NotSupportedException>(() => NbtSerializer.Serialize(list, "root"));
-        Assert.Throws<NotSupportedException>(() => NbtSerializer.Serialize(sequence, "root"));
+        Assert.Equal(new[] { 1 }, RoundTrip(list));
+        Assert.Equal(new[] { 2 }, RoundTrip(collection));
+        Assert.Equal(new[] { 3 }, RoundTrip(sequence));
     }
 
     [Fact]

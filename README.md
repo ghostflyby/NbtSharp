@@ -104,7 +104,8 @@ Player copy = NbtSerializer.Deserialize(data, context.Player);
 ```
 
 The generator emits a converter for every reachable class or struct and type information for arrays,
-lists, read-only collections, string-keyed dictionaries, and nullable value types. Enums are
+the supported sequence shapes (lists, sets, queues, stacks, linked lists, mutable/read-only wrappers,
+and immutable or frozen collections), string-keyed dictionary shapes, and nullable value types. Enums are
 serialized as the signed NBT integer tag that matches their underlying type width (`byte`/`sbyte`
 use `TAG_Byte`, `short`/`ushort` use `TAG_Short`, `int`/`uint` use `TAG_Int`, and `long`/`ulong`
 use `TAG_Long`); unsigned values preserve their bit pattern. The generator follows the same mapping
@@ -261,10 +262,35 @@ non-empty list, because the tag type must be known before the header is written.
 converter in those positions. Within a list, all elements must still share one actual tag type, and
 the writer validates every element against the predicted header type.
 
-Automatic list support covers arrays, `List<T>`, `IReadOnlyList<T>`, and `IReadOnlyCollection<T>`,
-whose length is known before the list header is written. `IList<T>`, `ICollection<T>`, and
-`IEnumerable<T>` are not automatically supported; materialize to `List<T>` or provide a custom
-converter that writes the list header and elements itself.
+Automatic sequence support covers arrays, `List<T>`, `IEnumerable<T>`, `ICollection<T>`, `IList<T>`,
+`IReadOnlyList<T>`, `IReadOnlyCollection<T>`, `HashSet<T>`, `ISet<T>`, `IReadOnlySet<T>`,
+`SortedSet<T>`, `Queue<T>`, `Stack<T>`, `LinkedList<T>`, `Collection<T>`, `ObservableCollection<T>`,
+`ReadOnlyCollection<T>`, `ConcurrentBag<T>`, `ConcurrentQueue<T>`, `ConcurrentStack<T>`,
+`BlockingCollection<T>`, `ImmutableArray<T>`, `ImmutableList<T>`, `IImmutableList<T>`,
+`ImmutableHashSet<T>`, `IImmutableSet<T>`, `ImmutableQueue<T>`, `IImmutableQueue<T>`,
+`ImmutableStack<T>`, `IImmutableStack<T>`, `ImmutableSortedSet<T>`, and `FrozenSet<T>`.
+
+Concrete collection types are discovered by their implemented interfaces. Construction uses a
+`CollectionBuilderAttribute` builder, a companion static `CreateRange`/`Create` factory, or a public
+constructor/`Add`/`Enqueue`/`Push` pattern; the generator emits the matching builder into the context.
+Interfaces are materialized the same way C# collection expressions choose targets: list interfaces
+become `List<T>` and set interfaces become `HashSet<T>`. NBT list order is the collection's enumeration
+order; stack-like types are filled in reverse so they round-trip, while set-like shapes collapse
+duplicate elements. An `IEnumerable<T>` value that is not an `IReadOnlyCollection<T>` is materialized
+before writing.
+
+Automatic map support covers `Dictionary<string,T>`, `IDictionary<string,T>`,
+`IReadOnlyDictionary<string,T>`, `ReadOnlyDictionary<string,T>`, `SortedDictionary<string,T>`,
+`SortedList<string,T>`, `ConcurrentDictionary<string,T>`, `ImmutableDictionary<string,T>`,
+`IImmutableDictionary<string,T>`, `ImmutableSortedDictionary<string,T>`, and
+`FrozenDictionary<string,T>`. Keys must be strings; duplicate keys keep the last value unless
+`RejectDuplicateCompoundNames` is set. Dictionaries and sets do not preserve NBT order, so their
+serialized member order is the collection's enumeration order.
+
+The reflection resolver supports the same built-in shapes and uses a reflection-based pattern
+fallback for collection-builder and constructor/`Add` types. A `CollectionBuilderAttribute` method
+that accepts only `ReadOnlySpan<T>` or `Span<T>` cannot be invoked through reflection; use source
+generation for those custom types.
 
 On read, arrays with fixed-width element tags are allocated once at the declared list length instead
 of being built through `List<T>`; variable-size element arrays and stream-backed reads grow from a

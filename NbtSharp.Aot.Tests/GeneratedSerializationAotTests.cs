@@ -1,4 +1,10 @@
+using System.Collections;
+using System.Collections.Concurrent;
+using System.Collections.Frozen;
+using System.Collections.Immutable;
+using System.Collections.ObjectModel;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 
 namespace NbtSharp.Aot.Tests;
 
@@ -112,6 +118,75 @@ public sealed class GeneratedSerializationAotTests
     }
 
     [Fact]
+    public void RoundTripsAdditionalCollectionShapes()
+    {
+        var value = new AotCollectionShapes
+        {
+            Queue = new Queue<int>([1, 2]),
+            Stack = new Stack<int>([1, 2]),
+            Set = new HashSet<string> { "a", "b" },
+            ListInterface = new List<int> { 3, 4 },
+            ReadOnly = new ReadOnlyCollection<int>([5, 6]),
+            ImmutableArray = [7, 8],
+            ImmutableList = ImmutableList.Create(9, 10),
+            ImmutableSet = ImmutableHashSet.Create("c", "d"),
+            ReadOnlyDictionary = new ReadOnlyDictionary<string, int>(
+                new Dictionary<string, int> { ["a"] = 1 }),
+            ImmutableDictionary = ImmutableDictionary.CreateRange(
+                new Dictionary<string, int> { ["b"] = 2 }),
+            FrozenSet = new HashSet<int> { 11, 12 }.ToFrozenSet(),
+            FrozenDictionary = new Dictionary<string, int> { ["c"] = 3 }.ToFrozenDictionary(),
+        };
+
+        var data = NbtSerializer.Serialize(
+            value,
+            AotContext.Default.AotCollectionShapes,
+            "root");
+        var copy = NbtSerializer.Deserialize(data, AotContext.Default.AotCollectionShapes);
+
+        Assert.Equal([1, 2], copy.Queue.ToArray());
+        Assert.Equal([2, 1], copy.Stack.ToArray());
+        Assert.True(copy.Set.SetEquals(["a", "b"]));
+        Assert.Equal([3, 4], copy.ListInterface.ToArray());
+        Assert.Equal([5, 6], copy.ReadOnly.ToArray());
+        Assert.Equal([7, 8], copy.ImmutableArray.ToArray());
+        Assert.Equal([9, 10], copy.ImmutableList.ToArray());
+        Assert.True(copy.ImmutableSet.SetEquals(["c", "d"]));
+        Assert.Equal(1, copy.ReadOnlyDictionary["a"]);
+        Assert.Equal(2, copy.ImmutableDictionary["b"]);
+        Assert.True(copy.FrozenSet.SetEquals([11, 12]));
+        Assert.Equal(3, copy.FrozenDictionary["c"]);
+    }
+
+    [Fact]
+    public void RoundTripsDiscoveredCollectionPatterns()
+    {
+        var value = new AotDiscoveredCollections
+        {
+            ConcurrentMap = new ConcurrentDictionary<string, int>(
+                new Dictionary<string, int> { ["a"] = 1 }),
+            SortedSet = [2, 1],
+            ImmutableSortedSet = ImmutableSortedSet.Create(4, 3),
+            ImmutableSortedMap = ImmutableSortedDictionary.CreateRange(
+                StringComparer.Ordinal,
+                new Dictionary<string, int> { ["b"] = 2 }),
+            Custom = new AotCustomCollection<int>([5, 6]),
+        };
+
+        var data = NbtSerializer.Serialize(
+            value,
+            AotContext.Default.AotDiscoveredCollections,
+            "root");
+        var copy = NbtSerializer.Deserialize(data, AotContext.Default.AotDiscoveredCollections);
+
+        Assert.Equal(1, copy.ConcurrentMap["a"]);
+        Assert.Equal([1, 2], copy.SortedSet.ToArray());
+        Assert.Equal([3, 4], copy.ImmutableSortedSet.ToArray());
+        Assert.Equal(2, copy.ImmutableSortedMap["b"]);
+        Assert.Equal([5, 6], copy.Custom.ToArray());
+    }
+
+    [Fact]
     public void RoundTripsPositionalRecord()
     {
         var value = new AotRecord(3, 4);
@@ -145,6 +220,8 @@ public sealed class GeneratedSerializationAotTests
 [NbtSerializable(typeof(AotEnums))]
 [NbtSerializable(typeof(AotWrapper<AotSimple>))]
 [NbtSerializable(typeof(AotCollections))]
+[NbtSerializable(typeof(AotCollectionShapes))]
+[NbtSerializable(typeof(AotDiscoveredCollections))]
 [NbtSerializable(typeof(AotRecord))]
 [NbtSerializable(typeof(AotConverters))]
 internal partial class AotContext : NbtSerializerContext
@@ -208,6 +285,74 @@ internal sealed class AotCollections
     public Dictionary<string, AotSimple> Map { get; init; } = [];
 
     public int? OptionalNumber { get; init; }
+}
+
+internal sealed class AotCollectionShapes
+{
+    public Queue<int> Queue { get; init; } = new();
+
+    public Stack<int> Stack { get; init; } = new();
+
+    public HashSet<string> Set { get; init; } = [];
+
+    public IList<int> ListInterface { get; init; } = new List<int>();
+
+    public ReadOnlyCollection<int> ReadOnly { get; init; } = new(new List<int>());
+
+    public ImmutableArray<int> ImmutableArray { get; init; }
+
+    public ImmutableList<int> ImmutableList { get; init; } = ImmutableList<int>.Empty;
+
+    public ImmutableHashSet<string> ImmutableSet { get; init; } = ImmutableHashSet<string>.Empty;
+
+    public ReadOnlyDictionary<string, int> ReadOnlyDictionary { get; init; } =
+        new(new Dictionary<string, int>());
+
+    public ImmutableDictionary<string, int> ImmutableDictionary { get; init; } =
+        ImmutableDictionary<string, int>.Empty;
+
+    public FrozenSet<int> FrozenSet { get; init; } = new HashSet<int>().ToFrozenSet();
+
+    public FrozenDictionary<string, int> FrozenDictionary { get; init; } =
+        new Dictionary<string, int>().ToFrozenDictionary();
+}
+
+internal sealed class AotDiscoveredCollections
+{
+    public ConcurrentDictionary<string, int> ConcurrentMap { get; init; } =
+        new(StringComparer.Ordinal);
+
+    public SortedSet<int> SortedSet { get; init; } = [];
+
+    public ImmutableSortedSet<int> ImmutableSortedSet { get; init; } =
+        ImmutableSortedSet<int>.Empty;
+
+    public ImmutableSortedDictionary<string, int> ImmutableSortedMap { get; init; } =
+        ImmutableSortedDictionary<string, int>.Empty;
+
+    public AotCustomCollection<int> Custom { get; init; } = new([]);
+}
+
+[CollectionBuilder(typeof(AotCustomCollectionFactory), "Create")]
+internal sealed class AotCustomCollection<T> : IReadOnlyList<T>
+{
+    private readonly T[] _items;
+
+    public AotCustomCollection(T[] items) => _items = items;
+
+    public T this[int index] => _items[index];
+
+    public int Count => _items.Length;
+
+    public IEnumerator<T> GetEnumerator() => ((IEnumerable<T>)_items).GetEnumerator();
+
+    IEnumerator IEnumerable.GetEnumerator() => _items.GetEnumerator();
+}
+
+internal static class AotCustomCollectionFactory
+{
+    public static AotCustomCollection<T> Create<T>(ReadOnlySpan<T> items) =>
+        new(items.ToArray());
 }
 
 internal sealed record AotRecord(int X, int Y);
