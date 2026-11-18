@@ -73,56 +73,87 @@ internal sealed class NbtReflectionMapConverter<TCollection, TValue> :
         {
             var pairType = typeof(KeyValuePair<,>).MakeGenericType(typeof(string), valueType);
             var attribute = collectionType.GetCustomAttribute<CollectionBuilderAttribute>();
-            if (attribute is not null &&
-                TryFindFactory(
-                    attribute.BuilderType,
-                    attribute.MethodName,
-                    collectionType,
-                    valueType,
-                    pairType,
-                    out var factory,
-                    out var factoryTakesArray))
+            string? spanFactory = null;
+            if (attribute is not null)
             {
-                return new MapPlan(
-                    null,
-                    false,
-                    factory,
-                    factoryTakesArray,
-                    null,
-                    null,
-                    null,
-                    false);
+                if (TryFindFactory(
+                        attribute.BuilderType,
+                        attribute.MethodName,
+                        collectionType,
+                        valueType,
+                        pairType,
+                        out var factory,
+                        out var factoryTakesArray))
+                {
+                    return new MapPlan(
+                        null,
+                        false,
+                        factory,
+                        factoryTakesArray,
+                        null,
+                        null,
+                        null,
+                        false);
+                }
+
+                if (HasSpanFactory(
+                        attribute.BuilderType,
+                        attribute.MethodName,
+                        collectionType,
+                        valueType,
+                        pairType))
+                {
+                    spanFactory = $"{attribute.BuilderType}.{attribute.MethodName}";
+                }
             }
 
-            var companion = collectionType.Assembly.GetType(
-                $"{collectionType.Namespace}.{collectionType.Name}");
-            if (companion is not null &&
-                (TryFindFactory(
-                     companion,
-                     "CreateRange",
-                     collectionType,
-                     valueType,
-                     pairType,
-                     out factory,
-                     out factoryTakesArray) ||
-                 TryFindFactory(
-                     companion,
-                     "Create",
-                     collectionType,
-                     valueType,
-                     pairType,
-                     out factory,
-                     out factoryTakesArray)))
+            var companion = FindCompanionType(collectionType);
+            if (companion is not null)
             {
-                return new MapPlan(
-                    null,
-                    false,
-                    factory,
-                    factoryTakesArray,
-                    null,
-                    null,
-                    null,
-                    false);
+                if (TryFindFactory(
+                        companion,
+                        "CreateRange",
+                        collectionType,
+                        valueType,
+                        pairType,
+                        out var factory,
+                        out var factoryTakesArray) ||
+                    TryFindFactory(
+                        companion,
+                        "Create",
+                        collectionType,
+                        valueType,
+                        pairType,
+                        out factory,
+                        out factoryTakesArray))
+                {
+                    return new MapPlan(
+                        null,
+                        false,
+                        factory,
+                        factoryTakesArray,
+                        null,
+                        null,
+                        null,
+                        false);
+                }
+
+                if (spanFactory is null)
+                {
+                    foreach (var methodName in new[] { "CreateRange", "Create" })
+                    {
+                        if (HasSpanFactory(
+                                companion,
+                                methodName,
+                                collectionType,
+                                valueType,
+                                pairType))
+                        {
+                            spanFactory = $"{companion}.{methodName}";
+                            break;
+                        }
+                    }
+                }
             }
 
             var indexer = collectionType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
@@ -188,8 +219,56 @@ internal sealed class NbtReflectionMapConverter<TCollection, TValue> :
                 }
             }
 
-            throw new NotSupportedException(
-                $"No supported construction pattern was found for {collectionType}.");
+            throw spanFactory is null
+                ? new NotSupportedException(
+                    $"No supported construction pattern was found for {collectionType}.")
+                : new NbtSpanCollectionBuilderException(spanFactory, collectionType);
+        }
+
+        private static Type? FindCompanionType(Type collectionType)
+        {
+            var name = collectionType.Name;
+            var arityIndex = name.IndexOf('`');
+            if (arityIndex >= 0)
+            {
+                name = name[..arityIndex];
+            }
+
+            return collectionType.Assembly.GetType($"{collectionType.Namespace}.{name}");
+        }
+
+        private static bool HasSpanFactory(
+            Type builderType,
+            string methodName,
+            Type collectionType,
+            Type valueType,
+            Type pairType)
+        {
+            foreach (var candidate in builderType.GetMethods(
+                         BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static))
+            {
+                if (candidate.Name != methodName || candidate.GetParameters().Length != 1)
+                {
+                    continue;
+                }
+
+                if (!TryCloseFactory(candidate, valueType, out var methodToCheck) ||
+                    !collectionType.IsAssignableFrom(methodToCheck.ReturnType))
+                {
+                    continue;
+                }
+
+                var parameterType = methodToCheck.GetParameters()[0].ParameterType;
+                if (parameterType.IsGenericType &&
+                    (parameterType.GetGenericTypeDefinition() == typeof(ReadOnlySpan<>) ||
+                     parameterType.GetGenericTypeDefinition() == typeof(Span<>)) &&
+                    parameterType.GetGenericArguments()[0] == pairType)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static ConstructorInfo? FindComparerConstructor(Type collectionType)
@@ -249,6 +328,35 @@ internal sealed class NbtReflectionMapConverter<TCollection, TValue> :
 
     [UnconditionalSuppressMessage("Aot", "IL2060", Justification = "Reflection is confined to the annotated reflection resolver path.")]
     [UnconditionalSuppressMessage("Aot", "IL2070", Justification = "Reflection is confined to the annotated reflection resolver path.")]
+    private static bool TryCloseFactory(
+        MethodInfo candidate,
+        Type valueType,
+        [NotNullWhen(true)] out MethodInfo? closed)
+    {
+        if (!candidate.IsGenericMethodDefinition)
+        {
+            closed = candidate;
+            return true;
+        }
+
+        try
+        {
+            closed = candidate.GetGenericArguments().Length switch
+            {
+                1 => candidate.MakeGenericMethod(valueType),
+                2 => candidate.MakeGenericMethod(typeof(string), valueType),
+                _ => null,
+            };
+        }
+        catch (ArgumentException)
+        {
+            closed = null;
+            return false;
+        }
+
+        return closed is not null;
+    }
+
     private static bool TryFindFactory(
         Type builderType,
         string methodName,
@@ -267,20 +375,8 @@ internal sealed class NbtReflectionMapConverter<TCollection, TValue> :
                 continue;
             }
 
-            var methodToCheck = candidate;
-            if (candidate.IsGenericMethodDefinition)
-            {
-                try
-                {
-                    methodToCheck = candidate.MakeGenericMethod(typeof(string), valueType);
-                }
-                catch (ArgumentException)
-                {
-                    continue;
-                }
-            }
-
-            if (!collectionType.IsAssignableFrom(methodToCheck.ReturnType))
+            if (!TryCloseFactory(candidate, valueType, out var methodToCheck) ||
+                !collectionType.IsAssignableFrom(methodToCheck.ReturnType))
             {
                 continue;
             }

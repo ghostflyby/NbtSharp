@@ -136,6 +136,10 @@ public sealed class GeneratedSerializationAotTests
                 new Dictionary<string, int> { ["b"] = 2 }),
             FrozenSet = new HashSet<int> { 11, 12 }.ToFrozenSet(),
             FrozenDictionary = new Dictionary<string, int> { ["c"] = 3 }.ToFrozenDictionary(),
+            ReadOnlyObservable = new ReadOnlyObservableCollection<int>(
+                new ObservableCollection<int> { 13, 14 }),
+            SortedStrings = new SortedSet<string>(StringComparer.Ordinal) { "a", "B" },
+            ImmutableSortedStrings = ImmutableSortedSet.Create(StringComparer.Ordinal, "a", "B"),
         };
 
         var data = NbtSerializer.Serialize(
@@ -156,6 +160,11 @@ public sealed class GeneratedSerializationAotTests
         Assert.Equal(2, copy.ImmutableDictionary["b"]);
         Assert.True(copy.FrozenSet.SetEquals([11, 12]));
         Assert.Equal(3, copy.FrozenDictionary["c"]);
+        Assert.Equal([13, 14], copy.ReadOnlyObservable.ToArray());
+        Assert.Equal(["B", "a"], copy.SortedStrings.ToArray());
+        Assert.Equal(["B", "a"], copy.ImmutableSortedStrings.ToArray());
+        Assert.Same(StringComparer.Ordinal, copy.SortedStrings.Comparer);
+        Assert.Same(StringComparer.Ordinal, copy.ImmutableSortedStrings.KeyComparer);
     }
 
     [Fact]
@@ -315,6 +324,14 @@ internal sealed class AotCollectionShapes
 
     public FrozenDictionary<string, int> FrozenDictionary { get; init; } =
         new Dictionary<string, int>().ToFrozenDictionary();
+
+    public ReadOnlyObservableCollection<int> ReadOnlyObservable { get; init; } =
+        new(new ObservableCollection<int>());
+
+    public SortedSet<string> SortedStrings { get; init; } = new(StringComparer.Ordinal);
+
+    public ImmutableSortedSet<string> ImmutableSortedStrings { get; init; } =
+        ImmutableSortedSet.Create<string>(StringComparer.Ordinal);
 }
 
 internal sealed class AotDiscoveredCollections

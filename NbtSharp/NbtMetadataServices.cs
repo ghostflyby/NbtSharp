@@ -118,6 +118,22 @@ public static class NbtMetadataServices
             TElement,
             NbtReadOnlyCollectionBuilder<TElement>>();
 
+    /// <summary>Creates a converter for <see cref="ReadOnlyObservableCollection{T}"/>.</summary>
+    /// <typeparam name="TElement">The element type.</typeparam>
+    /// <returns>The converter.</returns>
+    public static NbtConverter<ReadOnlyObservableCollection<TElement>>
+        CreateReadOnlyObservableCollectionConverter<TElement>() =>
+        new NbtSequenceConverter<
+            ReadOnlyObservableCollection<TElement>,
+            TElement,
+            NbtReadOnlyObservableCollectionBuilder<TElement>>();
+
+    /// <summary>Creates a converter for <see cref="SortedSet{T}"/>.</summary>
+    /// <typeparam name="TElement">The element type.</typeparam>
+    /// <returns>The converter.</returns>
+    public static NbtConverter<SortedSet<TElement>> CreateSortedSetConverter<TElement>() =>
+        new NbtSequenceConverter<SortedSet<TElement>, TElement, NbtSortedSetBuilder<TElement>>();
+
     /// <summary>Creates a converter for <see cref="ImmutableArray{T}"/>.</summary>
     /// <typeparam name="TElement">The element type.</typeparam>
     /// <returns>The converter.</returns>
@@ -167,6 +183,16 @@ public static class NbtMetadataServices
             TCollection,
             TElement,
             NbtImmutableStackBuilder<TCollection, TElement>>();
+
+    /// <summary>Creates a converter for <see cref="ImmutableSortedSet{T}"/>.</summary>
+    /// <typeparam name="TElement">The element type.</typeparam>
+    /// <returns>The converter.</returns>
+    public static NbtConverter<ImmutableSortedSet<TElement>>
+        CreateImmutableSortedSetConverter<TElement>() =>
+        new NbtSequenceConverter<
+            ImmutableSortedSet<TElement>,
+            TElement,
+            NbtImmutableSortedSetBuilder<TElement>>();
 
     /// <summary>Creates a converter for <see cref="FrozenSet{T}"/>.</summary>
     /// <typeparam name="TElement">The element type.</typeparam>

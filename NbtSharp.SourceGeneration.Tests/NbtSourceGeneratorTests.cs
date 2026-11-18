@@ -642,6 +642,94 @@ public sealed class NbtSourceGeneratorTests
     }
 
     [Fact]
+    public void ReportsPriorityQueueAsUnsupported()
+    {
+        var result = Run("""
+            using System.Collections.Generic;
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Player
+            {
+                public PriorityQueue<int, int> Values { get; set; } = new();
+            }
+            """);
+
+        var diagnostic = Assert.Single(
+            result.GeneratorDiagnostics,
+            static diagnostic => diagnostic.Id == "NBTSG003");
+        Assert.Contains("priority queue", diagnostic.GetMessage(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ReportsNestedPriorityQueueAsUnsupported()
+    {
+        var result = Run("""
+            using System.Collections.Generic;
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Player
+            {
+                public List<PriorityQueue<int, int>> Values { get; set; } = [];
+            }
+            """);
+
+        Assert.Contains(
+            result.GeneratorDiagnostics,
+            static diagnostic =>
+                diagnostic.Id == "NBTSG003" &&
+                diagnostic.GetMessage().Contains("priority queue", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void PriorityQueueMemberCanUseAConverter()
+    {
+        var result = Run("""
+            using System.Collections.Generic;
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Player
+            {
+                [NbtUseConverter(typeof(PriorityQueueConverter))]
+                public PriorityQueue<int, int> Values { get; set; } = new();
+            }
+
+            internal sealed class PriorityQueueConverter : NbtConverter<PriorityQueue<int, int>>
+            {
+                public override PriorityQueue<int, int> Read(
+                    ref NbtReader reader,
+                    NbtSerializerOptions options) => new();
+
+                public override void Write(
+                    ref NbtWriter writer,
+                    PriorityQueue<int, int> value,
+                    NbtSerializerOptions options)
+                {
+                }
+            }
+            """);
+
+        Assert.DoesNotContain(
+            result.GeneratorDiagnostics,
+            static diagnostic => diagnostic.Id == "NBTSG003");
+        AssertNoErrors(result);
+    }
+
+    [Fact]
     public void ReportsReadOnlyMapWithoutMutation()
     {
         var result = Run("""

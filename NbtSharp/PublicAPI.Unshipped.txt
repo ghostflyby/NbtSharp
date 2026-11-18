@@ -287,6 +287,7 @@ static NbtSharp.NbtMetadataServices.CreateImmutableListConverter<TCollection, TE
 static NbtSharp.NbtMetadataServices.CreateImmutableQueueConverter<TCollection, TElement>() -> NbtSharp.NbtConverter<TCollection>!
 static NbtSharp.NbtMetadataServices.CreateImmutableStackConverter<TCollection, TElement>() -> NbtSharp.NbtConverter<TCollection>!
 static NbtSharp.NbtMetadataServices.CreateImmutableSortedDictionaryConverter<TCollection, TValue>() -> NbtSharp.NbtConverter<TCollection>!
+static NbtSharp.NbtMetadataServices.CreateImmutableSortedSetConverter<TElement>() -> NbtSharp.NbtConverter<System.Collections.Immutable.ImmutableSortedSet<TElement>!>!
 static NbtSharp.NbtMetadataServices.CreateLinkedListConverter<TElement>() -> NbtSharp.NbtConverter<System.Collections.Generic.LinkedList<TElement>!>!
 static NbtSharp.NbtMetadataServices.CreateListBackedCollectionConverter<TCollection, TElement>() -> NbtSharp.NbtConverter<TCollection>!
 static NbtSharp.NbtMetadataServices.CreateMapConverter<TCollection, TValue, TBuilder>() -> NbtSharp.NbtConverter<TCollection>!
@@ -298,8 +299,10 @@ static NbtSharp.NbtMetadataServices.CreateReadOnlyCollectionConverter<TElement>(
 static NbtSharp.NbtMetadataServices.CreateReadOnlyCollectionWrapperConverter<TElement>() -> NbtSharp.NbtConverter<System.Collections.ObjectModel.ReadOnlyCollection<TElement>!>!
 static NbtSharp.NbtMetadataServices.CreateReadOnlyDictionaryConverter<TValue>() -> NbtSharp.NbtConverter<System.Collections.ObjectModel.ReadOnlyDictionary<string!, TValue>!>!
 static NbtSharp.NbtMetadataServices.CreateReadOnlyListConverter<TElement>() -> NbtSharp.NbtConverter<System.Collections.Generic.IReadOnlyList<TElement>!>!
+static NbtSharp.NbtMetadataServices.CreateReadOnlyObservableCollectionConverter<TElement>() -> NbtSharp.NbtConverter<System.Collections.ObjectModel.ReadOnlyObservableCollection<TElement>!>!
 static NbtSharp.NbtMetadataServices.CreateSetBackedCollectionConverter<TCollection, TElement>() -> NbtSharp.NbtConverter<TCollection>!
 static NbtSharp.NbtMetadataServices.CreateSequenceConverter<TCollection, TElement, TBuilder>() -> NbtSharp.NbtConverter<TCollection>!
+static NbtSharp.NbtMetadataServices.CreateSortedSetConverter<TElement>() -> NbtSharp.NbtConverter<System.Collections.Generic.SortedSet<TElement>!>!
 static NbtSharp.NbtMetadataServices.CreateStackConverter<TElement>() -> NbtSharp.NbtConverter<System.Collections.Generic.Stack<TElement>!>!
 static NbtSharp.NbtMetadataServices.DuplicateMember(NbtSharp.NbtReader reader, string! name) -> NbtSharp.NbtException!
 static NbtSharp.NbtMetadataServices.ExpectedTag(NbtSharp.NbtReader reader, NbtSharp.NbtTagType expected) -> NbtSharp.NbtException!

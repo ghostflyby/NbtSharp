@@ -265,7 +265,8 @@ the writer validates every element against the predicted header type.
 Automatic sequence support covers arrays, `List<T>`, `IEnumerable<T>`, `ICollection<T>`, `IList<T>`,
 `IReadOnlyList<T>`, `IReadOnlyCollection<T>`, `HashSet<T>`, `ISet<T>`, `IReadOnlySet<T>`,
 `SortedSet<T>`, `Queue<T>`, `Stack<T>`, `LinkedList<T>`, `Collection<T>`, `ObservableCollection<T>`,
-`ReadOnlyCollection<T>`, `ConcurrentBag<T>`, `ConcurrentQueue<T>`, `ConcurrentStack<T>`,
+`ReadOnlyCollection<T>`, `ReadOnlyObservableCollection<T>`, `ConcurrentBag<T>`, `ConcurrentQueue<T>`,
+`ConcurrentStack<T>`,
 `BlockingCollection<T>`, `ImmutableArray<T>`, `ImmutableList<T>`, `IImmutableList<T>`,
 `ImmutableHashSet<T>`, `IImmutableSet<T>`, `ImmutableQueue<T>`, `IImmutableQueue<T>`,
 `ImmutableStack<T>`, `IImmutableStack<T>`, `ImmutableSortedSet<T>`, and `FrozenSet<T>`.
@@ -276,8 +277,13 @@ constructor/`Add`/`Enqueue`/`Push` pattern; the generator emits the matching bui
 Interfaces are materialized the same way C# collection expressions choose targets: list interfaces
 become `List<T>` and set interfaces become `HashSet<T>`. NBT list order is the collection's enumeration
 order; stack-like types are filled in reverse so they round-trip, while set-like shapes collapse
-duplicate elements. An `IEnumerable<T>` value that is not an `IReadOnlyCollection<T>` is materialized
-before writing.
+duplicate elements. `SortedSet<T>` and `ImmutableSortedSet<T>` use ordinal ordering for string
+elements, so round-tripping does not depend on the current culture; custom types derived from them
+follow their own construction comparer. An `IEnumerable<T>` value that is
+not an `IReadOnlyCollection<T>` is materialized before writing. `PriorityQueue<TElement,TPriority>`
+is rejected with a `NotSupportedException` (and `NBTSG003` in generated contexts) because its
+element/priority pairs have no natural NBT sequence representation; register a custom converter to
+choose one.
 
 Automatic map support covers `Dictionary<string,T>`, `IDictionary<string,T>`,
 `IReadOnlyDictionary<string,T>`, `ReadOnlyDictionary<string,T>`, `SortedDictionary<string,T>`,
@@ -289,8 +295,9 @@ serialized member order is the collection's enumeration order.
 
 The reflection resolver supports the same built-in shapes and uses a reflection-based pattern
 fallback for collection-builder and constructor/`Add` types. A `CollectionBuilderAttribute` method
-that accepts only `ReadOnlySpan<T>` or `Span<T>` cannot be invoked through reflection; use source
-generation for those custom types.
+that accepts only `ReadOnlySpan<T>` or `Span<T>` cannot be invoked through reflection; the serializer
+throws a `NotSupportedException` naming the factory and directing you to source generation or a custom
+converter.
 
 On read, arrays with fixed-width element tags are allocated once at the declared list length instead
 of being built through `List<T>`; variable-size element arrays and stream-backed reads grow from a

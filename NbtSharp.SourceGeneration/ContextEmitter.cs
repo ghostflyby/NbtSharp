@@ -421,6 +421,10 @@ internal sealed partial class ContextEmitter
             $"{MetadataServices}.CreateObservableCollectionConverter<{entry.ElementTypeName!}>()",
         CollectionShape.ReadOnlyCollection =>
             $"{MetadataServices}.CreateReadOnlyCollectionWrapperConverter<{entry.ElementTypeName!}>()",
+        CollectionShape.ReadOnlyObservableCollection =>
+            $"{MetadataServices}.CreateReadOnlyObservableCollectionConverter<{entry.ElementTypeName!}>()",
+        CollectionShape.SortedSet =>
+            $"{MetadataServices}.CreateSortedSetConverter<{entry.ElementTypeName!}>()",
         CollectionShape.ImmutableArray =>
             $"{MetadataServices}.CreateImmutableArrayConverter<{entry.ElementTypeName!}>()",
         CollectionShape.ImmutableList =>
@@ -435,6 +439,8 @@ internal sealed partial class ContextEmitter
         CollectionShape.ImmutableStack =>
             $"{MetadataServices}.CreateImmutableStackConverter<" +
             $"{entry.TypeName}, {entry.ElementTypeName!}>()",
+        CollectionShape.ImmutableSortedSet =>
+            $"{MetadataServices}.CreateImmutableSortedSetConverter<{entry.ElementTypeName!}>()",
         CollectionShape.FrozenSet =>
             $"{MetadataServices}.CreateFrozenSetConverter<{entry.ElementTypeName!}>()",
         CollectionShape.Generated =>

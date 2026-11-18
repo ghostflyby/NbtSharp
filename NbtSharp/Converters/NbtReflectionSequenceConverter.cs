@@ -79,51 +79,76 @@ internal sealed class NbtReflectionSequenceConverter<TCollection, TElement> :
             var stackLike = addMethods.Any(static pair => pair.Name == "Push") &&
                             addMethods.All(static pair => pair.Name is not ("Add" or "Enqueue"));
             var attribute = collectionType.GetCustomAttribute<CollectionBuilderAttribute>();
-            if (attribute is not null &&
-                TryFindFactory(
-                    attribute.BuilderType,
-                    attribute.MethodName,
-                    collectionType,
-                    elementType,
-                    out var factory,
-                    out var factoryTakesArray))
+            string? spanFactory = null;
+            if (attribute is not null)
             {
-                return new SequencePlan(
-                    null,
-                    false,
-                    factory,
-                    factoryTakesArray,
-                    null,
-                    null,
-                    stackLike);
+                if (TryFindFactory(
+                        attribute.BuilderType,
+                        attribute.MethodName,
+                        collectionType,
+                        elementType,
+                        out var factory,
+                        out var factoryTakesArray))
+                {
+                    return new SequencePlan(
+                        null,
+                        false,
+                        factory,
+                        factoryTakesArray,
+                        null,
+                        null,
+                        stackLike);
+                }
+
+                if (HasSpanFactory(
+                        attribute.BuilderType,
+                        attribute.MethodName,
+                        collectionType,
+                        elementType))
+                {
+                    spanFactory = $"{attribute.BuilderType}.{attribute.MethodName}";
+                }
             }
 
-            var companion = collectionType.Assembly.GetType(
-                $"{collectionType.Namespace}.{collectionType.Name}");
-            if (companion is not null &&
-                (TryFindFactory(
-                     companion,
-                     "CreateRange",
-                     collectionType,
-                     elementType,
-                     out factory,
-                     out factoryTakesArray) ||
-                 TryFindFactory(
-                     companion,
-                     "Create",
-                     collectionType,
-                     elementType,
-                     out factory,
-                     out factoryTakesArray)))
+            var companion = FindCompanionType(collectionType);
+            if (companion is not null)
             {
-                return new SequencePlan(
-                    null,
-                    false,
-                    factory,
-                    factoryTakesArray,
-                    null,
-                    null,
-                    stackLike);
+                if (TryFindFactory(
+                        companion,
+                        "CreateRange",
+                        collectionType,
+                        elementType,
+                        out var factory,
+                        out var factoryTakesArray) ||
+                    TryFindFactory(
+                        companion,
+                        "Create",
+                        collectionType,
+                        elementType,
+                        out factory,
+                        out factoryTakesArray))
+                {
+                    return new SequencePlan(
+                        null,
+                        false,
+                        factory,
+                        factoryTakesArray,
+                        null,
+                        null,
+                        stackLike);
+                }
+
+                if (spanFactory is null)
+                {
+                    foreach (var methodName in new[] { "CreateRange", "Create" })
+                    {
+                        if (HasSpanFactory(companion, methodName, collectionType, elementType))
+                        {
+                            spanFactory = $"{companion}.{methodName}";
+                            break;
+                        }
+                    }
+                }
             }
 
             var defaultConstructor = collectionType.GetConstructor(Type.EmptyTypes);
@@ -177,8 +202,67 @@ internal sealed class NbtReflectionSequenceConverter<TCollection, TElement> :
                 }
             }
 
-            throw new NotSupportedException(
-                $"No supported construction pattern was found for {collectionType}.");
+            throw spanFactory is null
+                ? new NotSupportedException(
+                    $"No supported construction pattern was found for {collectionType}.")
+                : new NbtSpanCollectionBuilderException(spanFactory, collectionType);
+        }
+
+        private static Type? FindCompanionType(Type collectionType)
+        {
+            var name = collectionType.Name;
+            var arityIndex = name.IndexOf('`');
+            if (arityIndex >= 0)
+            {
+                name = name[..arityIndex];
+            }
+
+            return collectionType.Assembly.GetType($"{collectionType.Namespace}.{name}");
+        }
+
+        private static bool HasSpanFactory(
+            Type builderType,
+            string methodName,
+            Type collectionType,
+            Type elementType)
+        {
+            foreach (var candidate in builderType.GetMethods(
+                         BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static))
+            {
+                if (candidate.Name != methodName || candidate.GetParameters().Length != 1)
+                {
+                    continue;
+                }
+
+                var methodToCheck = candidate;
+                if (candidate.IsGenericMethodDefinition)
+                {
+                    try
+                    {
+                        methodToCheck = candidate.MakeGenericMethod(elementType);
+                    }
+                    catch (ArgumentException)
+                    {
+                        continue;
+                    }
+                }
+
+                if (!collectionType.IsAssignableFrom(methodToCheck.ReturnType))
+                {
+                    continue;
+                }
+
+                var parameterType = methodToCheck.GetParameters()[0].ParameterType;
+                if (parameterType.IsGenericType &&
+                    (parameterType.GetGenericTypeDefinition() == typeof(ReadOnlySpan<>) ||
+                     parameterType.GetGenericTypeDefinition() == typeof(Span<>)) &&
+                    parameterType.GetGenericArguments()[0] == elementType)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static MethodInfo? FindMutator(Type collectionType, string name, Type elementType) =>

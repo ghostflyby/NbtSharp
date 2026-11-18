@@ -462,6 +462,7 @@ internal static class NbtCollectionReader
                 definition == typeof(Collection<>) ||
                 definition == typeof(ObservableCollection<>) ||
                 definition == typeof(ReadOnlyCollection<>) ||
+                definition == typeof(ReadOnlyObservableCollection<>) ||
                 definition == typeof(SortedSet<>) ||
                 definition == typeof(ConcurrentBag<>) ||
                 definition == typeof(ConcurrentQueue<>) ||
