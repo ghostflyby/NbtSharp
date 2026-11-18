@@ -391,7 +391,7 @@ internal static class NbtBuiltInConverters
                 return true;
             }
             catch (System.Reflection.TargetInvocationException ex)
-                when (ex.InnerException is NotSupportedException inner)
+                when (ex.InnerException is NbtSpanCollectionBuilderException inner)
             {
                 System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(inner).Throw();
                 throw;
@@ -413,7 +413,7 @@ internal static class NbtBuiltInConverters
                 return true;
             }
             catch (System.Reflection.TargetInvocationException ex)
-                when (ex.InnerException is NotSupportedException inner)
+                when (ex.InnerException is NbtSpanCollectionBuilderException inner)
             {
                 System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(inner).Throw();
                 throw;

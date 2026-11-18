@@ -80,6 +80,13 @@ public sealed class CollectionShapeTests
         Assert.Empty(RoundTrip(new HashSet<int>()));
         Assert.Empty(RoundTrip(ImmutableArray<int>.Empty));
         Assert.Empty(RoundTrip(ImmutableList<int>.Empty));
+
+        var sorted = RoundTrip(new SortedSet<string>(StringComparer.Ordinal));
+        var immutableSorted = RoundTrip(ImmutableSortedSet.Create<string>(StringComparer.Ordinal));
+        Assert.Empty(sorted);
+        Assert.Empty(immutableSorted);
+        Assert.Same(StringComparer.Ordinal, sorted.Comparer);
+        Assert.Same(StringComparer.Ordinal, immutableSorted.KeyComparer);
     }
 
     [Fact]
@@ -205,7 +212,7 @@ public sealed class CollectionShapeTests
     {
         var value = SpanOnlyCollectionFactory.Create(new[] { 1, 2 });
 
-        var exception = Assert.Throws<NotSupportedException>(() =>
+        var exception = Assert.ThrowsAny<NotSupportedException>(() =>
             NbtSerializer.Serialize(value, "root"));
 
         Assert.Contains("span", exception.Message, StringComparison.OrdinalIgnoreCase);
@@ -216,13 +223,46 @@ public sealed class CollectionShapeTests
     public void ReflectionRejectsSpanOnlyMapBuilderWithGuidance()
     {
         var value = SpanOnlyMapFactory.Create(
-            [new KeyValuePair<string, int>("a", 1)]);
+            new[] { new KeyValuePair<string, int>("a", 1) });
 
-        var exception = Assert.Throws<NotSupportedException>(() =>
+        var exception = Assert.ThrowsAny<NotSupportedException>(() =>
             NbtSerializer.Serialize(value, "root"));
 
         Assert.Contains("span", exception.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("source generator", exception.Message);
+    }
+
+    [Fact]
+    public void ReflectionRejectsCompanionSpanFactoryWithGuidance()
+    {
+        var value = CompanionSpanCollection.Create(new[] { 1, 2 });
+
+        var exception = Assert.ThrowsAny<NotSupportedException>(() =>
+            NbtSerializer.Serialize(value, "root"));
+
+        Assert.Contains("span", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("source generator", exception.Message);
+    }
+
+    [Fact]
+    public void PriorityQueueConverterCanBeSupplied()
+    {
+        var queue = new PriorityQueue<int, int>();
+        queue.Enqueue(1, 2);
+        var options = new NbtSerializerOptions();
+        options.Converters.Add(new PriorityQueueCountConverter());
+
+        var data = NbtSerializer.Serialize(queue, "root", options);
+        var copy = NbtSerializer.Deserialize<PriorityQueue<int, int>>(data, options);
+
+        Assert.Empty(copy.UnorderedItems);
+    }
+
+    [Fact]
+    public void NestedPriorityQueueIsRejected()
+    {
+        Assert.Throws<NotSupportedException>(() =>
+            NbtSerializer.Serialize(new List<PriorityQueue<int, int>> { new() }, "root"));
     }
 
     [Fact]
@@ -325,41 +365,98 @@ internal static class SpanOnlyCollectionFactory
         new(items.ToArray());
 }
 
-[CollectionBuilder(typeof(SpanOnlyMapFactory), "Create")]
-internal sealed class SpanOnlyMap : IReadOnlyDictionary<string, int>
+internal sealed class CompanionSpanCollection<T> : IReadOnlyList<T>
 {
-    private readonly Dictionary<string, int> _items;
+    private readonly T[] _items;
 
-    internal SpanOnlyMap(Dictionary<string, int> items) => _items = items;
+    internal CompanionSpanCollection(T[] items) => _items = items;
 
-    public int this[string key] => _items[key];
+    public T this[int index] => _items[index];
+
+    public int Count => _items.Length;
+
+    public IEnumerator<T> GetEnumerator() => ((IEnumerable<T>)_items).GetEnumerator();
+
+    IEnumerator IEnumerable.GetEnumerator() => _items.GetEnumerator();
+}
+
+internal static class CompanionSpanCollection
+{
+    public static CompanionSpanCollection<T> Create<T>(Span<T> items) => new(items.ToArray());
+}
+
+[CollectionBuilder(typeof(SpanOnlyMapFactory), "Create")]
+internal sealed class SpanOnlyMap<TValue> : IReadOnlyDictionary<string, TValue>
+{
+    private readonly Dictionary<string, TValue> _items;
+
+    internal SpanOnlyMap(Dictionary<string, TValue> items) => _items = items;
+
+    public TValue this[string key] => _items[key];
 
     public IEnumerable<string> Keys => _items.Keys;
 
-    public IEnumerable<int> Values => _items.Values;
+    public IEnumerable<TValue> Values => _items.Values;
 
     public int Count => _items.Count;
 
     public bool ContainsKey(string key) => _items.ContainsKey(key);
 
-    public bool TryGetValue(string key, out int value) => _items.TryGetValue(key, out value);
+    public bool TryGetValue(string key, out TValue value)
+    {
+        if (_items.TryGetValue(key, out var stored))
+        {
+            value = stored;
+            return true;
+        }
 
-    public IEnumerator<KeyValuePair<string, int>> GetEnumerator() => _items.GetEnumerator();
+        value = default!;
+        return false;
+    }
+
+    public IEnumerator<KeyValuePair<string, TValue>> GetEnumerator() => _items.GetEnumerator();
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 }
 
 internal static class SpanOnlyMapFactory
 {
-    public static SpanOnlyMap Create(ReadOnlySpan<KeyValuePair<string, int>> items)
+    public static SpanOnlyMap<TValue> Create<TValue>(
+        ReadOnlySpan<KeyValuePair<string, TValue>> items)
     {
-        var map = new Dictionary<string, int>(StringComparer.Ordinal);
+        var map = new Dictionary<string, TValue>(StringComparer.Ordinal);
         foreach (var pair in items)
         {
             map[pair.Key] = pair.Value;
         }
 
-        return new SpanOnlyMap(map);
+        return new SpanOnlyMap<TValue>(map);
+    }
+}
+
+internal sealed class PriorityQueueCountConverter : NbtConverter<PriorityQueue<int, int>>
+{
+    public override PriorityQueue<int, int> Read(
+        ref NbtReader reader,
+        NbtSerializerOptions options)
+    {
+        _ = reader.GetInt32();
+        return new PriorityQueue<int, int>();
+    }
+
+    public override void Write(
+        ref NbtWriter writer,
+        PriorityQueue<int, int> value,
+        NbtSerializerOptions options) =>
+        writer.WriteInt32(value.Count);
+
+    public override bool TryGetTagType(
+        PriorityQueue<int, int> value,
+        NbtSerializerOptions options,
+        out NbtTagType tagType)
+    {
+        tagType = NbtTagType.Int;
+        return true;
     }
 }
 

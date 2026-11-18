@@ -278,7 +278,8 @@ Interfaces are materialized the same way C# collection expressions choose target
 become `List<T>` and set interfaces become `HashSet<T>`. NBT list order is the collection's enumeration
 order; stack-like types are filled in reverse so they round-trip, while set-like shapes collapse
 duplicate elements. `SortedSet<T>` and `ImmutableSortedSet<T>` use ordinal ordering for string
-elements, so round-tripping does not depend on the current culture. An `IEnumerable<T>` value that is
+elements, so round-tripping does not depend on the current culture; custom types derived from them
+follow their own construction comparer. An `IEnumerable<T>` value that is
 not an `IReadOnlyCollection<T>` is materialized before writing. `PriorityQueue<TElement,TPriority>`
 is rejected with a `NotSupportedException` (and `NBTSG003` in generated contexts) because its
 element/priority pairs have no natural NBT sequence representation; register a custom converter to

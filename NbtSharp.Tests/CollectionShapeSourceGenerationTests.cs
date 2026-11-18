@@ -44,6 +44,8 @@ public sealed class CollectionShapeSourceGenerationTests
                 new Dictionary<string, int> { ["f"] = 6, ["e"] = 5 }),
             Custom = new CustomCollection<int>([3, 4]),
             Derived = new DerivedIntCollection { 1, 2 },
+            SpanMap = SpanOnlyMapFactory.Create(
+                new[] { new KeyValuePair<string, int>("span", 9) }),
         };
         value.Blocking.TryAdd(1);
         value.Blocking.TryAdd(2);
@@ -73,6 +75,7 @@ public sealed class CollectionShapeSourceGenerationTests
         Assert.Equal([1, 2], copy.Blocking.OrderBy(static item => item));
         Assert.Equal([3, 4], copy.Custom.ToArray());
         Assert.Equal([1, 2], copy.Derived.ToArray());
+        Assert.Equal(9, copy.SpanMap["span"]);
     }
 
     [Fact]
@@ -246,6 +249,9 @@ internal sealed class SourceGenCollectionShapes
     public CustomCollection<int> Custom { get; set; } = new([]);
 
     public DerivedIntCollection Derived { get; set; } = new();
+
+    public SpanOnlyMap<int> SpanMap { get; set; } =
+        SpanOnlyMapFactory.Create(Array.Empty<KeyValuePair<string, int>>());
 
     public FrozenSet<int> FrozenSet { get; set; } = new HashSet<int>().ToFrozenSet();
 

@@ -107,8 +107,7 @@ internal sealed class NbtReflectionMapConverter<TCollection, TValue> :
                 }
             }
 
-            var companion = collectionType.Assembly.GetType(
-                $"{collectionType.Namespace}.{collectionType.Name}");
+            var companion = FindCompanionType(collectionType);
             if (companion is not null)
             {
                 if (TryFindFactory(
@@ -220,12 +219,22 @@ internal sealed class NbtReflectionMapConverter<TCollection, TValue> :
                 }
             }
 
-            throw new NotSupportedException(
-                spanFactory is null
-                    ? $"No supported construction pattern was found for {collectionType}."
-                    : $"The CollectionBuilder factory '{spanFactory}' for {collectionType} accepts a " +
-                      "span, which cannot be invoked through runtime reflection. Use the NbtSharp " +
-                      "source generator or register a custom converter for this type.");
+            throw spanFactory is null
+                ? new NotSupportedException(
+                    $"No supported construction pattern was found for {collectionType}.")
+                : new NbtSpanCollectionBuilderException(spanFactory, collectionType);
+        }
+
+        private static Type? FindCompanionType(Type collectionType)
+        {
+            var name = collectionType.Name;
+            var arityIndex = name.IndexOf('`');
+            if (arityIndex >= 0)
+            {
+                name = name[..arityIndex];
+            }
+
+            return collectionType.Assembly.GetType($"{collectionType.Namespace}.{name}");
         }
 
         private static bool HasSpanFactory(
@@ -246,9 +255,17 @@ internal sealed class NbtReflectionMapConverter<TCollection, TValue> :
                 var methodToCheck = candidate;
                 if (candidate.IsGenericMethodDefinition)
                 {
+                    var arity = candidate.GetGenericArguments().Length;
+                    if (arity is not (1 or 2))
+                    {
+                        continue;
+                    }
+
                     try
                     {
-                        methodToCheck = candidate.MakeGenericMethod(typeof(string), valueType);
+                        methodToCheck = arity == 1
+                            ? candidate.MakeGenericMethod(valueType)
+                            : candidate.MakeGenericMethod(typeof(string), valueType);
                     }
                     catch (ArgumentException)
                     {
