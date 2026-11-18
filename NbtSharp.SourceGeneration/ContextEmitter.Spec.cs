@@ -169,13 +169,13 @@ internal sealed partial class ContextEmitter
                 ? "true"
                 : "false",
             SpecialType.System_SByte =>
-                Convert.ToSByte(value, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture),
+                $"(sbyte){Convert.ToSByte(value, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture)}",
             SpecialType.System_Byte =>
-                Convert.ToByte(value, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture),
+                $"(byte){Convert.ToByte(value, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture)}",
             SpecialType.System_Int16 =>
-                Convert.ToInt16(value, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture),
+                $"(short){Convert.ToInt16(value, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture)}",
             SpecialType.System_UInt16 =>
-                Convert.ToUInt16(value, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture),
+                $"(ushort){Convert.ToUInt16(value, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture)}",
             SpecialType.System_Int32 =>
                 Convert.ToInt32(value, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture),
             SpecialType.System_UInt32 =>

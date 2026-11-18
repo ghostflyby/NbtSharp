@@ -336,23 +336,26 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
 
         declaredTypes.Reverse();
 
-        var mappedByName = new Dictionary<string, List<MemberInfo>>(StringComparer.Ordinal);
-        foreach (var current in declaredTypes)
+        var mappedProperties = new Dictionary<MethodInfo, (PropertyInfo Property, int TypeIndex)>();
+        var mappedFields = new List<(string Name, int TypeIndex)>();
+        for (var i = 0; i < declaredTypes.Count; i++)
         {
-            foreach (var property in current.GetProperties(
+            foreach (var property in declaredTypes[i].GetProperties(
                          BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly))
             {
-                if (property.GetMethod is not { IsPublic: true } ||
+                var getter = property.GetMethod;
+                if (getter is null ||
+                    !getter.IsPublic ||
                     property.GetIndexParameters().Length != 0 ||
                     property.IsDefined(typeof(NbtIgnoreAttribute), inherit: true))
                 {
                     continue;
                 }
 
-                Add(property.Name, property);
+                mappedProperties[getter.GetBaseDefinition()] = (property, i);
             }
 
-            foreach (var field in current.GetFields(
+            foreach (var field in declaredTypes[i].GetFields(
                          BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly))
             {
                 if (field.IsStatic ||
@@ -364,44 +367,43 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
                     continue;
                 }
 
-                Add(field.Name, field);
+                mappedFields.Add((field.Name, i));
             }
         }
 
-        foreach (var group in mappedByName.Values)
+        var mapped = mappedProperties.Values
+            .Select(static entry => (entry.Property.Name, entry.TypeIndex, (PropertyInfo?)entry.Property))
+            .Concat(mappedFields.Select(static entry => (entry.Name, entry.TypeIndex, (PropertyInfo?)null)))
+            .ToArray();
+
+        foreach (var (name, typeIndex, property) in mapped)
         {
-            if (group.Count < 2)
+            for (var i = typeIndex + 1; i < declaredTypes.Count; i++)
             {
-                continue;
-            }
-
-            for (var i = 1; i < group.Count; i++)
-            {
-                if (group[i] is PropertyInfo property &&
-                    group[0] is PropertyInfo baseProperty &&
-                    property.GetMethod is { } getter &&
-                    baseProperty.GetMethod is { } baseGetter &&
-                    getter.GetBaseDefinition() == baseGetter)
+                foreach (var candidate in declaredTypes[i].GetMembers(
+                             BindingFlags.Public | BindingFlags.NonPublic |
+                             BindingFlags.Instance | BindingFlags.Static |
+                             BindingFlags.DeclaredOnly))
                 {
-                    continue;
-                }
+                    if (candidate.Name != name)
+                    {
+                        continue;
+                    }
 
-                return group[0].Name;
+                    if (property?.GetMethod is { } mappedGetter &&
+                        candidate is PropertyInfo candidateProperty &&
+                        candidateProperty.GetMethod is { } candidateGetter &&
+                        candidateGetter.GetBaseDefinition() == mappedGetter.GetBaseDefinition())
+                    {
+                        continue;
+                    }
+
+                    return name;
+                }
             }
         }
 
         return null;
-
-        void Add(string name, MemberInfo member)
-        {
-            if (!mappedByName.TryGetValue(name, out var members))
-            {
-                members = [];
-                mappedByName.Add(name, members);
-            }
-
-            members.Add(member);
-        }
     }
 
     private static NbtReflectionMember[] DiscoverMembers(Type type)

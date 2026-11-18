@@ -1910,6 +1910,161 @@ public sealed class NbtSourceGeneratorTests
     }
 
     [Fact]
+    public void ReportsHiddenBaseMemberWhenDerivedMemberIsIgnored()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Derived))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal class Base
+            {
+                public int Value { get; set; }
+            }
+
+            internal sealed class Derived : Base
+            {
+                [NbtIgnore]
+                public new int Value { get; set; }
+            }
+            """);
+
+        Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG017");
+    }
+
+    [Fact]
+    public void ReportsHiddenBaseMemberWhenDerivedMemberIsNotMapped()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Derived))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal class Base
+            {
+                public int Value { get; set; }
+            }
+
+            internal sealed class Derived : Base
+            {
+                public new int Value;
+            }
+            """);
+
+        Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG017");
+    }
+
+    [Fact]
+    public void ReportsHiddenBaseMemberWhenDerivedMethodHidesIt()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Derived))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal class Base
+            {
+                public int Value { get; set; }
+            }
+
+            internal sealed class Derived : Base
+            {
+                public new int Value() => 0;
+            }
+            """);
+
+        Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG017");
+    }
+
+    [Fact]
+    public void AllowsMappedOverrides()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Derived))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal class Base
+            {
+                public virtual int Value { get; set; }
+            }
+
+            internal sealed class Derived : Base
+            {
+                public override int Value { get; set; }
+            }
+            """);
+
+        AssertNoErrors(result);
+        Assert.DoesNotContain(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG017");
+    }
+
+    [Fact]
+    public void FingerprintChangesWhenMetadataConstructorDefaultChanges()
+    {
+        var first = ComputeMetadataDefaultFingerprint(1);
+        var second = ComputeMetadataDefaultFingerprint(2);
+
+        Assert.NotEqual(first, second);
+    }
+
+    private static string ComputeMetadataDefaultFingerprint(int defaultValue)
+    {
+        var metadata = CSharpCompilation.Create(
+            "MetadataDefaults",
+            [
+                CSharpSyntaxTree.ParseText(
+                    $$"""
+                    public sealed class MetadataDto
+                    {
+                        public MetadataDto(int count = {{defaultValue}})
+                        {
+                            Count = count;
+                        }
+
+                        public int Count { get; }
+                    }
+                    """),
+            ],
+            References,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        var contextCompilation = CSharpCompilation.Create(
+            "FingerprintTests",
+            [
+                CSharpSyntaxTree.ParseText(
+                    """
+                    using NbtSharp;
+
+                    [NbtSerializable(typeof(MetadataDto))]
+                    internal partial class TestContext : NbtSerializerContext
+                    {
+                    }
+                    """),
+            ],
+            References.Add(metadata.ToMetadataReference()),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        var contextType = contextCompilation.GetTypeByMetadataName("TestContext")!;
+        var dtoType = contextCompilation.GetTypeByMetadataName("MetadataDto")!;
+
+        return ReachableFingerprint.Compute(
+            contextType,
+            ImmutableArray.Create(new RootType(dtoType, null, null)),
+            contextCompilation);
+    }
+
+    [Fact]
     public void ReportsRequiredValueTypes()
     {
         var result = Run("""

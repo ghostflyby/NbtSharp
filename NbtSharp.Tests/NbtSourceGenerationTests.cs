@@ -883,19 +883,37 @@ public sealed class NbtSourceGenerationTests
     public void OptionalConstructorParametersUseDeclaredDefaults()
     {
         var context = SourceGenerationContext.Default;
-        var data = NbtSerializer.Serialize(new NbtRoot(
-            "root",
-            new NbtCompound { ["Name"] = "given", ["Optional"] = 9 }));
         var reflectionOptions = new NbtSerializerOptions
         {
             TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
         };
-
+        var empty = NbtSerializer.Serialize(new NbtRoot("root", new NbtCompound()));
+        var defaults = NbtSerializer.Deserialize(empty, context.SourceGenOptionalDefaults);
+        var reflectedDefaults = NbtSerializer.Deserialize<SourceGenOptionalDefaults>(
+            empty,
+            reflectionOptions);
+        var data = NbtSerializer.Serialize(new NbtRoot(
+            "root",
+            new NbtCompound { ["Name"] = "given", ["Optional"] = 9 }));
         var generated = NbtSerializer.Deserialize(data, context.SourceGenOptionalDefaults);
         var reflected = NbtSerializer.Deserialize<SourceGenOptionalDefaults>(
             data,
             reflectionOptions);
 
+        Assert.Equal("default-name", defaults.Name);
+        Assert.Equal(7, defaults.Count);
+        Assert.Equal(SourceGenOptionalKind.Second, defaults.Kind);
+        Assert.Equal(5, defaults.Optional);
+        Assert.True(defaults.Enabled);
+        Assert.Equal(1.5, defaults.Ratio);
+        Assert.Null(defaults.Nickname);
+        Assert.Equal(defaults.Name, reflectedDefaults.Name);
+        Assert.Equal(defaults.Count, reflectedDefaults.Count);
+        Assert.Equal(defaults.Kind, reflectedDefaults.Kind);
+        Assert.Equal(defaults.Optional, reflectedDefaults.Optional);
+        Assert.Equal(defaults.Enabled, reflectedDefaults.Enabled);
+        Assert.Equal(defaults.Ratio, reflectedDefaults.Ratio);
+        Assert.Equal(defaults.Nickname, reflectedDefaults.Nickname);
         Assert.Equal("given", generated.Name);
         Assert.Equal(7, generated.Count);
         Assert.Equal(SourceGenOptionalKind.Second, generated.Kind);
@@ -904,6 +922,56 @@ public sealed class NbtSourceGenerationTests
         Assert.Equal(generated.Count, reflected.Count);
         Assert.Equal(generated.Kind, reflected.Kind);
         Assert.Equal(generated.Optional, reflected.Optional);
+    }
+
+    [Fact]
+    public void OptionalSmallIntegerDefaultsCompileAndRoundTrip()
+    {
+        var context = SourceGenerationContext.Default;
+        var reflectionOptions = new NbtSerializerOptions
+        {
+            TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
+        };
+        var data = NbtSerializer.Serialize(new NbtRoot("root", new NbtCompound()));
+
+        var generated = NbtSerializer.Deserialize(data, context.SourceGenSmallOptionalDefaults);
+        var reflected = NbtSerializer.Deserialize<SourceGenSmallOptionalDefaults>(
+            data,
+            reflectionOptions);
+
+        Assert.Equal(200, generated.ByteValue);
+        Assert.Equal(-5, generated.SByteValue);
+        Assert.Equal(-300, generated.ShortValue);
+        Assert.Equal<byte?>(7, generated.NullableByte);
+        Assert.Equal(generated.ByteValue, reflected.ByteValue);
+        Assert.Equal(generated.SByteValue, reflected.SByteValue);
+        Assert.Equal(generated.ShortValue, reflected.ShortValue);
+        Assert.Equal(generated.NullableByte, reflected.NullableByte);
+    }
+
+    [Fact]
+    public void MappedOverridesWorkThroughGeneratedAndReflectionPaths()
+    {
+        var context = SourceGenerationContext.Default;
+        var reflectionOptions = new NbtSerializerOptions
+        {
+            TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
+        };
+        var value = new SourceGenMappedOverrideDerived { Value = 5 };
+
+        var data = NbtSerializer.Serialize(
+            value,
+            context.SourceGenMappedOverrideDerived,
+            "root");
+        var generated = NbtSerializer.Deserialize(
+            data,
+            context.SourceGenMappedOverrideDerived);
+        var reflected = NbtSerializer.Deserialize<SourceGenMappedOverrideDerived>(
+            data,
+            reflectionOptions);
+
+        Assert.Equal(5, generated.Value);
+        Assert.Equal(5, reflected.Value);
     }
 
     [Fact]
@@ -983,10 +1051,17 @@ public sealed class NbtSourceGenerationTests
             TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
         };
 
-        var exception = Assert.Throws<NotSupportedException>(() =>
-            NbtSerializer.Serialize(new ReflectionHiddenDerived(), "root", reflectionOptions));
+        AssertRejected(new ReflectionHiddenDerived(), reflectionOptions);
+        AssertRejected(new ReflectionHiddenIgnoredDerived(), reflectionOptions);
+        AssertRejected(new ReflectionHiddenFieldDerived(), reflectionOptions);
+        AssertRejected(new ReflectionHiddenMethodDerived(), reflectionOptions);
 
-        Assert.Contains("hides a base member", exception.Message, StringComparison.Ordinal);
+        static void AssertRejected<T>(T value, NbtSerializerOptions options)
+        {
+            var exception = Assert.Throws<NotSupportedException>(() =>
+                NbtSerializer.Serialize(value, "root", options));
+            Assert.Contains("hides a base member", exception.Message, StringComparison.Ordinal);
+        }
     }
 
     [Fact]
@@ -1162,6 +1237,8 @@ public sealed class NbtSourceGenerationTests
 [NbtSerializable(typeof(SourceGenFactoryConverter))]
 [NbtSerializable(typeof(SourceGenBadFactoryConverter))]
 [NbtSerializable(typeof(SourceGenOptionalDefaults))]
+[NbtSerializable(typeof(SourceGenSmallOptionalDefaults))]
+[NbtSerializable(typeof(SourceGenMappedOverrideDerived))]
 [NbtSerializable(typeof(SourceGenSetsRequired))]
 [NbtSerializable(typeof(SourceGenPrivateSetter))]
 [NbtSerializable(typeof(CrossAssemblyDto))]
@@ -1623,12 +1700,18 @@ internal sealed class SourceGenOptionalDefaults
         string name = "default-name",
         int count = 7,
         SourceGenOptionalKind kind = SourceGenOptionalKind.Second,
-        int? optional = 5)
+        int? optional = 5,
+        bool enabled = true,
+        double ratio = 1.5,
+        string? nickname = null)
     {
         Name = name;
         Count = count;
         Kind = kind;
         Optional = optional;
+        Enabled = enabled;
+        Ratio = ratio;
+        Nickname = nickname;
     }
 
     public string Name { get; }
@@ -1638,6 +1721,35 @@ internal sealed class SourceGenOptionalDefaults
     public SourceGenOptionalKind Kind { get; }
 
     public int? Optional { get; }
+
+    public bool Enabled { get; }
+
+    public double Ratio { get; }
+
+    public string? Nickname { get; }
+}
+
+internal sealed class SourceGenSmallOptionalDefaults
+{
+    public SourceGenSmallOptionalDefaults(
+        byte byteValue = 200,
+        sbyte sbyteValue = -5,
+        short shortValue = -300,
+        byte? nullableByte = 7)
+    {
+        ByteValue = byteValue;
+        SByteValue = sbyteValue;
+        ShortValue = shortValue;
+        NullableByte = nullableByte;
+    }
+
+    public byte ByteValue { get; }
+
+    public sbyte SByteValue { get; }
+
+    public short ShortValue { get; }
+
+    public byte? NullableByte { get; }
 }
 
 internal sealed class SourceGenSetsRequired
@@ -1672,6 +1784,47 @@ internal class ReflectionHiddenBase
 internal sealed class ReflectionHiddenDerived : ReflectionHiddenBase
 {
     public new int Value { get; set; }
+}
+
+internal class ReflectionHiddenIgnoredBase
+{
+    public int Value { get; set; }
+}
+
+internal sealed class ReflectionHiddenIgnoredDerived : ReflectionHiddenIgnoredBase
+{
+    [NbtIgnore]
+    public new int Value { get; set; }
+}
+
+internal class ReflectionHiddenFieldBase
+{
+    public int Value { get; set; }
+}
+
+internal sealed class ReflectionHiddenFieldDerived : ReflectionHiddenFieldBase
+{
+    public new int Value = 1;
+}
+
+internal class ReflectionHiddenMethodBase
+{
+    public int Value { get; set; }
+}
+
+internal sealed class ReflectionHiddenMethodDerived : ReflectionHiddenMethodBase
+{
+    public new int Value() => 0;
+}
+
+internal class SourceGenMappedOverrideBase
+{
+    public virtual int Value { get; set; }
+}
+
+internal sealed class SourceGenMappedOverrideDerived : SourceGenMappedOverrideBase
+{
+    public override int Value { get; set; }
 }
 
 internal sealed class PlusOneInt32Converter : NbtConverter<int>
