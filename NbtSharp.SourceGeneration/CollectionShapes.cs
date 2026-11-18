@@ -17,11 +17,14 @@ internal enum CollectionShape
     Collection,
     ObservableCollection,
     ReadOnlyCollection,
+    ReadOnlyObservableCollection,
+    SortedSet,
     ImmutableArray,
     ImmutableList,
     ImmutableHashSet,
     ImmutableQueue,
     ImmutableStack,
+    ImmutableSortedSet,
     FrozenSet,
     Generated,
 }
@@ -67,6 +70,7 @@ internal static class CollectionShapeClassifier
                 "List" or "IEnumerable" or "ICollection" or "IList" or
                     "IReadOnlyList" or "IReadOnlyCollection" => CollectionShape.List,
                 "HashSet" or "ISet" or "IReadOnlySet" => CollectionShape.Set,
+                "SortedSet" => CollectionShape.SortedSet,
                 "Queue" => CollectionShape.Queue,
                 "Stack" => CollectionShape.Stack,
                 "LinkedList" => CollectionShape.LinkedList,
@@ -80,6 +84,7 @@ internal static class CollectionShapeClassifier
                 "Collection" => CollectionShape.Collection,
                 "ObservableCollection" => CollectionShape.ObservableCollection,
                 "ReadOnlyCollection" => CollectionShape.ReadOnlyCollection,
+                "ReadOnlyObservableCollection" => CollectionShape.ReadOnlyObservableCollection,
                 _ => CollectionShape.None,
             };
         }
@@ -92,6 +97,7 @@ internal static class CollectionShapeClassifier
                 "ImmutableHashSet" or "IImmutableSet" => CollectionShape.ImmutableHashSet,
                 "ImmutableQueue" or "IImmutableQueue" => CollectionShape.ImmutableQueue,
                 "ImmutableStack" or "IImmutableStack" => CollectionShape.ImmutableStack,
+                "ImmutableSortedSet" => CollectionShape.ImmutableSortedSet,
                 _ => CollectionShape.None,
             };
         }
@@ -144,6 +150,24 @@ internal static class CollectionShapeClassifier
         }
 
         return shape != MapShape.None;
+    }
+
+    /// <summary>
+    /// Identifies collection-like BCL types that have no NBT sequence or map representation, so
+    /// callers can report a precise diagnostic instead of mapping them as ordinary objects.
+    /// </summary>
+    public static bool TryGetUnsupportedReason(INamedTypeSymbol definition, out string reason)
+    {
+        reason = "";
+        if (definition.Arity == 2 &&
+            definition.ContainingNamespace?.ToDisplayString() == GenericNamespace &&
+            definition.Name == "PriorityQueue")
+        {
+            reason = "is a priority queue whose element and priority pairs do not map to an NBT list";
+            return true;
+        }
+
+        return false;
     }
 
     public static bool IsCollectionOrMap(INamedTypeSymbol named) =>

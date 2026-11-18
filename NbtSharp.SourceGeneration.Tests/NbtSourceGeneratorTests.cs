@@ -642,6 +642,30 @@ public sealed class NbtSourceGeneratorTests
     }
 
     [Fact]
+    public void ReportsPriorityQueueAsUnsupported()
+    {
+        var result = Run("""
+            using System.Collections.Generic;
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Player
+            {
+                public PriorityQueue<int, int> Values { get; set; } = new();
+            }
+            """);
+
+        var diagnostic = Assert.Single(
+            result.GeneratorDiagnostics,
+            static diagnostic => diagnostic.Id == "NBTSG003");
+        Assert.Contains("priority queue", diagnostic.GetMessage(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void ReportsReadOnlyMapWithoutMutation()
     {
         var result = Run("""

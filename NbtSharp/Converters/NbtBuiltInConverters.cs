@@ -80,6 +80,14 @@ internal static class NbtBuiltInConverters
 
         var definition = type.GetGenericTypeDefinition();
         var arguments = type.GetGenericArguments();
+        if (definition == typeof(PriorityQueue<,>))
+        {
+            throw new NotSupportedException(
+                "PriorityQueue<TElement, TPriority> cannot be represented as an NBT list or " +
+                "compound because it exposes element/priority pairs rather than a sequence. " +
+                "Register a custom converter to define its NBT representation.");
+        }
+
         if (definition == typeof(Nullable<>))
         {
             converter = CreateGeneric(typeof(NbtNullableConverter<>), arguments[0]);
@@ -155,6 +163,15 @@ internal static class NbtBuiltInConverters
                 type,
                 arguments[0],
                 MakeGeneric(typeof(NbtReadOnlyCollectionBuilder<>), arguments[0]));
+            return true;
+        }
+
+        if (definition == typeof(ReadOnlyObservableCollection<>))
+        {
+            converter = CreateSequence(
+                type,
+                arguments[0],
+                MakeGeneric(typeof(NbtReadOnlyObservableCollectionBuilder<>), arguments[0]));
             return true;
         }
 
@@ -373,6 +390,12 @@ internal static class NbtBuiltInConverters
                 converter = CreateGeneric(typeof(NbtReflectionMapConverter<,>), type, valueType);
                 return true;
             }
+            catch (System.Reflection.TargetInvocationException ex)
+                when (ex.InnerException is NotSupportedException inner)
+            {
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(inner).Throw();
+                throw;
+            }
             catch (Exception ex) when (ex is System.Reflection.TargetInvocationException or ArgumentException)
             {
                 return false;
@@ -388,6 +411,12 @@ internal static class NbtBuiltInConverters
                     type,
                     elementType);
                 return true;
+            }
+            catch (System.Reflection.TargetInvocationException ex)
+                when (ex.InnerException is NotSupportedException inner)
+            {
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(inner).Throw();
+                throw;
             }
             catch (Exception ex) when (ex is System.Reflection.TargetInvocationException or ArgumentException)
             {

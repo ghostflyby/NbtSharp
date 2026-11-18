@@ -34,6 +34,11 @@ public sealed class CollectionShapeSourceGenerationTests
             ImmutableQueue = ImmutableQueue.CreateRange(new[] { 1, 2 }),
             ImmutableStack = ImmutableStack.CreateRange(new[] { 1, 2 }),
             ImmutableSortedSet = ImmutableSortedSet.Create(2, 1),
+            SortedStringSet = new SortedSet<string>(StringComparer.Ordinal) { "a", "B" },
+            ImmutableSortedStringSet = ImmutableSortedSet.Create(
+                StringComparer.Ordinal,
+                "a",
+                "B"),
             ImmutableSortedMap = ImmutableSortedDictionary.CreateRange(
                 StringComparer.Ordinal,
                 new Dictionary<string, int> { ["f"] = 6, ["e"] = 5 }),
@@ -58,6 +63,10 @@ public sealed class CollectionShapeSourceGenerationTests
         Assert.Equal([1, 2], copy.ImmutableQueue.ToArray());
         Assert.Equal([2, 1], copy.ImmutableStack.ToArray());
         Assert.Equal([1, 2], copy.ImmutableSortedSet.ToArray());
+        Assert.Equal(["B", "a"], copy.SortedStringSet.ToArray());
+        Assert.Equal(["B", "a"], copy.ImmutableSortedStringSet.ToArray());
+        Assert.Same(StringComparer.Ordinal, copy.SortedStringSet.Comparer);
+        Assert.Same(StringComparer.Ordinal, copy.ImmutableSortedStringSet.KeyComparer);
         Assert.Equal(5, copy.ImmutableSortedMap["e"]);
         Assert.Equal(6, copy.ImmutableSortedMap["f"]);
         Assert.Same(StringComparer.Ordinal, copy.ImmutableSortedMap.KeyComparer);
@@ -84,6 +93,8 @@ public sealed class CollectionShapeSourceGenerationTests
             Collection = new Collection<int> { 10, 11 },
             Observable = new ObservableCollection<int> { 12, 13 },
             ReadOnly = new ReadOnlyCollection<int>([14, 15]),
+            ReadOnlyObservable = new ReadOnlyObservableCollection<int>(
+                new ObservableCollection<int> { 16, 17 }),
             ImmutableArray = [],
         };
 
@@ -102,6 +113,7 @@ public sealed class CollectionShapeSourceGenerationTests
         Assert.Equal([10, 11], copy.Collection.ToArray());
         Assert.Equal([12, 13], copy.Observable.ToArray());
         Assert.Equal([14, 15], copy.ReadOnly.ToArray());
+        Assert.Equal([16, 17], copy.ReadOnlyObservable.ToArray());
     }
 
     [Fact]
@@ -176,6 +188,9 @@ internal sealed class SourceGenCollectionShapes
 
     public ReadOnlyCollection<int> ReadOnly { get; set; } = new(new List<int>());
 
+    public ReadOnlyObservableCollection<int> ReadOnlyObservable { get; set; } =
+        new(new ObservableCollection<int>());
+
     public ImmutableArray<int> ImmutableArray { get; set; }
 
     public ImmutableList<int> ImmutableList { get; set; } = ImmutableList<int>.Empty;
@@ -207,6 +222,8 @@ internal sealed class SourceGenCollectionShapes
 
     public SortedSet<int> SortedSet { get; set; } = [];
 
+    public SortedSet<string> SortedStringSet { get; set; } = new(StringComparer.Ordinal);
+
     public SortedDictionary<string, int> SortedMap { get; set; } = [];
 
     public SortedList<string, int> SortedList { get; set; } = [];
@@ -217,6 +234,9 @@ internal sealed class SourceGenCollectionShapes
 
     public ImmutableSortedSet<int> ImmutableSortedSet { get; set; } =
         ImmutableSortedSet<int>.Empty;
+
+    public ImmutableSortedSet<string> ImmutableSortedStringSet { get; set; } =
+        System.Collections.Immutable.ImmutableSortedSet.Create<string>(StringComparer.Ordinal);
 
     public ImmutableSortedDictionary<string, int> ImmutableSortedMap { get; set; } =
         ImmutableSortedDictionary<string, int>.Empty;

@@ -18,6 +18,7 @@ public sealed class CollectionShapeTests
         var collection = new Collection<int> { 1, 2, 3 };
         var observable = new ObservableCollection<int> { 1, 2, 3 };
         var readOnly = new ReadOnlyCollection<int>([1, 2, 3]);
+        var readOnlyObservable = new ReadOnlyObservableCollection<int>(observable);
 
         Assert.Equal([1, 2, 3], RoundTrip(queue).ToArray());
         Assert.Equal([3, 2, 1], RoundTrip(stack).ToArray());
@@ -25,6 +26,7 @@ public sealed class CollectionShapeTests
         Assert.Equal([1, 2, 3], RoundTrip(collection).ToArray());
         Assert.Equal([1, 2, 3], RoundTrip(observable).ToArray());
         Assert.Equal([1, 2, 3], RoundTrip(readOnly).ToArray());
+        Assert.Equal([1, 2, 3], RoundTrip(readOnlyObservable).ToArray());
     }
 
     [Fact]
@@ -53,6 +55,21 @@ public sealed class CollectionShapeTests
 
         Assert.Equal([1, 2, 3], set.OrderBy(static value => value));
         Assert.Equal([1, 2, 3], interfaceSet.OrderBy(static value => value));
+    }
+
+    [Fact]
+    public void SortedSetShapesUseOrdinalOrderingForStrings()
+    {
+        var sorted = new SortedSet<string>(StringComparer.Ordinal) { "a", "B" };
+        var immutable = ImmutableSortedSet.Create(StringComparer.Ordinal, "a", "B");
+
+        var sortedCopy = RoundTrip(sorted);
+        var immutableCopy = RoundTrip(immutable);
+
+        Assert.Equal(["B", "a"], sortedCopy.ToArray());
+        Assert.Equal(["B", "a"], immutableCopy.ToArray());
+        Assert.Same(StringComparer.Ordinal, sortedCopy.Comparer);
+        Assert.Same(StringComparer.Ordinal, immutableCopy.KeyComparer);
     }
 
     [Fact]
@@ -171,6 +188,44 @@ public sealed class CollectionShapeTests
     }
 
     [Fact]
+    public void PriorityQueueIsRejectedWithGuidance()
+    {
+        var queue = new PriorityQueue<int, int>();
+        queue.Enqueue(1, 2);
+
+        var exception = Assert.Throws<NotSupportedException>(() =>
+            NbtSerializer.Serialize(queue, "root"));
+
+        Assert.Contains("PriorityQueue", exception.Message);
+        Assert.Contains("custom converter", exception.Message);
+    }
+
+    [Fact]
+    public void ReflectionRejectsSpanOnlySequenceBuilderWithGuidance()
+    {
+        var value = SpanOnlyCollectionFactory.Create(new[] { 1, 2 });
+
+        var exception = Assert.Throws<NotSupportedException>(() =>
+            NbtSerializer.Serialize(value, "root"));
+
+        Assert.Contains("span", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("source generator", exception.Message);
+    }
+
+    [Fact]
+    public void ReflectionRejectsSpanOnlyMapBuilderWithGuidance()
+    {
+        var value = SpanOnlyMapFactory.Create(
+            [new KeyValuePair<string, int>("a", 1)]);
+
+        var exception = Assert.Throws<NotSupportedException>(() =>
+            NbtSerializer.Serialize(value, "root"));
+
+        Assert.Contains("span", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("source generator", exception.Message);
+    }
+
+    [Fact]
     public void ReflectionKeepsStackOrderForConstructorPushTypes()
     {
         var value = new ConstructorStack<int>([1, 2]);
@@ -246,6 +301,66 @@ internal struct StructIntCollection : IEnumerable<int>
     public IEnumerator<int> GetEnumerator() => (_items ?? []).GetEnumerator();
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+}
+
+[CollectionBuilder(typeof(SpanOnlyCollectionFactory), "Create")]
+internal sealed class SpanOnlyCollection<T> : IReadOnlyList<T>
+{
+    private readonly T[] _items;
+
+    internal SpanOnlyCollection(T[] items) => _items = items;
+
+    public T this[int index] => _items[index];
+
+    public int Count => _items.Length;
+
+    public IEnumerator<T> GetEnumerator() => ((IEnumerable<T>)_items).GetEnumerator();
+
+    IEnumerator IEnumerable.GetEnumerator() => _items.GetEnumerator();
+}
+
+internal static class SpanOnlyCollectionFactory
+{
+    public static SpanOnlyCollection<T> Create<T>(ReadOnlySpan<T> items) =>
+        new(items.ToArray());
+}
+
+[CollectionBuilder(typeof(SpanOnlyMapFactory), "Create")]
+internal sealed class SpanOnlyMap : IReadOnlyDictionary<string, int>
+{
+    private readonly Dictionary<string, int> _items;
+
+    internal SpanOnlyMap(Dictionary<string, int> items) => _items = items;
+
+    public int this[string key] => _items[key];
+
+    public IEnumerable<string> Keys => _items.Keys;
+
+    public IEnumerable<int> Values => _items.Values;
+
+    public int Count => _items.Count;
+
+    public bool ContainsKey(string key) => _items.ContainsKey(key);
+
+    public bool TryGetValue(string key, out int value) => _items.TryGetValue(key, out value);
+
+    public IEnumerator<KeyValuePair<string, int>> GetEnumerator() => _items.GetEnumerator();
+
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+}
+
+internal static class SpanOnlyMapFactory
+{
+    public static SpanOnlyMap Create(ReadOnlySpan<KeyValuePair<string, int>> items)
+    {
+        var map = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var pair in items)
+        {
+            map[pair.Key] = pair.Value;
+        }
+
+        return new SpanOnlyMap(map);
+    }
 }
 
 internal sealed class ConstructorStack<T> : IEnumerable<T>

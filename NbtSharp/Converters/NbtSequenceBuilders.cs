@@ -99,6 +99,18 @@ internal struct NbtReadOnlyCollectionBuilder<TElement> :
     public ReadOnlyCollection<TElement> Complete() => new(_elements);
 }
 
+internal struct NbtReadOnlyObservableCollectionBuilder<TElement> :
+    INbtSequenceBuilder<ReadOnlyObservableCollection<TElement>, TElement>
+{
+    private ObservableCollection<TElement> _items;
+
+    public void Create(int count) => _items = new ObservableCollection<TElement>();
+
+    public void Add(TElement element) => _items.Add(element);
+
+    public ReadOnlyObservableCollection<TElement> Complete() => new(_items);
+}
+
 internal struct NbtImmutableArrayBuilder<TElement> :
     INbtSequenceBuilder<ImmutableArray<TElement>, TElement>
 {
@@ -237,7 +249,8 @@ internal struct NbtSortedSetBuilder<TElement> :
 {
     private SortedSet<TElement> _set;
 
-    public void Create(int count) => _set = new SortedSet<TElement>();
+    public void Create(int count) =>
+        _set = new SortedSet<TElement>(NbtCollectionComparers.Default<TElement>());
 
     public void Add(TElement element) => _set.Add(element);
 
@@ -261,7 +274,9 @@ internal struct NbtImmutableSortedSetBuilder<TElement> :
 {
     private ImmutableSortedSet<TElement>.Builder _builder;
 
-    public void Create(int count) => _builder = ImmutableSortedSet.CreateBuilder<TElement>();
+    public void Create(int count) =>
+        _builder = ImmutableSortedSet.CreateBuilder<TElement>(
+            NbtCollectionComparers.Default<TElement>());
 
     public void Add(TElement element) => _builder.Add(element);
 

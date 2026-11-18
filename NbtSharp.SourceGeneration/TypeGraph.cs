@@ -258,6 +258,17 @@ internal sealed class TypeGraph
         if (named.IsGenericType)
         {
             var definition = named.OriginalDefinition;
+            if (CollectionShapeClassifier.TryGetUnsupportedReason(definition, out var unsupportedReason))
+            {
+                Report(
+                    Diagnostics.UnsupportedType,
+                    location,
+                    type.ToDisplayString(FullyQualified),
+                    unsupportedReason);
+                HasErrors = true;
+                return null;
+            }
+
             if (IsNamed(definition, "System", "Nullable", 1))
             {
                 var underlying = named.TypeArguments[0];
