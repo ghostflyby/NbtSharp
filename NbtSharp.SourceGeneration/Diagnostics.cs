@@ -79,6 +79,15 @@ internal static class Diagnostics
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
+    public static readonly DiagnosticDescriptor HiddenMember = new(
+        "NBTSG017",
+        "Hidden members are not supported",
+        "The member '{1}' on type '{0}' hides a base member with the same name",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "Rename the derived member or exclude one of the members with [NbtIgnore]. NBT maps each type to a single compound, so hidden members cannot be mapped unambiguously.");
+
     public static readonly DiagnosticDescriptor GeneratedNameConflict = new(
         "NBTSG008",
         "Generated member name conflict",

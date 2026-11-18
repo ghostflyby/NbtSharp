@@ -1830,6 +1830,86 @@ public sealed class NbtSourceGeneratorTests
     }
 
     [Fact]
+    public void ReportsHiddenMembers()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Derived))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal class Base
+            {
+                public int Value { get; set; }
+            }
+
+            internal sealed class Derived : Base
+            {
+                public new int Value { get; set; }
+            }
+            """);
+
+        Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG017");
+        Assert.DoesNotContain(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG005");
+    }
+
+    [Fact]
+    public void ReportsHiddenMembersEvenWhenNbtNamesDiffer()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Derived))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal class Base
+            {
+                [NbtPropertyName("BaseValue")]
+                public int Value { get; set; }
+            }
+
+            internal sealed class Derived : Base
+            {
+                [NbtPropertyName("DerivedValue")]
+                public new int Value { get; set; }
+            }
+            """);
+
+        Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG017");
+    }
+
+    [Fact]
+    public void AllowsHiddenBaseMemberWhenItIsIgnored()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Derived))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal class Base
+            {
+                [NbtIgnore]
+                public int Value { get; set; }
+            }
+
+            internal sealed class Derived : Base
+            {
+                public new int Value { get; set; }
+            }
+            """);
+
+        AssertNoErrors(result);
+        Assert.DoesNotContain(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG017");
+    }
+
+    [Fact]
     public void ReportsRequiredValueTypes()
     {
         var result = Run("""

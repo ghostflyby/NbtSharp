@@ -1,5 +1,7 @@
 using System.Collections.Immutable;
+using System.Globalization;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 
 namespace NbtSharp.SourceGeneration;
 
@@ -120,11 +122,94 @@ internal sealed partial class ContextEmitter
             return new ConstructorSpec(
                 model.Constructor.ParameterMemberIndexes,
                 FormatParameters(constructor.Parameters),
+                constructor.Parameters
+                    .Select(static parameter => FormatParameterDefault(parameter))
+                    .ToImmutableArray(),
                 FormatTypeParameterList(definition.TypeParameters),
                 FormatConstraints(definition.TypeParameters).ToImmutableArray(),
                 Fq(model.Type.IsGenericType ? definition : model.Type),
                 "Create_" + model.Type.Name);
         }
+
+        private static string? FormatParameterDefault(IParameterSymbol parameter)
+        {
+            if (!parameter.HasExplicitDefaultValue)
+            {
+                return null;
+            }
+
+            var value = parameter.ExplicitDefaultValue;
+            if (value is null)
+            {
+                return $"default({Fq(parameter.Type)})!";
+            }
+
+            var type = parameter.Type;
+            if (type.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T &&
+                type is INamedTypeSymbol { TypeArguments.Length: 1 } nullableType)
+            {
+                type = nullableType.TypeArguments[0];
+            }
+
+            if (type.TypeKind == TypeKind.Enum &&
+                type is INamedTypeSymbol { EnumUnderlyingType: { } enumUnderlyingType })
+            {
+                var enumLiteral = FormatPrimitive(value, enumUnderlyingType.SpecialType);
+                return enumLiteral is null
+                    ? null
+                    : $"({Fq(parameter.Type)})({enumLiteral})";
+            }
+
+            return FormatPrimitive(value, type.SpecialType);
+        }
+
+        private static string? FormatPrimitive(object value, SpecialType type) => type switch
+        {
+            SpecialType.System_Boolean => Convert.ToBoolean(value, CultureInfo.InvariantCulture)
+                ? "true"
+                : "false",
+            SpecialType.System_SByte =>
+                Convert.ToSByte(value, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture),
+            SpecialType.System_Byte =>
+                Convert.ToByte(value, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture),
+            SpecialType.System_Int16 =>
+                Convert.ToInt16(value, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture),
+            SpecialType.System_UInt16 =>
+                Convert.ToUInt16(value, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture),
+            SpecialType.System_Int32 =>
+                Convert.ToInt32(value, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture),
+            SpecialType.System_UInt32 =>
+                Convert.ToUInt32(value, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture) + "U",
+            SpecialType.System_Int64 =>
+                Convert.ToInt64(value, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture) + "L",
+            SpecialType.System_UInt64 =>
+                Convert.ToUInt64(value, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture) + "UL",
+            SpecialType.System_Single => FormatSingle(Convert.ToSingle(value, CultureInfo.InvariantCulture)),
+            SpecialType.System_Double => FormatDouble(Convert.ToDouble(value, CultureInfo.InvariantCulture)),
+            SpecialType.System_Decimal =>
+                Convert.ToDecimal(value, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture) + "M",
+            SpecialType.System_String => SymbolDisplay.FormatLiteral((string)value, quote: true),
+            SpecialType.System_Char => SymbolDisplay.FormatLiteral((char)value, quote: true),
+            _ => null,
+        };
+
+        private static string FormatSingle(float value) =>
+            float.IsNaN(value)
+                ? "global::System.Single.NaN"
+                : float.IsPositiveInfinity(value)
+                    ? "global::System.Single.PositiveInfinity"
+                    : float.IsNegativeInfinity(value)
+                        ? "global::System.Single.NegativeInfinity"
+                        : value.ToString("R", CultureInfo.InvariantCulture) + "F";
+
+        private static string FormatDouble(double value) =>
+            double.IsNaN(value)
+                ? "global::System.Double.NaN"
+                : double.IsPositiveInfinity(value)
+                    ? "global::System.Double.PositiveInfinity"
+                    : double.IsNegativeInfinity(value)
+                        ? "global::System.Double.NegativeInfinity"
+                        : value.ToString("R", CultureInfo.InvariantCulture) + "D";
 
         private static MemberSpec BuildMemberSpec(MemberModel member, ObjectModel model)
         {

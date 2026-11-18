@@ -834,13 +834,16 @@ internal sealed partial class ContextEmitter
         }
 
         var parameterMemberIndexes = model.Constructor.ParameterMemberIndexes;
+        var parameterDefaults = model.Constructor.ParameterDefaults;
         var arguments = new string[parameterMemberIndexes.Length];
         for (var i = 0; i < parameterMemberIndexes.Length; i++)
         {
             var memberIndex = parameterMemberIndexes[i];
             var memberType = model.Members[memberIndex].TypeName;
-            arguments[i] =
-                $"__p{memberIndex} ? __v{memberIndex} : default({memberType})!";
+            var fallback = i < parameterDefaults.Length && parameterDefaults[i] is { } parameterDefault
+                ? parameterDefault
+                : $"default({memberType})!";
+            arguments[i] = $"__p{memberIndex} ? __v{memberIndex} : {fallback}";
         }
 
         var argumentList = string.Join(", ", arguments);

@@ -158,22 +158,17 @@ schedule.
 
 ### 7. Required and constructor semantics
 
-**Scope**
-
-- Support required value types (for example via `UnsafeAccessor` constructors) or document the
-  limitation permanently.
-- Decide and document how `[SetsRequiredMembers]` interacts with strict presence checks for mapped
-  members.
-- Decide whether missing constructor-bound members should use parameter default values instead of
-  `default(T)`.
-- Diagnose or correctly handle hidden (`new`) members. The current generated code can bind both
-  entries to the derived member.
-- Add tests for cross-assembly DTOs with public types, private setters, and `init` accessors.
+**Status (2026-11-18): implemented.** Required value types remain a permanent limitation
+(`NBTSG007`). `[SetsRequiredMembers]` only excuses required members that are excluded from the
+mapping; mapped required members are always presence-checked. Missing constructor-bound members use
+the parameter's declared default value when it has one, otherwise the CLR default. Hidden (`new`)
+members are rejected with `NBTSG017` and `NotSupportedException` from the reflection resolver.
+Cross-assembly `init`/required members and friend-assembly (`internal`) setters are covered by
+parity tests; private setters in another assembly are documented as not visible to source generation.
 
 **Acceptance**
 
-- The chosen semantics are documented and covered by parity tests between generated and reflection
-  paths.
+- Covered by generated/reflection parity tests and documented in the README.
 
 ### 8. Converter cache cold-start cost
 
@@ -232,9 +227,8 @@ reported explicitly instead of being mapped as objects.
 
 ### 14. Test matrix expansion
 
-- Cross-assembly DTOs with private setters/init accessors.
 - Enum flags, undefined values, nested collections, and enum dictionaries.
-- Hidden members, override attribute inheritance, and inherited fields.
+- Override attribute inheritance and inherited fields.
 - Custom-converter precedence matrix.
 - Malformed-input and fuzz tests for the reader.
 - Generator performance tests with large contexts.
@@ -256,12 +250,11 @@ reported explicitly instead of being mapped as objects.
 
 ## Suggested sequencing
 
-P0 and P1 #4/#6 are complete. For the remaining work:
+P0 and P1 #4/#6/#7 are complete. For the remaining work:
 
-1. P1 #7: required and constructor semantics, including hidden (`new`) members.
-2. P1 #8 and #5: converter-cache cold start, then generated member converter caching.
-3. P2 #13 and #9: `SerializeAsync`, then resolver-chain migration support.
-4. P2 #10/#12 and the P3 items when their design prerequisites are settled.
+1. P1 #8 and #5: converter-cache cold start, then generated member converter caching.
+2. P2 #13 and #9: `SerializeAsync`, then resolver-chain migration support.
+3. P2 #10/#12 and the P3 items when their design prerequisites are settled.
 
 ## Deliberate non-goals for now
 

@@ -424,6 +424,20 @@ internal sealed class TypeGraph
             return null;
         }
 
+        var hidden = members
+            .GroupBy(static member => member.ClrName, StringComparer.Ordinal)
+            .FirstOrDefault(static group => group.Count() > 1);
+        if (hidden is not null)
+        {
+            Report(
+                Diagnostics.HiddenMember,
+                location,
+                type.ToDisplayString(FullyQualified),
+                hidden.Key);
+            HasErrors = true;
+            return null;
+        }
+
         var duplicate = members
             .GroupBy(static member => member.NbtName, StringComparer.Ordinal)
             .FirstOrDefault(static group => group.Count() > 1);

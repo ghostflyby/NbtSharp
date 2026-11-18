@@ -338,6 +338,7 @@ internal sealed class ConstructorSpec
     public ConstructorSpec(
         int[] parameterMemberIndexes,
         string parameterList,
+        ImmutableArray<string?> parameterDefaults,
         string typeParameterList,
         ImmutableArray<string> constraintLines,
         string definitionTypeName,
@@ -345,6 +346,7 @@ internal sealed class ConstructorSpec
     {
         ParameterMemberIndexes = parameterMemberIndexes;
         ParameterList = parameterList;
+        ParameterDefaults = parameterDefaults;
         TypeParameterList = typeParameterList;
         ConstraintLines = constraintLines;
         DefinitionTypeName = definitionTypeName;
@@ -354,6 +356,12 @@ internal sealed class ConstructorSpec
     public int[] ParameterMemberIndexes { get; }
 
     public string ParameterList { get; }
+
+    /// <summary>
+    /// Optional default expressions for constructor parameters, aligned with
+    /// <see cref="ParameterMemberIndexes"/>. A null entry means the parameter has no usable default.
+    /// </summary>
+    public ImmutableArray<string?> ParameterDefaults { get; }
 
     public string TypeParameterList { get; }
 
@@ -629,6 +637,12 @@ internal static class ContextSpecFingerprint
             }
 
             hash.Add(constructor.ParameterList);
+            hash.Add(constructor.ParameterDefaults.Length);
+            foreach (var parameterDefault in constructor.ParameterDefaults)
+            {
+                hash.Add(parameterDefault);
+            }
+
             hash.Add(constructor.TypeParameterList);
             AddStrings(ref hash, constructor.ConstraintLines);
             hash.Add(constructor.DefinitionTypeName);

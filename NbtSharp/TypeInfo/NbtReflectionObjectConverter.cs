@@ -24,6 +24,14 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
     public NbtReflectionObjectConverter(Type type)
     {
         _type = type;
+        var hiddenMember = FindHiddenMember(type);
+        if (hiddenMember is not null)
+        {
+            throw new NotSupportedException(
+                $"The member '{hiddenMember}' on {type} hides a base member with the same name. " +
+                "Rename the derived member or exclude one of the members with [NbtIgnore].");
+        }
+
         _members = DiscoverMembers(type);
         _indexByName = new Dictionary<string, int>(StringComparer.Ordinal);
         for (var i = 0; i < _members.Length; i++)
@@ -191,13 +199,14 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
         }
         else
         {
+            var parameters = _constructor.GetParameters();
             var arguments = new object?[_constructorMemberIndexes.Length];
             for (var i = 0; i < arguments.Length; i++)
             {
                 var memberIndex = _constructorMemberIndexes[i];
                 arguments[i] = present[memberIndex]
                     ? values[memberIndex]
-                    : GetDefault(_members[memberIndex].Type);
+                    : GetParameterDefault(parameters[i], _members[memberIndex].Type);
             }
 
             instance = _constructor.Invoke(arguments);
@@ -212,6 +221,25 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
         }
 
         return instance;
+    }
+
+    private static object? GetParameterDefault(ParameterInfo parameter, Type memberType)
+    {
+        if (!parameter.HasDefaultValue)
+        {
+            return GetDefault(memberType);
+        }
+
+        var value = parameter.DefaultValue;
+        if (value is null || value is DBNull || ReferenceEquals(value, Missing.Value))
+        {
+            return GetDefault(memberType);
+        }
+
+        var targetType = Nullable.GetUnderlyingType(parameter.ParameterType) ?? parameter.ParameterType;
+        return targetType.IsEnum && !value.GetType().IsEnum
+            ? Enum.ToObject(targetType, value)
+            : value;
     }
 
     private static object? GetDefault(Type type) => type.IsValueType ? Activator.CreateInstance(type) : null;
@@ -297,6 +325,84 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
 
     private static bool SetsRequiredMembers(ConstructorInfo constructor) =>
         constructor.IsDefined(typeof(SetsRequiredMembersAttribute), inherit: false);
+
+    private static string? FindHiddenMember(Type type)
+    {
+        var declaredTypes = new List<Type>();
+        for (var current = type; current is not null; current = current.BaseType)
+        {
+            declaredTypes.Add(current);
+        }
+
+        declaredTypes.Reverse();
+
+        var mappedByName = new Dictionary<string, List<MemberInfo>>(StringComparer.Ordinal);
+        foreach (var current in declaredTypes)
+        {
+            foreach (var property in current.GetProperties(
+                         BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly))
+            {
+                if (property.GetMethod is not { IsPublic: true } ||
+                    property.GetIndexParameters().Length != 0 ||
+                    property.IsDefined(typeof(NbtIgnoreAttribute), inherit: true))
+                {
+                    continue;
+                }
+
+                Add(property.Name, property);
+            }
+
+            foreach (var field in current.GetFields(
+                         BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly))
+            {
+                if (field.IsStatic ||
+                    field.IsLiteral ||
+                    field.IsInitOnly ||
+                    !field.IsDefined(typeof(NbtIncludeAttribute), inherit: true) ||
+                    field.IsDefined(typeof(NbtIgnoreAttribute), inherit: true))
+                {
+                    continue;
+                }
+
+                Add(field.Name, field);
+            }
+        }
+
+        foreach (var group in mappedByName.Values)
+        {
+            if (group.Count < 2)
+            {
+                continue;
+            }
+
+            for (var i = 1; i < group.Count; i++)
+            {
+                if (group[i] is PropertyInfo property &&
+                    group[0] is PropertyInfo baseProperty &&
+                    property.GetMethod is { } getter &&
+                    baseProperty.GetMethod is { } baseGetter &&
+                    getter.GetBaseDefinition() == baseGetter)
+                {
+                    continue;
+                }
+
+                return group[0].Name;
+            }
+        }
+
+        return null;
+
+        void Add(string name, MemberInfo member)
+        {
+            if (!mappedByName.TryGetValue(name, out var members))
+            {
+                members = [];
+                mappedByName.Add(name, members);
+            }
+
+            members.Add(member);
+        }
+    }
 
     private static NbtReflectionMember[] DiscoverMembers(Type type)
     {
