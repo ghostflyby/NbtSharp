@@ -275,7 +275,7 @@ internal struct NbtImmutableSortedSetBuilder<TElement> :
     private ImmutableSortedSet<TElement>.Builder _builder;
 
     public void Create(int count) =>
-        _builder = ImmutableSortedSet.CreateBuilder<TElement>(
+        _builder = ImmutableSortedSet.CreateBuilder(
             NbtCollectionComparers.Default<TElement>());
 
     public void Add(TElement element) => _builder.Add(element);

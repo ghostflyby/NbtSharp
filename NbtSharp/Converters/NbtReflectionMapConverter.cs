@@ -331,11 +331,11 @@ internal sealed class NbtReflectionMapConverter<TCollection, TValue> :
     private static bool TryCloseFactory(
         MethodInfo candidate,
         Type valueType,
-        out MethodInfo closed)
+        [NotNullWhen(true)] out MethodInfo? closed)
     {
-        closed = candidate;
         if (!candidate.IsGenericMethodDefinition)
         {
+            closed = candidate;
             return true;
         }
 
@@ -345,12 +345,12 @@ internal sealed class NbtReflectionMapConverter<TCollection, TValue> :
             {
                 1 => candidate.MakeGenericMethod(valueType),
                 2 => candidate.MakeGenericMethod(typeof(string), valueType),
-                _ => null!,
+                _ => null,
             };
         }
         catch (ArgumentException)
         {
-            closed = null!;
+            closed = null;
             return false;
         }
 

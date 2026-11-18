@@ -331,7 +331,7 @@ internal sealed class AotCollectionShapes
     public SortedSet<string> SortedStrings { get; init; } = new(StringComparer.Ordinal);
 
     public ImmutableSortedSet<string> ImmutableSortedStrings { get; init; } =
-        System.Collections.Immutable.ImmutableSortedSet.Create<string>(StringComparer.Ordinal);
+        ImmutableSortedSet.Create<string>(StringComparer.Ordinal);
 }
 
 internal sealed class AotDiscoveredCollections

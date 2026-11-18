@@ -7,8 +7,14 @@ namespace NbtSharp.Converters;
 /// </summary>
 internal static class NbtCollectionComparers
 {
-    public static IComparer<T> Default<T>() =>
-        typeof(T) == typeof(string)
-            ? (IComparer<T>)(object)StringComparer.Ordinal
-            : Comparer<T>.Default;
+    public static IComparer<T> Default<T>()
+    {
+        if (typeof(T) != typeof(string))
+        {
+            return Comparer<T>.Default;
+        }
+
+        object ordinal = StringComparer.Ordinal;
+        return (IComparer<T>)ordinal;
+    }
 }
