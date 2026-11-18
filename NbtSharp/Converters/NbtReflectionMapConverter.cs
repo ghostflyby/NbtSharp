@@ -252,28 +252,8 @@ internal sealed class NbtReflectionMapConverter<TCollection, TValue> :
                     continue;
                 }
 
-                var methodToCheck = candidate;
-                if (candidate.IsGenericMethodDefinition)
-                {
-                    var arity = candidate.GetGenericArguments().Length;
-                    if (arity is not (1 or 2))
-                    {
-                        continue;
-                    }
-
-                    try
-                    {
-                        methodToCheck = arity == 1
-                            ? candidate.MakeGenericMethod(valueType)
-                            : candidate.MakeGenericMethod(typeof(string), valueType);
-                    }
-                    catch (ArgumentException)
-                    {
-                        continue;
-                    }
-                }
-
-                if (!collectionType.IsAssignableFrom(methodToCheck.ReturnType))
+                if (!TryCloseFactory(candidate, valueType, out var methodToCheck) ||
+                    !collectionType.IsAssignableFrom(methodToCheck.ReturnType))
                 {
                     continue;
                 }
@@ -348,6 +328,35 @@ internal sealed class NbtReflectionMapConverter<TCollection, TValue> :
 
     [UnconditionalSuppressMessage("Aot", "IL2060", Justification = "Reflection is confined to the annotated reflection resolver path.")]
     [UnconditionalSuppressMessage("Aot", "IL2070", Justification = "Reflection is confined to the annotated reflection resolver path.")]
+    private static bool TryCloseFactory(
+        MethodInfo candidate,
+        Type valueType,
+        out MethodInfo closed)
+    {
+        closed = candidate;
+        if (!candidate.IsGenericMethodDefinition)
+        {
+            return true;
+        }
+
+        try
+        {
+            closed = candidate.GetGenericArguments().Length switch
+            {
+                1 => candidate.MakeGenericMethod(valueType),
+                2 => candidate.MakeGenericMethod(typeof(string), valueType),
+                _ => null!,
+            };
+        }
+        catch (ArgumentException)
+        {
+            closed = null!;
+            return false;
+        }
+
+        return closed is not null;
+    }
+
     private static bool TryFindFactory(
         Type builderType,
         string methodName,
@@ -366,20 +375,8 @@ internal sealed class NbtReflectionMapConverter<TCollection, TValue> :
                 continue;
             }
 
-            var methodToCheck = candidate;
-            if (candidate.IsGenericMethodDefinition)
-            {
-                try
-                {
-                    methodToCheck = candidate.MakeGenericMethod(typeof(string), valueType);
-                }
-                catch (ArgumentException)
-                {
-                    continue;
-                }
-            }
-
-            if (!collectionType.IsAssignableFrom(methodToCheck.ReturnType))
+            if (!TryCloseFactory(candidate, valueType, out var methodToCheck) ||
+                !collectionType.IsAssignableFrom(methodToCheck.ReturnType))
             {
                 continue;
             }

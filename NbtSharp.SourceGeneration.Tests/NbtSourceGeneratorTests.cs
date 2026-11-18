@@ -726,6 +726,7 @@ public sealed class NbtSourceGeneratorTests
         Assert.DoesNotContain(
             result.GeneratorDiagnostics,
             static diagnostic => diagnostic.Id == "NBTSG003");
+        AssertNoErrors(result);
     }
 
     [Fact]

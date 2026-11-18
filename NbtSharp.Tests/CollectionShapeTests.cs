@@ -205,6 +205,9 @@ public sealed class CollectionShapeTests
 
         Assert.Contains("PriorityQueue", exception.Message);
         Assert.Contains("custom converter", exception.Message);
+
+        Assert.Throws<NotSupportedException>(() =>
+            NbtSerializer.Deserialize<PriorityQueue<int, int>>(Array.Empty<byte>()));
     }
 
     [Fact]
@@ -242,6 +245,17 @@ public sealed class CollectionShapeTests
 
         Assert.Contains("span", exception.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("source generator", exception.Message);
+    }
+
+    [Fact]
+    public void ReflectionSupportsSingleTypeParameterMapFactories()
+    {
+        var value = EnumerableMapFactory.Create(
+            new[] { new KeyValuePair<string, int>("a", 1) });
+
+        var copy = RoundTrip(value);
+
+        Assert.Equal(1, copy["a"]);
     }
 
     [Fact]
@@ -363,6 +377,55 @@ internal static class SpanOnlyCollectionFactory
 {
     public static SpanOnlyCollection<T> Create<T>(ReadOnlySpan<T> items) =>
         new(items.ToArray());
+}
+
+[CollectionBuilder(typeof(EnumerableMapFactory), "Create")]
+internal sealed class EnumerableMap<TValue> : IReadOnlyDictionary<string, TValue>
+{
+    private readonly Dictionary<string, TValue> _items;
+
+    internal EnumerableMap(Dictionary<string, TValue> items) => _items = items;
+
+    public TValue this[string key] => _items[key];
+
+    public IEnumerable<string> Keys => _items.Keys;
+
+    public IEnumerable<TValue> Values => _items.Values;
+
+    public int Count => _items.Count;
+
+    public bool ContainsKey(string key) => _items.ContainsKey(key);
+
+    public bool TryGetValue(string key, out TValue value)
+    {
+        if (_items.TryGetValue(key, out var stored))
+        {
+            value = stored;
+            return true;
+        }
+
+        value = default!;
+        return false;
+    }
+
+    public IEnumerator<KeyValuePair<string, TValue>> GetEnumerator() => _items.GetEnumerator();
+
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+}
+
+internal static class EnumerableMapFactory
+{
+    public static EnumerableMap<TValue> Create<TValue>(
+        IEnumerable<KeyValuePair<string, TValue>> items)
+    {
+        var map = new Dictionary<string, TValue>(StringComparer.Ordinal);
+        foreach (var pair in items)
+        {
+            map[pair.Key] = pair.Value;
+        }
+
+        return new EnumerableMap<TValue>(map);
+    }
 }
 
 internal sealed class CompanionSpanCollection<T> : IReadOnlyList<T>
