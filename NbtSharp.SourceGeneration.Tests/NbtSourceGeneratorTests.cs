@@ -2012,6 +2012,26 @@ public sealed class NbtSourceGeneratorTests
     }
 
     [Fact]
+    public void AllowsRecordInheritanceWithRepeatedPositionalParameter()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Derived))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal record Base(int Value);
+
+            internal sealed record Derived(int Value, int Other) : Base(Value);
+            """);
+
+        AssertNoErrors(result);
+        Assert.DoesNotContain(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG017");
+    }
+
+    [Fact]
     public void FingerprintChangesWhenMetadataConstructorDefaultChanges()
     {
         var first = ComputeMetadataDefaultFingerprint(1);
@@ -2040,6 +2060,10 @@ public sealed class NbtSourceGeneratorTests
             ],
             References,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        using var stream = new MemoryStream();
+        var emitResult = metadata.Emit(stream);
+        Assert.True(emitResult.Success);
+        var reference = MetadataReference.CreateFromImage(stream.ToArray());
         var contextCompilation = CSharpCompilation.Create(
             "FingerprintTests",
             [
@@ -2053,10 +2077,11 @@ public sealed class NbtSourceGeneratorTests
                     }
                     """),
             ],
-            References.Add(metadata.ToMetadataReference()),
+            References.Add(reference),
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
         var contextType = contextCompilation.GetTypeByMetadataName("TestContext")!;
         var dtoType = contextCompilation.GetTypeByMetadataName("MetadataDto")!;
+        Assert.Empty(dtoType.DeclaringSyntaxReferences);
 
         return ReachableFingerprint.Compute(
             contextType,

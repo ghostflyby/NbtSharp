@@ -887,6 +887,7 @@ public sealed class NbtSourceGenerationTests
         {
             TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
         };
+        reflectionOptions.Converters.Add(SourceGenDecimalConverter.Instance);
         var empty = NbtSerializer.Serialize(new NbtRoot("root", new NbtCompound()));
         var defaults = NbtSerializer.Deserialize(empty, context.SourceGenOptionalDefaults);
         var reflectedDefaults = NbtSerializer.Deserialize<SourceGenOptionalDefaults>(
@@ -907,6 +908,9 @@ public sealed class NbtSourceGenerationTests
         Assert.True(defaults.Enabled);
         Assert.Equal(1.5, defaults.Ratio);
         Assert.Null(defaults.Nickname);
+        Assert.True(float.IsNaN(defaults.SpecialSingle));
+        Assert.True(double.IsPositiveInfinity(defaults.SpecialDouble));
+        Assert.Equal(0.1m, defaults.Amount);
         Assert.Equal(defaults.Name, reflectedDefaults.Name);
         Assert.Equal(defaults.Count, reflectedDefaults.Count);
         Assert.Equal(defaults.Kind, reflectedDefaults.Kind);
@@ -914,6 +918,9 @@ public sealed class NbtSourceGenerationTests
         Assert.Equal(defaults.Enabled, reflectedDefaults.Enabled);
         Assert.Equal(defaults.Ratio, reflectedDefaults.Ratio);
         Assert.Equal(defaults.Nickname, reflectedDefaults.Nickname);
+        Assert.Equal(defaults.SpecialSingle, reflectedDefaults.SpecialSingle);
+        Assert.Equal(defaults.SpecialDouble, reflectedDefaults.SpecialDouble);
+        Assert.Equal(defaults.Amount, reflectedDefaults.Amount);
         Assert.Equal("given", generated.Name);
         Assert.Equal(7, generated.Count);
         Assert.Equal(SourceGenOptionalKind.Second, generated.Kind);
@@ -958,10 +965,15 @@ public sealed class NbtSourceGenerationTests
             TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
         };
         var value = new SourceGenMappedOverrideDerived { Value = 5 };
+        var genericValue = new SourceGenMappedGenericOverrideDerived { Value = 6 };
 
         var data = NbtSerializer.Serialize(
             value,
             context.SourceGenMappedOverrideDerived,
+            "root");
+        var genericData = NbtSerializer.Serialize(
+            genericValue,
+            context.SourceGenMappedGenericOverrideDerived,
             "root");
         var generated = NbtSerializer.Deserialize(
             data,
@@ -969,9 +981,17 @@ public sealed class NbtSourceGenerationTests
         var reflected = NbtSerializer.Deserialize<SourceGenMappedOverrideDerived>(
             data,
             reflectionOptions);
+        var genericGenerated = NbtSerializer.Deserialize(
+            genericData,
+            context.SourceGenMappedGenericOverrideDerived);
+        var genericReflected = NbtSerializer.Deserialize<SourceGenMappedGenericOverrideDerived>(
+            genericData,
+            reflectionOptions);
 
         Assert.Equal(5, generated.Value);
         Assert.Equal(5, reflected.Value);
+        Assert.Equal(6, genericGenerated.Value);
+        Assert.Equal(6, genericReflected.Value);
     }
 
     [Fact]
@@ -1242,6 +1262,7 @@ public sealed class NbtSourceGenerationTests
 [NbtSerializable(typeof(SourceGenOptionalDefaults))]
 [NbtSerializable(typeof(SourceGenSmallOptionalDefaults))]
 [NbtSerializable(typeof(SourceGenMappedOverrideDerived))]
+[NbtSerializable(typeof(SourceGenMappedGenericOverrideDerived))]
 [NbtSerializable(typeof(SourceGenSetsRequired))]
 [NbtSerializable(typeof(SourceGenPrivateSetter))]
 [NbtSerializable(typeof(CrossAssemblyDto))]
@@ -1706,7 +1727,10 @@ internal sealed class SourceGenOptionalDefaults
         int? optional = 5,
         bool enabled = true,
         double ratio = 1.5,
-        string? nickname = null)
+        string? nickname = null,
+        float specialSingle = float.NaN,
+        double specialDouble = double.PositiveInfinity,
+        decimal amount = 0.1m)
     {
         Name = name;
         Count = count;
@@ -1715,6 +1739,9 @@ internal sealed class SourceGenOptionalDefaults
         Enabled = enabled;
         Ratio = ratio;
         Nickname = nickname;
+        SpecialSingle = specialSingle;
+        SpecialDouble = specialDouble;
+        Amount = amount;
     }
 
     public string Name { get; }
@@ -1730,6 +1757,13 @@ internal sealed class SourceGenOptionalDefaults
     public double Ratio { get; }
 
     public string? Nickname { get; }
+
+    public float SpecialSingle { get; }
+
+    public double SpecialDouble { get; }
+
+    [NbtUseConverter(typeof(SourceGenDecimalConverter))]
+    public decimal Amount { get; }
 }
 
 internal sealed class SourceGenSmallOptionalDefaults
@@ -1826,6 +1860,17 @@ internal class SourceGenMappedOverrideBase
 }
 
 internal sealed class SourceGenMappedOverrideDerived : SourceGenMappedOverrideBase
+{
+    public override int Value { get; set; }
+}
+
+internal class SourceGenMappedGenericOverrideBase<T>
+{
+    public virtual T Value { get; set; } = default!;
+}
+
+internal sealed class SourceGenMappedGenericOverrideDerived :
+    SourceGenMappedGenericOverrideBase<int>
 {
     public override int Value { get; set; }
 }

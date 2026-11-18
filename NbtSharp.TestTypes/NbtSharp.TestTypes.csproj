@@ -9,7 +9,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Roslyn imports non-public metadata members only for friend assemblies. -->
+    <!-- Roslyn imports internal metadata accessors only for friend assemblies. -->
     <InternalsVisibleTo Include="NbtSharp.Tests" />
   </ItemGroup>
 
