@@ -1051,9 +1051,12 @@ public sealed class NbtSourceGenerationTests
             TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
         };
 
+        var hiddenField = new ReflectionHiddenFieldDerived { Value = 1 };
+
+        Assert.Equal(1, hiddenField.Value);
         AssertRejected(new ReflectionHiddenDerived(), reflectionOptions);
         AssertRejected(new ReflectionHiddenIgnoredDerived(), reflectionOptions);
-        AssertRejected(new ReflectionHiddenFieldDerived(), reflectionOptions);
+        AssertRejected(hiddenField, reflectionOptions);
         AssertRejected(new ReflectionHiddenMethodDerived(), reflectionOptions);
 
         static void AssertRejected<T>(T value, NbtSerializerOptions options)
