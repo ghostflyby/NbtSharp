@@ -83,6 +83,13 @@ public sealed class NbtConverterTests
 
         Assert.Throws<NbtException>(() => NbtSerializer.Deserialize<List<string>>(data));
         Assert.Empty(NbtSerializer.Deserialize<List<int>>(data));
+
+        var shortData = NbtSerializer.Serialize(
+            new NbtRoot("root", new NbtList(new List<short>())));
+        Assert.Empty(NbtSerializer.Deserialize<List<char>>(shortData));
+        Assert.Empty(NbtSerializer.Deserialize<List<ushort>>(shortData));
+        Assert.Throws<NbtException>(() => NbtSerializer.Deserialize<List<int>>(shortData));
+        Assert.Throws<NbtException>(() => NbtSerializer.Deserialize<List<char>>(data));
     }
 
     [Fact]

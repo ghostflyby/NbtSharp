@@ -308,8 +308,10 @@ internal sealed class NbtReflectionSequenceConverter<TCollection, TElement> :
         takesArray = false;
         readOnlySpanFactory = null;
         spanFactory = null;
-        MethodInfo? spanMethod = null;
-        var spanIsWritable = false;
+        MethodInfo? enumerableMethod = null;
+        MethodInfo? arrayMethod = null;
+        MethodInfo? readOnlySpanMethod = null;
+        MethodInfo? writableSpanMethod = null;
         foreach (var candidate in builderType.GetMethods(
                      BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static))
         {
@@ -339,56 +341,99 @@ internal sealed class NbtReflectionSequenceConverter<TCollection, TElement> :
             var parameterType = methodToCheck.GetParameters()[0].ParameterType;
             if (parameterType == elementType.MakeArrayType())
             {
-                method = methodToCheck;
-                takesArray = true;
-                return true;
+                arrayMethod ??= methodToCheck;
             }
-
-            if (parameterType.IsAssignableFrom(typeof(List<TElement>)))
+            else if (parameterType.IsAssignableFrom(typeof(List<TElement>)))
             {
-                method = methodToCheck;
-                return true;
+                enumerableMethod ??= methodToCheck;
             }
-
-            if (parameterType.IsGenericType &&
-                (parameterType.GetGenericTypeDefinition() == typeof(ReadOnlySpan<>) ||
-                 parameterType.GetGenericTypeDefinition() == typeof(Span<>)) &&
-                parameterType.GetGenericArguments()[0] == elementType &&
-                spanMethod is null)
+            else if (parameterType.IsGenericType &&
+                     parameterType.GetGenericArguments()[0] == elementType)
             {
-                spanMethod = methodToCheck;
-                spanIsWritable = parameterType.GetGenericTypeDefinition() == typeof(Span<>);
+                if (parameterType.GetGenericTypeDefinition() == typeof(ReadOnlySpan<>))
+                {
+                    readOnlySpanMethod ??= methodToCheck;
+                }
+                else if (parameterType.GetGenericTypeDefinition() == typeof(Span<>))
+                {
+                    writableSpanMethod ??= methodToCheck;
+                }
             }
         }
 
-        if (spanMethod is null)
+        if (enumerableMethod is not null)
+        {
+            method = enumerableMethod;
+            return true;
+        }
+
+        if (TryCreateSpanFactory(
+                readOnlySpanMethod,
+                writableSpanMethod,
+                collectionType,
+                elementType,
+                out readOnlySpanFactory,
+                out spanFactory))
+        {
+            return true;
+        }
+
+        if (arrayMethod is not null)
+        {
+            method = arrayMethod;
+            takesArray = true;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryCreateSpanFactory(
+        MethodInfo? readOnlySpanMethod,
+        MethodInfo? writableSpanMethod,
+        Type collectionType,
+        Type elementType,
+        out NbtReadOnlySpanFactory<TCollection, TElement>? readOnlySpanFactory,
+        out NbtSpanFactory<TCollection, TElement>? spanFactory)
+    {
+        readOnlySpanFactory = null;
+        spanFactory = null;
+        if (readOnlySpanMethod is not null)
+        {
+            try
+            {
+                readOnlySpanFactory =
+                    (NbtReadOnlySpanFactory<TCollection, TElement>)readOnlySpanMethod.CreateDelegate(
+                        typeof(NbtReadOnlySpanFactory<,>).MakeGenericType(
+                            collectionType,
+                            elementType));
+                return true;
+            }
+            catch (Exception ex) when (IsSpanFactoryBindingFailure(ex))
+            {
+            }
+        }
+
+        if (writableSpanMethod is null)
         {
             return false;
         }
 
         try
         {
-            if (spanIsWritable)
-            {
-                spanFactory = (NbtSpanFactory<TCollection, TElement>)spanMethod.CreateDelegate(
-                    typeof(NbtSpanFactory<,>).MakeGenericType(collectionType, elementType));
-            }
-            else
-            {
-                readOnlySpanFactory =
-                    (NbtReadOnlySpanFactory<TCollection, TElement>)spanMethod.CreateDelegate(
-                        typeof(NbtReadOnlySpanFactory<,>).MakeGenericType(
-                            collectionType,
-                            elementType));
-            }
-
+            spanFactory = (NbtSpanFactory<TCollection, TElement>)writableSpanMethod.CreateDelegate(
+                typeof(NbtSpanFactory<,>).MakeGenericType(collectionType, elementType));
             return true;
         }
-        catch (ArgumentException)
+        catch (Exception ex) when (IsSpanFactoryBindingFailure(ex))
         {
             return false;
         }
     }
+
+    private static bool IsSpanFactoryBindingFailure(Exception exception) =>
+        exception is ArgumentException or NotSupportedException or
+            MethodAccessException or InvalidOperationException;
 }
 
 internal static class NbtReflectionInvoke

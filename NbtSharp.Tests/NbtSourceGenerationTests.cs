@@ -971,8 +971,14 @@ public sealed class NbtSourceGenerationTests
             ULong = ulong.MaxValue,
             Character = '你',
             OptionalUShort = 0,
+            OptionalUInt = 7,
+            OptionalULong = 9,
             OptionalCharacter = '\n',
             UShorts = [0, ushort.MaxValue],
+            UInts = [0, uint.MaxValue],
+            ULongs = [0, ulong.MaxValue],
+            UIntList = [1, uint.MaxValue],
+            CharMap = new Dictionary<string, char> { ["a"] = '你' },
             Characters = ['a', '你'],
         };
 
@@ -987,18 +993,28 @@ public sealed class NbtSourceGenerationTests
         Assert.Equal(value.ULong, generated.ULong);
         Assert.Equal(value.Character, generated.Character);
         Assert.Equal(value.OptionalUShort, generated.OptionalUShort);
-        Assert.Null(generated.OptionalUInt);
+        Assert.Equal(value.OptionalUInt, generated.OptionalUInt);
+        Assert.Equal(value.OptionalULong, generated.OptionalULong);
         Assert.Equal(value.OptionalCharacter, generated.OptionalCharacter);
         Assert.Equal(value.UShorts, generated.UShorts);
+        Assert.Equal(value.UInts, generated.UInts);
+        Assert.Equal(value.ULongs, generated.ULongs);
+        Assert.Equal(value.UIntList, generated.UIntList);
+        Assert.Equal(value.CharMap, generated.CharMap);
         Assert.Equal(value.Characters, generated.Characters);
         Assert.Equal(value.UShort, reflected.UShort);
         Assert.Equal(value.UInt, reflected.UInt);
         Assert.Equal(value.ULong, reflected.ULong);
         Assert.Equal(value.Character, reflected.Character);
         Assert.Equal(value.OptionalUShort, reflected.OptionalUShort);
-        Assert.Null(reflected.OptionalUInt);
+        Assert.Equal(value.OptionalUInt, reflected.OptionalUInt);
+        Assert.Equal(value.OptionalULong, reflected.OptionalULong);
         Assert.Equal(value.OptionalCharacter, reflected.OptionalCharacter);
         Assert.Equal(value.UShorts, reflected.UShorts);
+        Assert.Equal(value.UInts, reflected.UInts);
+        Assert.Equal(value.ULongs, reflected.ULongs);
+        Assert.Equal(value.UIntList, reflected.UIntList);
+        Assert.Equal(value.CharMap, reflected.CharMap);
         Assert.Equal(value.Characters, reflected.Characters);
     }
 
@@ -1827,9 +1843,19 @@ internal sealed class SourceGenUnsignedScalars
 
     public uint? OptionalUInt { get; set; }
 
+    public ulong? OptionalULong { get; set; }
+
     public char? OptionalCharacter { get; set; }
 
     public ushort[] UShorts { get; set; } = [];
+
+    public uint[] UInts { get; set; } = [];
+
+    public ulong[] ULongs { get; set; } = [];
+
+    public List<uint> UIntList { get; set; } = [];
+
+    public Dictionary<string, char> CharMap { get; set; } = [];
 
     public char[] Characters { get; set; } = [];
 }

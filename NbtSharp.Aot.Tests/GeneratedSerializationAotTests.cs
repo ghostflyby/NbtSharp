@@ -177,8 +177,12 @@ public sealed class GeneratedSerializationAotTests
             ULong = ulong.MaxValue,
             Character = '你',
             OptionalUShort = 3,
+            OptionalUInt = 4,
+            OptionalULong = 5,
             OptionalCharacter = '\n',
             UShorts = [0, 1],
+            UInts = [0, 1],
+            ULongs = [0, 1],
             Characters = ['a', '你'],
         };
 
@@ -193,9 +197,12 @@ public sealed class GeneratedSerializationAotTests
         Assert.Equal(value.ULong, copy.ULong);
         Assert.Equal(value.Character, copy.Character);
         Assert.Equal(value.OptionalUShort, copy.OptionalUShort);
-        Assert.Null(copy.OptionalUInt);
+        Assert.Equal(value.OptionalUInt, copy.OptionalUInt);
+        Assert.Equal(value.OptionalULong, copy.OptionalULong);
         Assert.Equal(value.OptionalCharacter, copy.OptionalCharacter);
         Assert.Equal(value.UShorts, copy.UShorts);
+        Assert.Equal(value.UInts, copy.UInts);
+        Assert.Equal(value.ULongs, copy.ULongs);
         Assert.Equal(value.Characters, copy.Characters);
     }
 
@@ -381,9 +388,15 @@ internal sealed class AotUnsignedScalars
 
     public uint? OptionalUInt { get; init; }
 
+    public ulong? OptionalULong { get; init; }
+
     public char? OptionalCharacter { get; init; }
 
     public ushort[] UShorts { get; init; } = [];
+
+    public uint[] UInts { get; init; } = [];
+
+    public ulong[] ULongs { get; init; } = [];
 
     public char[] Characters { get; init; } = [];
 }
