@@ -234,6 +234,16 @@ public sealed class CollectionShapeTests
     }
 
     [Fact]
+    public void ReflectionReversesStackLikeSpanFactories()
+    {
+        var value = StackSpanFactory.Create<int>([1, 2, 3]);
+
+        var copy = RoundTrip(value);
+
+        Assert.Equal([3, 2, 1], copy.ToArray());
+    }
+
+    [Fact]
     public void ReflectionPrefersEnumerableFactoriesOverSpanAndArray()
     {
         MultiFactory.Reset();
@@ -580,6 +590,32 @@ internal static class SpanPreferenceFactory
     {
         WritableCalls++;
         return new(items.ToArray());
+    }
+}
+
+[CollectionBuilder(typeof(StackSpanFactory), "Create")]
+internal sealed class StackSpanCollection<T> : IEnumerable<T>
+{
+    private readonly List<T> _items = [];
+
+    public void Push(T item) => _items.Insert(0, item);
+
+    public IEnumerator<T> GetEnumerator() => _items.GetEnumerator();
+
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+}
+
+internal static class StackSpanFactory
+{
+    public static StackSpanCollection<T> Create<T>(ReadOnlySpan<T> items)
+    {
+        var stack = new StackSpanCollection<T>();
+        foreach (var item in items)
+        {
+            stack.Push(item);
+        }
+
+        return stack;
     }
 }
 

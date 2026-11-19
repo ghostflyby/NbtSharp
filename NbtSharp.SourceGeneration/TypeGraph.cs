@@ -1135,10 +1135,6 @@ internal sealed class TypeGraph
             "global::System.Object" or
             "global::NbtSharp.NbtRoot" or
             "global::NbtSharp.NbtEndList" or
-            "global::System.Char" or
-            "global::System.UInt16" or
-            "global::System.UInt32" or
-            "global::System.UInt64" or
             "global::System.IntPtr" or
             "global::System.UIntPtr" or
             "global::System.Decimal" or

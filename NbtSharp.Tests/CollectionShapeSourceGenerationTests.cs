@@ -120,6 +120,25 @@ public sealed class CollectionShapeSourceGenerationTests
     }
 
     [Fact]
+    public void GeneratedFactoriesPreferReadOnlySpanOverWritableSpan()
+    {
+        var context = CollectionShapeContext.Default;
+        GeneratedSpanPreferenceFactory.Reset();
+        var value = new SourceGenCollectionShapes
+        {
+            SpanPreference = new GeneratedSpanPreferenceCollection<int>([1, 2]),
+            ImmutableArray = [],
+        };
+
+        var data = NbtSerializer.Serialize(value, context.SourceGenCollectionShapes, "root");
+        var copy = NbtSerializer.Deserialize(data, context.SourceGenCollectionShapes);
+
+        Assert.Equal([1, 2], copy.SpanPreference.ToArray());
+        Assert.Equal(1, GeneratedSpanPreferenceFactory.ReadOnlyCalls);
+        Assert.Equal(0, GeneratedSpanPreferenceFactory.WritableCalls);
+    }
+
+    [Fact]
     public void GeneratedConvertersSupportImmutableAndFrozenShapes()
     {
         var context = CollectionShapeContext.Default;
@@ -253,6 +272,9 @@ internal sealed class SourceGenCollectionShapes
     public SpanOnlyMap<int> SpanMap { get; set; } =
         SpanOnlyMapFactory.Create(Array.Empty<KeyValuePair<string, int>>());
 
+    public GeneratedSpanPreferenceCollection<int> SpanPreference { get; set; } =
+        new([1, 2]);
+
     public FrozenSet<int> FrozenSet { get; set; } = new HashSet<int>().ToFrozenSet();
 
     public FrozenDictionary<string, int> FrozenDictionary { get; set; } =
@@ -279,6 +301,46 @@ internal static class CustomCollectionFactory
 {
     public static CustomCollection<T> Create<T>(ReadOnlySpan<T> items) =>
         new(items.ToArray());
+}
+
+[CollectionBuilder(typeof(GeneratedSpanPreferenceFactory), "Create")]
+internal sealed class GeneratedSpanPreferenceCollection<T> : IReadOnlyList<T>
+{
+    private readonly T[] _items;
+
+    internal GeneratedSpanPreferenceCollection(T[] items) => _items = items;
+
+    public T this[int index] => _items[index];
+
+    public int Count => _items.Length;
+
+    public IEnumerator<T> GetEnumerator() => ((IEnumerable<T>)_items).GetEnumerator();
+
+    IEnumerator IEnumerable.GetEnumerator() => _items.GetEnumerator();
+}
+
+internal static class GeneratedSpanPreferenceFactory
+{
+    public static int ReadOnlyCalls;
+    public static int WritableCalls;
+
+    public static void Reset()
+    {
+        ReadOnlyCalls = 0;
+        WritableCalls = 0;
+    }
+
+    public static GeneratedSpanPreferenceCollection<T> Create<T>(ReadOnlySpan<T> items)
+    {
+        ReadOnlyCalls++;
+        return new(items.ToArray());
+    }
+
+    public static GeneratedSpanPreferenceCollection<T> Create<T>(Span<T> items)
+    {
+        WritableCalls++;
+        return new(items.ToArray());
+    }
 }
 
 internal sealed class DerivedIntCollection : Collection<int>
