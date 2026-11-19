@@ -236,7 +236,7 @@ public sealed class CollectionShapeTests
     [Fact]
     public void ReflectionReversesStackLikeSpanFactories()
     {
-        var value = StackSpanFactory.Create<int>([1, 2, 3]);
+        var value = StackSpanFactory.Create(new[] { 1, 2, 3 });
 
         var copy = RoundTrip(value);
 

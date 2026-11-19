@@ -732,6 +732,7 @@ public sealed class NbtSourceGenerationTests
     {
         var context = new SourceGenerationContext();
         var value = new SourceGenConverterRequiredNull { Amount = null };
+        Assert.Null(value.Amount);
 
         var exception = Assert.Throws<NbtException>(
             () => NbtSerializer.Serialize(value, context.SourceGenConverterRequiredNull, "root"));
@@ -820,6 +821,7 @@ public sealed class NbtSourceGenerationTests
     {
         var context = SourceGenerationContext.Default;
         var value = new SourceGenRequiredNullable { Name = null };
+        Assert.Null(value.Name);
         var reflectionOptions = new NbtSerializerOptions
         {
             TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
@@ -839,6 +841,7 @@ public sealed class NbtSourceGenerationTests
     {
         var context = SourceGenerationContext.Default;
         var value = new SourceGenPrivateGetter { Visible = 1, Hidden = 2 };
+        Assert.Equal(1, value.Visible);
         var reflectionOptions = new NbtSerializerOptions
         {
             TypeInfoResolver = new NbtReflectionTypeInfoResolver(),

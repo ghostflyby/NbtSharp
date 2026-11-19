@@ -258,12 +258,12 @@ internal sealed class NbtReflectionMapConverter<TCollection, TValue> :
         {
             if (_readOnlySpanFactory is not null)
             {
-                return _readOnlySpanFactory(values.ToArray())!;
+                return _readOnlySpanFactory(values.ToArray());
             }
 
             if (_spanFactory is not null)
             {
-                return _spanFactory(values.ToArray())!;
+                return _spanFactory(values.ToArray());
             }
 
             if (_factory is not null)

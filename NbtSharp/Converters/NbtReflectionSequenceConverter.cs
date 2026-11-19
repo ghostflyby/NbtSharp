@@ -231,7 +231,7 @@ internal sealed class NbtReflectionSequenceConverter<TCollection, TElement> :
                     elements.Reverse();
                 }
 
-                return _readOnlySpanFactory(elements.ToArray())!;
+                return _readOnlySpanFactory(elements.ToArray());
             }
 
             if (_spanFactory is not null)
@@ -241,7 +241,7 @@ internal sealed class NbtReflectionSequenceConverter<TCollection, TElement> :
                     elements.Reverse();
                 }
 
-                return _spanFactory(elements.ToArray())!;
+                return _spanFactory(elements.ToArray());
             }
 
             if (_factory is not null)
