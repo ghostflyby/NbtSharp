@@ -22,7 +22,6 @@ public sealed class NbtConverterTests
     [Fact]
     public void UnsupportedScalarsRequireAConverter()
     {
-        Assert.Throws<NotSupportedException>(() => NbtSerializer.Serialize((ushort)1, "root"));
         Assert.Throws<NotSupportedException>(() => NbtSerializer.Serialize(1.5m, "root"));
         Assert.Throws<NotSupportedException>(() => NbtSerializer.Serialize(Guid.Empty, "root"));
     }
@@ -261,6 +260,17 @@ public sealed class NbtConverterTests
             NbtSerializer.Deserialize<List<int>>(data, options));
 
         Assert.Equal("$[0]", exception.Path);
+    }
+
+    [Fact]
+    public void UnsignedAndCharacterScalarsRoundTrip()
+    {
+        Assert.Equal((ushort)0xABCD, RoundTrip((ushort)0xABCD));
+        Assert.Equal(0xDEADBEEFu, RoundTrip(0xDEADBEEFu));
+        Assert.Equal(0xDEADBEEFCAFEBABEul, RoundTrip(0xDEADBEEFCAFEBABEul));
+        Assert.Equal('你', RoundTrip('你'));
+        Assert.Equal((ushort)0, RoundTrip((ushort)0));
+        Assert.Equal(char.MaxValue, RoundTrip(char.MaxValue));
     }
 
     [Fact]

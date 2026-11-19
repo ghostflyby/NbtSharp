@@ -957,6 +957,52 @@ public sealed class NbtSourceGenerationTests
     }
 
     [Fact]
+    public void SupportsUnsignedAndCharacterScalars()
+    {
+        var context = SourceGenerationContext.Default;
+        var reflectionOptions = new NbtSerializerOptions
+        {
+            TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
+        };
+        var value = new SourceGenUnsignedScalars
+        {
+            UShort = ushort.MaxValue,
+            UInt = uint.MaxValue,
+            ULong = ulong.MaxValue,
+            Character = '你',
+            OptionalUShort = 0,
+            OptionalCharacter = '\n',
+            UShorts = [0, ushort.MaxValue],
+            Characters = ['a', '你'],
+        };
+
+        var data = NbtSerializer.Serialize(value, context.SourceGenUnsignedScalars, "root");
+        var generated = NbtSerializer.Deserialize(data, context.SourceGenUnsignedScalars);
+        var reflected = NbtSerializer.Deserialize<SourceGenUnsignedScalars>(
+            data,
+            reflectionOptions);
+
+        Assert.Equal(value.UShort, generated.UShort);
+        Assert.Equal(value.UInt, generated.UInt);
+        Assert.Equal(value.ULong, generated.ULong);
+        Assert.Equal(value.Character, generated.Character);
+        Assert.Equal(value.OptionalUShort, generated.OptionalUShort);
+        Assert.Null(generated.OptionalUInt);
+        Assert.Equal(value.OptionalCharacter, generated.OptionalCharacter);
+        Assert.Equal(value.UShorts, generated.UShorts);
+        Assert.Equal(value.Characters, generated.Characters);
+        Assert.Equal(value.UShort, reflected.UShort);
+        Assert.Equal(value.UInt, reflected.UInt);
+        Assert.Equal(value.ULong, reflected.ULong);
+        Assert.Equal(value.Character, reflected.Character);
+        Assert.Equal(value.OptionalUShort, reflected.OptionalUShort);
+        Assert.Null(reflected.OptionalUInt);
+        Assert.Equal(value.OptionalCharacter, reflected.OptionalCharacter);
+        Assert.Equal(value.UShorts, reflected.UShorts);
+        Assert.Equal(value.Characters, reflected.Characters);
+    }
+
+    [Fact]
     public void MappedOverridesWorkThroughGeneratedAndReflectionPaths()
     {
         var context = SourceGenerationContext.Default;
@@ -1261,6 +1307,7 @@ public sealed class NbtSourceGenerationTests
 [NbtSerializable(typeof(SourceGenBadFactoryConverter))]
 [NbtSerializable(typeof(SourceGenOptionalDefaults))]
 [NbtSerializable(typeof(SourceGenSmallOptionalDefaults))]
+[NbtSerializable(typeof(SourceGenUnsignedScalars))]
 [NbtSerializable(typeof(SourceGenMappedOverrideDerived))]
 [NbtSerializable(typeof(SourceGenMappedGenericOverrideDerived))]
 [NbtSerializable(typeof(SourceGenSetsRequired))]
@@ -1764,6 +1811,27 @@ internal sealed class SourceGenOptionalDefaults
 
     [NbtUseConverter(typeof(SourceGenDecimalConverter))]
     public decimal Amount { get; }
+}
+
+internal sealed class SourceGenUnsignedScalars
+{
+    public ushort UShort { get; set; }
+
+    public uint UInt { get; set; }
+
+    public ulong ULong { get; set; }
+
+    public char Character { get; set; }
+
+    public ushort? OptionalUShort { get; set; }
+
+    public uint? OptionalUInt { get; set; }
+
+    public char? OptionalCharacter { get; set; }
+
+    public ushort[] UShorts { get; set; } = [];
+
+    public char[] Characters { get; set; } = [];
 }
 
 internal sealed class SourceGenSmallOptionalDefaults

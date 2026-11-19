@@ -27,6 +27,26 @@ internal static class NbtPrimitiveConverters
         static (ref reader) => reader.GetInt64(),
         static (ref writer, value) => writer.WriteInt64(value));
 
+    public static readonly NbtConverter<ushort> UInt16 = new NbtDelegateConverter<ushort>(
+        NbtTagType.Short,
+        static (ref reader) => unchecked((ushort)reader.GetInt16()),
+        static (ref writer, value) => writer.WriteInt16(unchecked((short)value)));
+
+    public static readonly NbtConverter<uint> UInt32 = new NbtDelegateConverter<uint>(
+        NbtTagType.Int,
+        static (ref reader) => unchecked((uint)reader.GetInt32()),
+        static (ref writer, value) => writer.WriteInt32(unchecked((int)value)));
+
+    public static readonly NbtConverter<ulong> UInt64 = new NbtDelegateConverter<ulong>(
+        NbtTagType.Long,
+        static (ref reader) => unchecked((ulong)reader.GetInt64()),
+        static (ref writer, value) => writer.WriteInt64(unchecked((long)value)));
+
+    public static readonly NbtConverter<char> Char = new NbtDelegateConverter<char>(
+        NbtTagType.Short,
+        static (ref reader) => unchecked((char)reader.GetInt16()),
+        static (ref writer, value) => writer.WriteInt16(unchecked((short)value)));
+
     public static readonly NbtConverter<float> Single = new NbtDelegateConverter<float>(
         NbtTagType.Float,
         static (ref reader) => reader.GetSingle(),

@@ -1197,6 +1197,10 @@ internal sealed partial class ContextEmitter
                 ScalarKind.Int16 => ScalarKind.NullableInt16,
                 ScalarKind.Int32 => ScalarKind.NullableInt32,
                 ScalarKind.Int64 => ScalarKind.NullableInt64,
+                ScalarKind.UInt16 => ScalarKind.NullableUInt16,
+                ScalarKind.UInt32 => ScalarKind.NullableUInt32,
+                ScalarKind.UInt64 => ScalarKind.NullableUInt64,
+                ScalarKind.Char => ScalarKind.NullableChar,
                 ScalarKind.Single => ScalarKind.NullableSingle,
                 ScalarKind.Double => ScalarKind.NullableDouble,
                 ScalarKind.Boolean => ScalarKind.NullableBoolean,
@@ -1214,6 +1218,10 @@ internal sealed partial class ContextEmitter
         SpecialType.System_Int16 => ScalarKind.Int16,
         SpecialType.System_Int32 => ScalarKind.Int32,
         SpecialType.System_Int64 => ScalarKind.Int64,
+        SpecialType.System_UInt16 => ScalarKind.UInt16,
+        SpecialType.System_UInt32 => ScalarKind.UInt32,
+        SpecialType.System_UInt64 => ScalarKind.UInt64,
+        SpecialType.System_Char => ScalarKind.Char,
         SpecialType.System_Single => ScalarKind.Single,
         SpecialType.System_Double => ScalarKind.Double,
         SpecialType.System_Boolean => ScalarKind.Boolean,
@@ -1222,7 +1230,7 @@ internal sealed partial class ContextEmitter
     };
 
     private static bool IsNullableScalar(ScalarKind kind) =>
-        kind is >= ScalarKind.NullableSByte and <= ScalarKind.NullableBoolean;
+        kind is >= ScalarKind.NullableSByte and <= ScalarKind.NullableChar;
 
     private static ScalarKind GetUnderlyingScalarKind(ScalarKind kind) => kind switch
     {
@@ -1231,6 +1239,10 @@ internal sealed partial class ContextEmitter
         ScalarKind.NullableInt16 => ScalarKind.Int16,
         ScalarKind.NullableInt32 => ScalarKind.Int32,
         ScalarKind.NullableInt64 => ScalarKind.Int64,
+        ScalarKind.NullableUInt16 => ScalarKind.UInt16,
+        ScalarKind.NullableUInt32 => ScalarKind.UInt32,
+        ScalarKind.NullableUInt64 => ScalarKind.UInt64,
+        ScalarKind.NullableChar => ScalarKind.Char,
         ScalarKind.NullableSingle => ScalarKind.Single,
         ScalarKind.NullableDouble => ScalarKind.Double,
         ScalarKind.NullableBoolean => ScalarKind.Boolean,
@@ -1245,6 +1257,10 @@ internal sealed partial class ContextEmitter
             ScalarKind.Int16 => "reader.GetInt16()",
             ScalarKind.Int32 => "reader.GetInt32()",
             ScalarKind.Int64 => "reader.GetInt64()",
+            ScalarKind.UInt16 => "unchecked((ushort)reader.GetInt16())",
+            ScalarKind.UInt32 => "unchecked((uint)reader.GetInt32())",
+            ScalarKind.UInt64 => "unchecked((ulong)reader.GetInt64())",
+            ScalarKind.Char => "unchecked((char)reader.GetInt16())",
             ScalarKind.Single => "reader.GetSingle()",
             ScalarKind.Double => "reader.GetDouble()",
             ScalarKind.Boolean => $"{MetadataServices}.ReadBoolean(ref reader)",
@@ -1263,6 +1279,10 @@ internal sealed partial class ContextEmitter
             ScalarKind.Int16 => $"writer.WriteInt16({name}, {operand});",
             ScalarKind.Int32 => $"writer.WriteInt32({name}, {operand});",
             ScalarKind.Int64 => $"writer.WriteInt64({name}, {operand});",
+            ScalarKind.UInt16 => $"writer.WriteInt16({name}, unchecked((short){operand}));",
+            ScalarKind.UInt32 => $"writer.WriteInt32({name}, unchecked((int){operand}));",
+            ScalarKind.UInt64 => $"writer.WriteInt64({name}, unchecked((long){operand}));",
+            ScalarKind.Char => $"writer.WriteInt16({name}, unchecked((short){operand}));",
             ScalarKind.Single => $"writer.WriteSingle({name}, {operand});",
             ScalarKind.Double => $"writer.WriteDouble({name}, {operand});",
             ScalarKind.Boolean => $"writer.WriteSByte({name}, {operand} ? (sbyte)1 : (sbyte)0);",

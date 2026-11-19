@@ -17,8 +17,9 @@ schedule.
 - P2 #11 is implemented (PR #16 and the collection wrap-up): sequence/map shape interfaces,
   immutable/frozen/concurrent/sorted shapes, and `CollectionBuilderAttribute`/companion
   factory/constructor/`Add` pattern discovery. String sorted sets use ordinal ordering;
-  `PriorityQueue<TElement,TPriority>` is rejected with a diagnostic, and span-only reflection
-  builders report a source-generation/custom-converter path.
+  `PriorityQueue<TElement,TPriority>` is rejected with a diagnostic. Span-only builders are
+  supported by source generation and by the reflection resolver through runtime-created delegates.
+- Built-in scalar support also covers `byte`, `ushort`, `uint`, `ulong`, and `char`.
 
 ## P0: highest impact
 

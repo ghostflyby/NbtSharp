@@ -17,6 +17,10 @@ internal enum ScalarKind
     Int16,
     Int32,
     Int64,
+    UInt16,
+    UInt32,
+    UInt64,
+    Char,
     Single,
     Double,
     Boolean,
@@ -29,6 +33,10 @@ internal enum ScalarKind
     NullableSingle,
     NullableDouble,
     NullableBoolean,
+    NullableUInt16,
+    NullableUInt32,
+    NullableUInt64,
+    NullableChar,
 }
 
 /// <summary>

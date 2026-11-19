@@ -18,6 +18,10 @@ internal static class NbtBuiltInConverters
         [typeof(short)] = NbtPrimitiveConverters.Int16,
         [typeof(int)] = NbtPrimitiveConverters.Int32,
         [typeof(long)] = NbtPrimitiveConverters.Int64,
+        [typeof(ushort)] = NbtPrimitiveConverters.UInt16,
+        [typeof(uint)] = NbtPrimitiveConverters.UInt32,
+        [typeof(ulong)] = NbtPrimitiveConverters.UInt64,
+        [typeof(char)] = NbtPrimitiveConverters.Char,
         [typeof(float)] = NbtPrimitiveConverters.Single,
         [typeof(double)] = NbtPrimitiveConverters.Double,
         [typeof(string)] = NbtPrimitiveConverters.String,
@@ -390,12 +394,6 @@ internal static class NbtBuiltInConverters
                 converter = CreateGeneric(typeof(NbtReflectionMapConverter<,>), type, valueType);
                 return true;
             }
-            catch (System.Reflection.TargetInvocationException ex)
-                when (ex.InnerException is NbtSpanCollectionBuilderException inner)
-            {
-                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(inner).Throw();
-                throw;
-            }
             catch (Exception ex) when (ex is System.Reflection.TargetInvocationException or ArgumentException)
             {
                 return false;
@@ -411,12 +409,6 @@ internal static class NbtBuiltInConverters
                     type,
                     elementType);
                 return true;
-            }
-            catch (System.Reflection.TargetInvocationException ex)
-                when (ex.InnerException is NbtSpanCollectionBuilderException inner)
-            {
-                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(inner).Throw();
-                throw;
             }
             catch (Exception ex) when (ex is System.Reflection.TargetInvocationException or ArgumentException)
             {

@@ -211,40 +211,26 @@ public sealed class CollectionShapeTests
     }
 
     [Fact]
-    public void ReflectionRejectsSpanOnlySequenceBuilderWithGuidance()
+    public void ReflectionSupportsSpanOnlySequenceBuilders()
     {
-        var value = SpanOnlyCollectionFactory.Create(new[] { 1, 2 });
+        var readOnlySpan = SpanOnlyCollectionFactory.Create(new[] { 1, 2 });
+        var writableSpan = CompanionSpanCollection.Create(new[] { 3, 4 });
 
-        var exception = Assert.ThrowsAny<NotSupportedException>(() =>
-            NbtSerializer.Serialize(value, "root"));
-
-        Assert.Contains("span", exception.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("source generator", exception.Message);
+        Assert.Equal([1, 2], RoundTrip(readOnlySpan).ToArray());
+        Assert.Equal([3, 4], RoundTrip(writableSpan).ToArray());
+        Assert.Empty(RoundTrip(SpanOnlyCollectionFactory.Create<int>([])));
     }
 
     [Fact]
-    public void ReflectionRejectsSpanOnlyMapBuilderWithGuidance()
+    public void ReflectionSupportsSpanOnlyMapBuilders()
     {
         var value = SpanOnlyMapFactory.Create(
             new[] { new KeyValuePair<string, int>("a", 1) });
 
-        var exception = Assert.ThrowsAny<NotSupportedException>(() =>
-            NbtSerializer.Serialize(value, "root"));
+        var copy = RoundTrip(value);
 
-        Assert.Contains("span", exception.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("source generator", exception.Message);
-    }
-
-    [Fact]
-    public void ReflectionRejectsCompanionSpanFactoryWithGuidance()
-    {
-        var value = CompanionSpanCollection.Create(new[] { 1, 2 });
-
-        var exception = Assert.ThrowsAny<NotSupportedException>(() =>
-            NbtSerializer.Serialize(value, "root"));
-
-        Assert.Contains("span", exception.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("source generator", exception.Message);
+        Assert.Equal(1, copy["a"]);
+        Assert.Empty(RoundTrip(SpanOnlyMapFactory.Create<int>([])));
     }
 
     [Fact]

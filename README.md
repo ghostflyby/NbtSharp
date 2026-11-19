@@ -110,8 +110,11 @@ the supported sequence shapes (lists, sets, queues, stacks, linked lists, mutabl
 and immutable or frozen collections), string-keyed dictionary shapes, and nullable value types. Enums are
 serialized as the signed NBT integer tag that matches their underlying type width (`byte`/`sbyte`
 use `TAG_Byte`, `short`/`ushort` use `TAG_Short`, `int`/`uint` use `TAG_Int`, and `long`/`ulong`
-use `TAG_Long`); unsigned values preserve their bit pattern. The generator follows the same mapping
-rules as the reflection resolver: public instance properties, `[NbtInclude]` fields, `[NbtIgnore]`,
+use `TAG_Long`); unsigned values preserve their bit pattern. Built-in scalars also include `byte`,
+`ushort`, `uint`, `ulong`, and `char`: numbers use the signed tag of the same width, and `char` is
+stored as its UTF-16 code unit in `TAG_Short`. `nint`/`nuint`, `decimal`, `Guid`, date/time types,
+`Half`, and `Int128`/`UInt128` still require a custom converter. The generator follows the same
+mapping rules as the reflection resolver: public instance properties, `[NbtInclude]` fields, `[NbtIgnore]`,
 `[NbtPropertyName]`, constructor binding, unknown-member skipping, and null and duplicate handling.
 `init`-only and `required` members are supported through `UnsafeAccessor`; hidden (`new`) members
 report `NBTSG017`. A private setter in another assembly is not visible to source generation; expose
@@ -302,10 +305,10 @@ Automatic map support covers `Dictionary<string,T>`, `IDictionary<string,T>`,
 serialized member order is the collection's enumeration order.
 
 The reflection resolver supports the same built-in shapes and uses a reflection-based pattern
-fallback for collection-builder and constructor/`Add` types. A `CollectionBuilderAttribute` method
-that accepts only `ReadOnlySpan<T>` or `Span<T>` cannot be invoked through reflection; the serializer
-throws a `NotSupportedException` naming the factory and directing you to source generation or a custom
-converter.
+fallback for collection-builder and constructor/`Add` types. `CollectionBuilderAttribute` and
+companion factories that take `ReadOnlySpan<T>` or `Span<T>` are invoked through a runtime-created
+delegate; this requires dynamic code, so source generation remains the AOT-safe path. If the delegate
+cannot be created, the serializer throws `NotSupportedException`.
 
 On read, arrays with fixed-width element tags are allocated once at the declared list length instead
 of being built through `List<T>`; variable-size element arrays and stream-backed reads grow from a
