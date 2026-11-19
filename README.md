@@ -87,7 +87,9 @@ int value = NbtSerializer.Deserialize<int>(data, out string? rootName);
 Reflection mapping uses public instance properties by default. `[NbtPropertyName("name")]` renames a
 member, `[NbtIgnore]` excludes it, and public fields are included only with `[NbtInclude]`. A
 public parameterless constructor is preferred; otherwise a constructor whose parameter names match
-the members is used. Unknown members are skipped and missing members keep their defaults.
+the members is used. Unknown members are skipped; a missing constructor-bound member uses the
+parameter's declared default value when it has one, falling back to the CLR default. Hidden (`new`)
+members are rejected because NBT has one member namespace per compound.
 
 ## Source generation
 
@@ -111,8 +113,11 @@ use `TAG_Byte`, `short`/`ushort` use `TAG_Short`, `int`/`uint` use `TAG_Int`, an
 use `TAG_Long`); unsigned values preserve their bit pattern. The generator follows the same mapping
 rules as the reflection resolver: public instance properties, `[NbtInclude]` fields, `[NbtIgnore]`,
 `[NbtPropertyName]`, constructor binding, unknown-member skipping, and null and duplicate handling.
-`init`-only and `required` members are supported through `UnsafeAccessor`. Unsupported shapes are
-reported as `NBTSG` diagnostics at compile time.
+`init`-only and `required` members are supported through `UnsafeAccessor`; hidden (`new`) members
+report `NBTSG017`. A private setter in another assembly is not visible to source generation; expose
+it as `public`/`init`, make it `internal` and grant the context assembly `InternalsVisibleTo`, or put
+the context in the same assembly. Unsupported shapes are reported as `NBTSG` diagnostics at compile
+time.
 
 Members whose type is not modeled by the generator can opt out with `[NbtUseConverter]`:
 
@@ -166,7 +171,10 @@ the compound, otherwise deserialization throws `NbtException`. A required mapped
 is null cannot be serialized and throws regardless of `NullValueHandling`. A required member that is
 excluded from the mapping requires the selected constructor to be marked with
 `[SetsRequiredMembers]`; otherwise the source generator reports `NBTSG015` and the reflection
-resolver throws `NotSupportedException`.
+resolver throws `NotSupportedException`. `[SetsRequiredMembers]` only covers excluded members:
+mapped required members are still presence-checked, so a compound that omits one fails even when the
+constructor initializes it. Required members on a value type require the selected constructor to be
+marked with `[SetsRequiredMembers]`; otherwise the generator reports `NBTSG007`.
 
 ## Streaming
 

@@ -11,7 +11,7 @@ namespace NbtSharp.SourceGeneration;
 /// </summary>
 internal static class ReachableFingerprint
 {
-    private const string FormatVersion = "reachable-fingerprint-v7";
+    private const string FormatVersion = "reachable-fingerprint-v9";
     private const string UseConverterAttribute = "NbtSharp.NbtUseConverterAttribute";
     private const string CollectionBuilderAttributeName =
         "System.Runtime.CompilerServices.CollectionBuilderAttribute";
@@ -207,6 +207,12 @@ internal static class ReachableFingerprint
                     {
                         hash.Add(parameter.Name);
                         hash.Add((int)parameter.RefKind);
+                        hash.Add(parameter.HasExplicitDefaultValue);
+                        if (parameter.HasExplicitDefaultValue)
+                        {
+                            AddConstant(ref hash, parameter.ExplicitDefaultValue);
+                        }
+
                         pending.Push(parameter.Type);
                     }
 
@@ -280,6 +286,25 @@ internal static class ReachableFingerprint
         }
 
         hash.Add(Convert.ToString(constant.Value, CultureInfo.InvariantCulture));
+    }
+
+    private static void AddConstant(ref StableHash hash, object? value)
+    {
+        if (value is null)
+        {
+            hash.Add("null");
+            return;
+        }
+
+        hash.Add(value.GetType().FullName);
+        hash.Add(value switch
+        {
+            string text => text,
+            bool flag => flag ? "true" : "false",
+            char character => character.ToString(),
+            IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
+            _ => value.ToString(),
+        });
     }
 
     private static bool IsCollectionType(INamedTypeSymbol named) =>

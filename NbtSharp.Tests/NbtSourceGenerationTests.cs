@@ -1,6 +1,8 @@
 using System.Buffers;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.IO.Pipelines;
+using NbtSharp.TestTypes;
 
 namespace NbtSharp.Tests;
 
@@ -878,6 +880,214 @@ public sealed class NbtSourceGenerationTests
     }
 
     [Fact]
+    public void OptionalConstructorParametersUseDeclaredDefaults()
+    {
+        var context = SourceGenerationContext.Default;
+        var reflectionOptions = new NbtSerializerOptions
+        {
+            TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
+        };
+        reflectionOptions.Converters.Add(SourceGenDecimalConverter.Instance);
+        var empty = NbtSerializer.Serialize(new NbtRoot("root", new NbtCompound()));
+        var defaults = NbtSerializer.Deserialize(empty, context.SourceGenOptionalDefaults);
+        var reflectedDefaults = NbtSerializer.Deserialize<SourceGenOptionalDefaults>(
+            empty,
+            reflectionOptions);
+        var data = NbtSerializer.Serialize(new NbtRoot(
+            "root",
+            new NbtCompound { ["Name"] = "given", ["Optional"] = 9 }));
+        var generated = NbtSerializer.Deserialize(data, context.SourceGenOptionalDefaults);
+        var reflected = NbtSerializer.Deserialize<SourceGenOptionalDefaults>(
+            data,
+            reflectionOptions);
+
+        Assert.Equal("default-name", defaults.Name);
+        Assert.Equal(7, defaults.Count);
+        Assert.Equal(SourceGenOptionalKind.Second, defaults.Kind);
+        Assert.Equal(5, defaults.Optional);
+        Assert.True(defaults.Enabled);
+        Assert.Equal(1.5, defaults.Ratio);
+        Assert.Null(defaults.Nickname);
+        Assert.True(float.IsNaN(defaults.SpecialSingle));
+        Assert.True(double.IsPositiveInfinity(defaults.SpecialDouble));
+        Assert.Equal(0.1m, defaults.Amount);
+        Assert.Equal(defaults.Name, reflectedDefaults.Name);
+        Assert.Equal(defaults.Count, reflectedDefaults.Count);
+        Assert.Equal(defaults.Kind, reflectedDefaults.Kind);
+        Assert.Equal(defaults.Optional, reflectedDefaults.Optional);
+        Assert.Equal(defaults.Enabled, reflectedDefaults.Enabled);
+        Assert.Equal(defaults.Ratio, reflectedDefaults.Ratio);
+        Assert.Equal(defaults.Nickname, reflectedDefaults.Nickname);
+        Assert.Equal(defaults.SpecialSingle, reflectedDefaults.SpecialSingle);
+        Assert.Equal(defaults.SpecialDouble, reflectedDefaults.SpecialDouble);
+        Assert.Equal(defaults.Amount, reflectedDefaults.Amount);
+        Assert.Equal("given", generated.Name);
+        Assert.Equal(7, generated.Count);
+        Assert.Equal(SourceGenOptionalKind.Second, generated.Kind);
+        Assert.Equal(9, generated.Optional);
+        Assert.Equal(generated.Name, reflected.Name);
+        Assert.Equal(generated.Count, reflected.Count);
+        Assert.Equal(generated.Kind, reflected.Kind);
+        Assert.Equal(generated.Optional, reflected.Optional);
+    }
+
+    [Fact]
+    public void OptionalSmallIntegerDefaultsCompileAndRoundTrip()
+    {
+        var context = SourceGenerationContext.Default;
+        var reflectionOptions = new NbtSerializerOptions
+        {
+            TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
+        };
+        var data = NbtSerializer.Serialize(new NbtRoot("root", new NbtCompound()));
+
+        var generated = NbtSerializer.Deserialize(data, context.SourceGenSmallOptionalDefaults);
+        var reflected = NbtSerializer.Deserialize<SourceGenSmallOptionalDefaults>(
+            data,
+            reflectionOptions);
+
+        Assert.Equal(200, generated.ByteValue);
+        Assert.Equal(-5, generated.SByteValue);
+        Assert.Equal(-300, generated.ShortValue);
+        Assert.Equal<byte?>(7, generated.NullableByte);
+        Assert.Equal(generated.ByteValue, reflected.ByteValue);
+        Assert.Equal(generated.SByteValue, reflected.SByteValue);
+        Assert.Equal(generated.ShortValue, reflected.ShortValue);
+        Assert.Equal(generated.NullableByte, reflected.NullableByte);
+    }
+
+    [Fact]
+    public void MappedOverridesWorkThroughGeneratedAndReflectionPaths()
+    {
+        var context = SourceGenerationContext.Default;
+        var reflectionOptions = new NbtSerializerOptions
+        {
+            TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
+        };
+        var value = new SourceGenMappedOverrideDerived { Value = 5 };
+        var genericValue = new SourceGenMappedGenericOverrideDerived { Value = 6 };
+
+        var data = NbtSerializer.Serialize(
+            value,
+            context.SourceGenMappedOverrideDerived,
+            "root");
+        var genericData = NbtSerializer.Serialize(
+            genericValue,
+            context.SourceGenMappedGenericOverrideDerived,
+            "root");
+        var generated = NbtSerializer.Deserialize(
+            data,
+            context.SourceGenMappedOverrideDerived);
+        var reflected = NbtSerializer.Deserialize<SourceGenMappedOverrideDerived>(
+            data,
+            reflectionOptions);
+        var genericGenerated = NbtSerializer.Deserialize(
+            genericData,
+            context.SourceGenMappedGenericOverrideDerived);
+        var genericReflected = NbtSerializer.Deserialize<SourceGenMappedGenericOverrideDerived>(
+            genericData,
+            reflectionOptions);
+
+        Assert.Equal(5, generated.Value);
+        Assert.Equal(5, reflected.Value);
+        Assert.Equal(6, genericGenerated.Value);
+        Assert.Equal(6, genericReflected.Value);
+    }
+
+    [Fact]
+    public void SetsRequiredMembersKeepsMappedRequiredPresenceChecks()
+    {
+        var context = SourceGenerationContext.Default;
+        var reflectionOptions = new NbtSerializerOptions
+        {
+            TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
+        };
+        var missing = NbtSerializer.Serialize(new NbtRoot("root", new NbtCompound()));
+        var present = NbtSerializer.Serialize(new NbtRoot(
+            "root",
+            new NbtCompound { ["Name"] = "from-nbt" }));
+
+        Assert.Throws<NbtException>(() =>
+            NbtSerializer.Deserialize(missing, context.SourceGenSetsRequired));
+        Assert.Throws<NbtException>(() =>
+            NbtSerializer.Deserialize<SourceGenSetsRequired>(missing, reflectionOptions));
+        Assert.Equal(
+            "from-nbt",
+            NbtSerializer.Deserialize(present, context.SourceGenSetsRequired).Name);
+        Assert.Equal(
+            "from-nbt",
+            NbtSerializer.Deserialize<SourceGenSetsRequired>(present, reflectionOptions).Name);
+    }
+
+    [Fact]
+    public void RoundTripsPrivateSetterAndInitAccessors()
+    {
+        var context = SourceGenerationContext.Default;
+        var reflectionOptions = new NbtSerializerOptions
+        {
+            TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
+        };
+        var value = SourceGenPrivateSetter.Create("private", 3);
+
+        var data = NbtSerializer.Serialize(value, context.SourceGenPrivateSetter, "root");
+        var generated = NbtSerializer.Deserialize(data, context.SourceGenPrivateSetter);
+        var reflected = NbtSerializer.Deserialize<SourceGenPrivateSetter>(
+            data,
+            reflectionOptions);
+
+        Assert.Equal("private", generated.Name);
+        Assert.Equal(3, generated.Value);
+        Assert.Equal("private", reflected.Name);
+        Assert.Equal(3, reflected.Value);
+    }
+
+    [Fact]
+    public void RoundTripsCrossAssemblyNonPublicSetterAndInitAccessors()
+    {
+        var context = SourceGenerationContext.Default;
+        var reflectionOptions = new NbtSerializerOptions
+        {
+            TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
+        };
+        var value = CrossAssemblyDto.Create("cross", 4);
+
+        var data = NbtSerializer.Serialize(value, context.CrossAssemblyDto, "root");
+        var generated = NbtSerializer.Deserialize(data, context.CrossAssemblyDto);
+        var reflected = NbtSerializer.Deserialize<CrossAssemblyDto>(data, reflectionOptions);
+
+        Assert.Equal("cross", generated.Name);
+        Assert.Equal(4, generated.Value);
+        Assert.Equal("cross", generated.RequiredName);
+        Assert.Equal("cross", reflected.Name);
+        Assert.Equal(4, reflected.Value);
+        Assert.Equal("cross", reflected.RequiredName);
+    }
+
+    [Fact]
+    public void HiddenMembersAreRejectedByReflection()
+    {
+        var reflectionOptions = new NbtSerializerOptions
+        {
+            TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
+        };
+
+        var hiddenField = new ReflectionHiddenFieldDerived { Value = 1 };
+
+        Assert.Equal(1, hiddenField.Value);
+        AssertRejected(new ReflectionHiddenDerived(), reflectionOptions);
+        AssertRejected(new ReflectionHiddenIgnoredDerived(), reflectionOptions);
+        AssertRejected(hiddenField, reflectionOptions);
+        AssertRejected(new ReflectionHiddenMethodDerived(), reflectionOptions);
+
+        static void AssertRejected<T>(T value, NbtSerializerOptions options)
+        {
+            var exception = Assert.Throws<NotSupportedException>(() =>
+                NbtSerializer.Serialize(value, "root", options));
+            Assert.Contains("hides a base member", exception.Message, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
     public void SupportsEnumsWithUnderlyingWidth()
     {
         var context = SourceGenerationContext.Default;
@@ -1049,6 +1259,13 @@ public sealed class NbtSourceGenerationTests
 [NbtSerializable(typeof(SourceGenConverterRequiredNull))]
 [NbtSerializable(typeof(SourceGenFactoryConverter))]
 [NbtSerializable(typeof(SourceGenBadFactoryConverter))]
+[NbtSerializable(typeof(SourceGenOptionalDefaults))]
+[NbtSerializable(typeof(SourceGenSmallOptionalDefaults))]
+[NbtSerializable(typeof(SourceGenMappedOverrideDerived))]
+[NbtSerializable(typeof(SourceGenMappedGenericOverrideDerived))]
+[NbtSerializable(typeof(SourceGenSetsRequired))]
+[NbtSerializable(typeof(SourceGenPrivateSetter))]
+[NbtSerializable(typeof(CrossAssemblyDto))]
 internal partial class SourceGenerationContext : NbtSerializerContext
 {
     public SourceGenerationContext()
@@ -1492,6 +1709,170 @@ internal sealed class SourceGenSingleGetter
 
         init => _name = value;
     }
+}
+
+internal enum SourceGenOptionalKind
+{
+    First,
+    Second,
+    Third,
+}
+
+internal sealed class SourceGenOptionalDefaults
+{
+    public SourceGenOptionalDefaults(
+        string name = "default-name",
+        int count = 7,
+        SourceGenOptionalKind kind = SourceGenOptionalKind.Second,
+        int? optional = 5,
+        bool enabled = true,
+        double ratio = 1.5,
+        string? nickname = null,
+        float specialSingle = float.NaN,
+        double specialDouble = double.PositiveInfinity,
+        decimal amount = 0.1m)
+    {
+        Name = name;
+        Count = count;
+        Kind = kind;
+        Optional = optional;
+        Enabled = enabled;
+        Ratio = ratio;
+        Nickname = nickname;
+        SpecialSingle = specialSingle;
+        SpecialDouble = specialDouble;
+        Amount = amount;
+    }
+
+    public string Name { get; }
+
+    public int Count { get; }
+
+    public SourceGenOptionalKind Kind { get; }
+
+    public int? Optional { get; }
+
+    public bool Enabled { get; }
+
+    public double Ratio { get; }
+
+    public string? Nickname { get; }
+
+    public float SpecialSingle { get; }
+
+    public double SpecialDouble { get; }
+
+    [NbtUseConverter(typeof(SourceGenDecimalConverter))]
+    public decimal Amount { get; }
+}
+
+internal sealed class SourceGenSmallOptionalDefaults
+{
+    public SourceGenSmallOptionalDefaults(
+        byte byteValue = 200,
+        sbyte sbyteValue = -5,
+        short shortValue = -300,
+        byte? nullableByte = 7)
+    {
+        ByteValue = byteValue;
+        SByteValue = sbyteValue;
+        ShortValue = shortValue;
+        NullableByte = nullableByte;
+    }
+
+    public byte ByteValue { get; }
+
+    public sbyte SByteValue { get; }
+
+    public short ShortValue { get; }
+
+    public byte? NullableByte { get; }
+}
+
+internal sealed class SourceGenSetsRequired
+{
+    [SetsRequiredMembers]
+    public SourceGenSetsRequired()
+    {
+        Name = "constructor";
+    }
+
+    public required string Name { get; init; }
+}
+
+internal sealed class SourceGenPrivateSetter
+{
+    public string Name { get; private set; } = "";
+
+    public int Value { get; init; }
+
+    public static SourceGenPrivateSetter Create(string name, int value) => new()
+    {
+        Name = name,
+        Value = value,
+    };
+}
+
+internal class ReflectionHiddenBase
+{
+    public int Value { get; set; }
+}
+
+internal sealed class ReflectionHiddenDerived : ReflectionHiddenBase
+{
+    public new int Value { get; set; }
+}
+
+internal class ReflectionHiddenIgnoredBase
+{
+    public int Value { get; set; }
+}
+
+internal sealed class ReflectionHiddenIgnoredDerived : ReflectionHiddenIgnoredBase
+{
+    [NbtIgnore]
+    public new int Value { get; set; }
+}
+
+internal class ReflectionHiddenFieldBase
+{
+    public int Value { get; set; }
+}
+
+internal sealed class ReflectionHiddenFieldDerived : ReflectionHiddenFieldBase
+{
+    public new int Value = 1;
+}
+
+internal class ReflectionHiddenMethodBase
+{
+    public int Value { get; set; }
+}
+
+internal sealed class ReflectionHiddenMethodDerived : ReflectionHiddenMethodBase
+{
+    public new int Value() => 0;
+}
+
+internal class SourceGenMappedOverrideBase
+{
+    public virtual int Value { get; set; }
+}
+
+internal sealed class SourceGenMappedOverrideDerived : SourceGenMappedOverrideBase
+{
+    public override int Value { get; set; }
+}
+
+internal class SourceGenMappedGenericOverrideBase<T>
+{
+    public virtual T Value { get; set; } = default!;
+}
+
+internal sealed class SourceGenMappedGenericOverrideDerived :
+    SourceGenMappedGenericOverrideBase<int>
+{
+    public override int Value { get; set; }
 }
 
 internal sealed class PlusOneInt32Converter : NbtConverter<int>

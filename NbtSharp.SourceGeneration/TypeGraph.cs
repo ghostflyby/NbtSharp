@@ -134,6 +134,8 @@ internal sealed class MemberModel
 
     public ITypeSymbol? SetterContainingType { get; }
 
+    public ITypeSymbol? DeclaringType { get; set; }
+
     public int Index { get; set; }
 
     public int ConstructorParameterIndex { get; set; } = -1;
@@ -567,7 +569,10 @@ internal sealed class TypeGraph
                         isField: false,
                         canWrite: setter is not null,
                         isInitOnly: setter?.IsInitOnly == true,
-                        setterContainingType: current);
+                        setterContainingType: current)
+                    {
+                        DeclaringType = current,
+                    };
                     if (!TryConfigureConverter(memberModel, property, location))
                     {
                         return null;
@@ -615,7 +620,10 @@ internal sealed class TypeGraph
                         isField: true,
                         canWrite: true,
                         isInitOnly: false,
-                        setterContainingType: null);
+                        setterContainingType: null)
+                    {
+                        DeclaringType = current,
+                    };
                     if (!TryConfigureConverter(memberModel, field, location))
                     {
                         return null;
@@ -627,7 +635,78 @@ internal sealed class TypeGraph
         }
 
         fields.AddRange(properties);
+        var hidden = FindHiddenMember(fields, declarationTypes);
+        if (hidden is not null)
+        {
+            Report(
+                Diagnostics.HiddenMember,
+                hidden.Value.Location ?? location,
+                type.ToDisplayString(FullyQualified),
+                hidden.Value.Name);
+            return null;
+        }
+
         return fields;
+    }
+
+    private static (string Name, Location? Location)? FindHiddenMember(
+        List<MemberModel> members,
+        List<INamedTypeSymbol> declarationTypes)
+    {
+        var indexes = new Dictionary<INamedTypeSymbol, int>(SymbolEqualityComparer.Default);
+        for (var i = 0; i < declarationTypes.Count; i++)
+        {
+            indexes[declarationTypes[i]] = i;
+        }
+
+        foreach (var member in members)
+        {
+            if (member.DeclaringType is not INamedTypeSymbol declaringType ||
+                !indexes.TryGetValue(declaringType, out var start))
+            {
+                continue;
+            }
+
+            for (var i = start + 1; i < declarationTypes.Count; i++)
+            {
+                foreach (var candidate in declarationTypes[i].GetMembers(member.ClrName))
+                {
+                    if (IsOverrideOf(member.Symbol, candidate))
+                    {
+                        continue;
+                    }
+
+                    return (
+                        member.ClrName,
+                        candidate.Locations.FirstOrDefault() ??
+                            member.Symbol.Locations.FirstOrDefault());
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsOverrideOf(ISymbol mappedMember, ISymbol candidate) =>
+        mappedMember is IPropertySymbol mappedProperty &&
+        candidate is IPropertySymbol candidateProperty &&
+        Overrides(candidateProperty, mappedProperty);
+
+    private static bool Overrides(IPropertySymbol property, IPropertySymbol baseProperty)
+    {
+        for (var current = property.OverriddenProperty;
+             current is not null;
+             current = current.OverriddenProperty)
+        {
+            if (SymbolEqualityComparer.Default.Equals(
+                    current.OriginalDefinition,
+                    baseProperty.OriginalDefinition))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private bool TryConfigureConverter(MemberModel member, ISymbol symbol, Location? containingLocation)

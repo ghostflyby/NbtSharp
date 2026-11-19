@@ -1830,6 +1830,266 @@ public sealed class NbtSourceGeneratorTests
     }
 
     [Fact]
+    public void ReportsHiddenMembers()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Derived))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal class Base
+            {
+                public int Value { get; set; }
+            }
+
+            internal sealed class Derived : Base
+            {
+                public new int Value { get; set; }
+            }
+            """);
+
+        Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG017");
+        Assert.DoesNotContain(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG005");
+    }
+
+    [Fact]
+    public void ReportsHiddenMembersEvenWhenNbtNamesDiffer()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Derived))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal class Base
+            {
+                [NbtPropertyName("BaseValue")]
+                public int Value { get; set; }
+            }
+
+            internal sealed class Derived : Base
+            {
+                [NbtPropertyName("DerivedValue")]
+                public new int Value { get; set; }
+            }
+            """);
+
+        Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG017");
+    }
+
+    [Fact]
+    public void AllowsHiddenBaseMemberWhenItIsIgnored()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Derived))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal class Base
+            {
+                [NbtIgnore]
+                public int Value { get; set; }
+            }
+
+            internal sealed class Derived : Base
+            {
+                public new int Value { get; set; }
+            }
+            """);
+
+        AssertNoErrors(result);
+        Assert.DoesNotContain(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG017");
+    }
+
+    [Fact]
+    public void ReportsHiddenBaseMemberWhenDerivedMemberIsIgnored()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Derived))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal class Base
+            {
+                public int Value { get; set; }
+            }
+
+            internal sealed class Derived : Base
+            {
+                [NbtIgnore]
+                public new int Value { get; set; }
+            }
+            """);
+
+        Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG017");
+    }
+
+    [Fact]
+    public void ReportsHiddenBaseMemberWhenDerivedMemberIsNotMapped()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Derived))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal class Base
+            {
+                public int Value { get; set; }
+            }
+
+            internal sealed class Derived : Base
+            {
+                public new int Value;
+            }
+            """);
+
+        Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG017");
+    }
+
+    [Fact]
+    public void ReportsHiddenBaseMemberWhenDerivedMethodHidesIt()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Derived))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal class Base
+            {
+                public int Value { get; set; }
+            }
+
+            internal sealed class Derived : Base
+            {
+                public new int Value() => 0;
+            }
+            """);
+
+        Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG017");
+    }
+
+    [Fact]
+    public void AllowsMappedOverrides()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Derived))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal class Base
+            {
+                public virtual int Value { get; set; }
+            }
+
+            internal sealed class Derived : Base
+            {
+                public override int Value { get; set; }
+            }
+            """);
+
+        AssertNoErrors(result);
+        Assert.DoesNotContain(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG017");
+    }
+
+    [Fact]
+    public void AllowsRecordInheritanceWithRepeatedPositionalParameter()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Derived))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal record Base(int Value);
+
+            internal sealed record Derived(int Value, int Other) : Base(Value);
+            """);
+
+        AssertNoErrors(result);
+        Assert.DoesNotContain(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG017");
+    }
+
+    [Fact]
+    public void FingerprintChangesWhenMetadataConstructorDefaultChanges()
+    {
+        var first = ComputeMetadataDefaultFingerprint(1);
+        var second = ComputeMetadataDefaultFingerprint(2);
+
+        Assert.NotEqual(first, second);
+    }
+
+    private static string ComputeMetadataDefaultFingerprint(int defaultValue)
+    {
+        var metadata = CSharpCompilation.Create(
+            "MetadataDefaults",
+            [
+                CSharpSyntaxTree.ParseText(
+                    $$"""
+                    public sealed class MetadataDto
+                    {
+                        public MetadataDto(int count = {{defaultValue}})
+                        {
+                            Count = count;
+                        }
+
+                        public int Count { get; }
+                    }
+                    """),
+            ],
+            References,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        using var stream = new MemoryStream();
+        var emitResult = metadata.Emit(stream);
+        Assert.True(emitResult.Success);
+        var reference = MetadataReference.CreateFromImage(stream.ToArray());
+        var contextCompilation = CSharpCompilation.Create(
+            "FingerprintTests",
+            [
+                CSharpSyntaxTree.ParseText(
+                    """
+                    using NbtSharp;
+
+                    [NbtSerializable(typeof(MetadataDto))]
+                    internal partial class TestContext : NbtSerializerContext
+                    {
+                    }
+                    """),
+            ],
+            References.Add(reference),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        var contextType = contextCompilation.GetTypeByMetadataName("TestContext")!;
+        var dtoType = contextCompilation.GetTypeByMetadataName("MetadataDto")!;
+        Assert.Empty(dtoType.DeclaringSyntaxReferences);
+
+        return ReachableFingerprint.Compute(
+            contextType,
+            ImmutableArray.Create(new RootType(dtoType, null, null)),
+            contextCompilation);
+    }
+
+    [Fact]
     public void ReportsRequiredValueTypes()
     {
         var result = Run("""
