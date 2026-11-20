@@ -94,6 +94,57 @@ public sealed class NbtStreamAdapterTests
     }
 
     [Fact]
+    public async Task SerializeAsyncRoundTripsAStream()
+    {
+        using var stream = new MemoryStream();
+        var value = new NbtRoot("root", 42);
+
+        await NbtSerializer.SerializeAsync(
+            stream,
+            value,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(stream.CanWrite);
+        stream.Position = 0;
+        var actual = NbtSerializer.Deserialize(stream);
+        Assert.Equal(42, actual.Value.Value is int stored ? stored : 0);
+    }
+
+    [Fact]
+    public async Task SerializeAsyncRoundTripsAPipeWriter()
+    {
+        using var stream = new MemoryStream();
+        var pipe = PipeWriter.Create(stream, new StreamPipeWriterOptions(leaveOpen: true));
+        var value = new NbtRoot("root", 43);
+
+        await NbtSerializer.SerializeAsync(
+            pipe,
+            value,
+            cancellationToken: TestContext.Current.CancellationToken);
+        await pipe.CompleteAsync();
+
+        Assert.True(stream.CanWrite);
+        var actual = NbtSerializer.Deserialize(stream.ToArray());
+        Assert.Equal(43, actual.Value.Value is int stored ? stored : 0);
+    }
+
+    [Fact]
+    public async Task SerializeAsyncHonorsACanceledToken()
+    {
+        using var stream = new MemoryStream();
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            NbtSerializer.SerializeAsync(
+                stream,
+                new NbtRoot("root", 1),
+                cancellationToken: cancellation.Token));
+
+        Assert.Equal(0, stream.Length);
+    }
+
+    [Fact]
     public async Task DeserializeAsyncRoundTripsAStream()
     {
         var data = CreateDocumentForStreaming();

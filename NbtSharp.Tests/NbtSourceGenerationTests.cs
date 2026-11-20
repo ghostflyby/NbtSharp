@@ -1271,6 +1271,25 @@ public sealed class NbtSourceGenerationTests
     }
 
     [Fact]
+    public async Task SerializeAsyncTypeInfoRoundTrips()
+    {
+        var context = SourceGenerationContext.Default;
+        var value = new SourceGenItem { Id = "async", Count = 3 };
+        using var stream = new MemoryStream();
+
+        await NbtSerializer.SerializeAsync(
+            stream,
+            value,
+            context.SourceGenItem,
+            cancellationToken: TestContext.Current.CancellationToken);
+        stream.Position = 0;
+        var copy = NbtSerializer.Deserialize(stream, context.SourceGenItem);
+
+        Assert.Equal("async", copy.Id);
+        Assert.Equal(3, copy.Count);
+    }
+
+    [Fact]
     public void StaticConverterFieldsAreLazy()
     {
         var context = SourceGenerationContext.Default;

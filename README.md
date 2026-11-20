@@ -369,7 +369,10 @@ after the root value are ignored, and the stream may have been read ahead. `Dese
 available for `Stream`, `ReadOnlySequence<byte>`, and `PipeReader`; it consumes one document
 asynchronously through a `PipeReader`. The `PipeReader` and `ReadOnlySequence<byte>` overloads leave
 bytes after the root available to the caller, while the `Stream` overload may read ahead and discard
-them. The writer does not roll back partial output if a converter throws.
+them. `SerializeAsync` is available for `Stream` and `PipeWriter`; writing is synchronous and the
+cancellation token is observed by the asynchronous flush. The caller owns a `PipeWriter`, while the
+`Stream` overload completes only the internal pipe and leaves the stream open. The writer does
+not roll back partial output if a converter throws.
 
 ## Build and test
 
