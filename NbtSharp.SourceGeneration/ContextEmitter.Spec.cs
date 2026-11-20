@@ -59,6 +59,7 @@ internal sealed partial class ContextEmitter
                 AccessorName = entry.AccessorName,
                 BackingFieldName = entry.BackingFieldName,
                 ConverterName = entry.ConverterName,
+                StaticConverterName = entry.StaticConverterName,
                 BuilderName = entry.BuilderName,
                 GeneratedBuilder = entry.GeneratedBuilder,
                 PublicPropertyName = entry.PublicPropertyName,

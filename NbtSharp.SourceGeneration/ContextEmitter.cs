@@ -16,6 +16,7 @@ internal sealed partial class ContextEmitter
     private readonly Action<DiagnosticSpec> _reportDiagnostic;
     private readonly ContextModel _model;
     private readonly CodeWriter _writer = new();
+    private readonly Dictionary<string, TypeSpec> _entriesByTypeName = new(StringComparer.Ordinal);
     private TypeGraph _graph = null!;
     private ContextSpec? _spec;
     private bool _hasNameErrors;
@@ -31,7 +32,16 @@ internal sealed partial class ContextEmitter
         _model = null!;
         _spec = prepared.Spec;
         _reportDiagnostic = static _ => { };
+        foreach (var entry in _spec.Entries)
+        {
+            _entriesByTypeName[entry.TypeName] = entry;
+        }
     }
+
+    private string ContextTypeName =>
+        _spec!.ContainingNamespace.Length == 0
+            ? $"global::{_spec.ContextName}"
+            : $"global::{_spec.ContainingNamespace}.{_spec.ContextName}";
 
     public static PreparedContext PrepareResolved(
         ContextModel model,
@@ -244,6 +254,8 @@ internal sealed partial class ContextEmitter
             used.Add(entry.BackingFieldName);
             entry.ConverterName = MakeUnique($"Converter_{index}", used);
             used.Add(entry.ConverterName);
+            entry.StaticConverterName = MakeUnique($"__staticConverter{index}", used);
+            used.Add(entry.StaticConverterName);
 
             if (entry.GeneratedBuilder is not null)
             {
@@ -298,6 +310,38 @@ internal sealed partial class ContextEmitter
         _writer.WriteLine("{");
         _writer.Indent();
 
+        var memberTypeNames = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var entry in spec.Entries)
+        {
+            if (entry.Object is not { } objectSpec)
+            {
+                continue;
+            }
+
+            foreach (var member in objectSpec.Members)
+            {
+                if (member.ConverterMode == ConverterMode.Generated &&
+                    member.ScalarKind == ScalarKind.None &&
+                    _entriesByTypeName.ContainsKey(member.TypeName))
+                {
+                    memberTypeNames.Add(member.TypeName);
+                }
+            }
+        }
+
+        foreach (var entry in spec.Entries)
+        {
+            if (!memberTypeNames.Contains(entry.TypeName))
+            {
+                continue;
+            }
+
+            _writer.WriteLine(
+                $"private static readonly global::NbtSharp.NbtConverter<{entry.TypeName}> " +
+                $"{entry.StaticConverterName} = {GetFactory(entry)};");
+        }
+
+        _writer.WriteLine();
         _writer.WriteLine($"public static {spec.ContextName} Default {{ get; }} = new();");
         _writer.WriteLine();
 
@@ -502,6 +546,13 @@ internal sealed partial class ContextEmitter
         _writer.Outdent();
         _writer.WriteLine("}");
     }
+
+    private TypeSpec? GetStaticConverterEntry(MemberSpec member) =>
+        member.ConverterMode == ConverterMode.Generated &&
+        member.ScalarKind == ScalarKind.None &&
+        _entriesByTypeName.TryGetValue(member.TypeName, out var entry)
+            ? entry
+            : null;
 
     private void EmitMemberConverters(ObjectSpec model)
     {
@@ -737,6 +788,27 @@ internal sealed partial class ContextEmitter
                     $"__v{member.Index} = global::NbtSharp.NbtMetadataServices.ReadValueWithConverter<{member.TypeName}>(" +
                     $"ref reader, __converter{member.Index}, options, {path});");
             }
+            else if (GetStaticConverterEntry(member) is { } staticEntry)
+            {
+                _writer.WriteLine(
+                    $"if (options.Converters.Count == 0 && " +
+                    $"options.TypeInfoResolver is {ContextTypeName})");
+                _writer.WriteLine("{");
+                _writer.Indent();
+                _writer.WriteLine(
+                    $"__v{member.Index} = global::NbtSharp.NbtMetadataServices.ReadValueWithConverter<{member.TypeName}>(" +
+                    $"ref reader, {ContextTypeName}.{staticEntry.StaticConverterName}, options, {path});");
+                _writer.Outdent();
+                _writer.WriteLine("}");
+                _writer.WriteLine("else");
+                _writer.WriteLine("{");
+                _writer.Indent();
+                _writer.WriteLine(
+                    $"__v{member.Index} = global::NbtSharp.NbtMetadataServices.ReadValue<{member.TypeName}>(" +
+                    $"ref reader, options, {path});");
+                _writer.Outdent();
+                _writer.WriteLine("}");
+            }
             else
             {
                 _writer.WriteLine(
@@ -955,7 +1027,7 @@ internal sealed partial class ContextEmitter
                     _writer.WriteLine("__path = null;");
                 }
 
-                _writer.WriteLine(GetWriteMemberStatement(member, nbtName, value));
+                EmitWriteMemberStatement(member, nbtName, value);
             }
         }
 
@@ -976,6 +1048,42 @@ internal sealed partial class ContextEmitter
         _writer.WriteLine("writer.WriteEndCompound();");
         _writer.Outdent();
         _writer.WriteLine("}");
+    }
+
+    private void EmitWriteMemberStatement(MemberSpec member, string nbtName, string value)
+    {
+        if (member.ConverterMode == ConverterMode.Explicit)
+        {
+            _writer.WriteLine(
+                $"{MetadataServices}.WriteMemberWithConverter(ref writer, {nbtName}, {value}, " +
+                $"__converter{member.Index}, options);");
+            return;
+        }
+
+        if (GetStaticConverterEntry(member) is { } staticEntry)
+        {
+            _writer.WriteLine(
+                $"if (options.Converters.Count == 0 && " +
+                $"options.TypeInfoResolver is {ContextTypeName})");
+            _writer.WriteLine("{");
+            _writer.Indent();
+            _writer.WriteLine(
+                $"{MetadataServices}.WriteMemberWithConverter(ref writer, {nbtName}, {value}, " +
+                $"{ContextTypeName}.{staticEntry.StaticConverterName}, options);");
+            _writer.Outdent();
+            _writer.WriteLine("}");
+            _writer.WriteLine("else");
+            _writer.WriteLine("{");
+            _writer.Indent();
+            _writer.WriteLine(
+                $"{MetadataServices}.WriteMember(ref writer, {nbtName}, {value}, options);");
+            _writer.Outdent();
+            _writer.WriteLine("}");
+            return;
+        }
+
+        _writer.WriteLine(
+            $"{MetadataServices}.WriteMember(ref writer, {nbtName}, {value}, options);");
     }
 
     private static string GetWriteMemberStatement(MemberSpec member, string nbtName, string value) =>

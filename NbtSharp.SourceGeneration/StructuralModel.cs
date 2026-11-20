@@ -142,6 +142,8 @@ internal sealed class TypeSpec
 
     public string ConverterName { get; set; } = "";
 
+    public string StaticConverterName { get; set; } = "";
+
     public string? BuilderName { get; set; }
 
     public GeneratedBuilderSpec? GeneratedBuilder { get; set; }
@@ -581,6 +583,7 @@ internal static class ContextSpecFingerprint
         hash.Add(entry.AccessorName);
         hash.Add(entry.BackingFieldName);
         hash.Add(entry.ConverterName);
+        hash.Add(entry.StaticConverterName);
         hash.Add(entry.BuilderName);
         hash.Add(entry.PublicPropertyName);
         hash.Add(entry.IsRoot);

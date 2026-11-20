@@ -300,6 +300,40 @@ public sealed class NbtSerializerTests
         Assert.Equal(0, mismatch);
     }
 
+    [Fact]
+    public void ConverterCacheResolvesDistinctTypesConcurrently()
+    {
+        var options = new NbtSerializerOptions();
+        var types = new[]
+        {
+            typeof(int),
+            typeof(long),
+            typeof(string),
+            typeof(bool),
+            typeof(List<int>),
+            typeof(int[]),
+            typeof(Dictionary<string, int>),
+            typeof(HashSet<int>),
+        };
+        var expected = types.Select(options.GetConverter).ToArray();
+        var mismatch = 0;
+
+        Parallel.For(
+            0,
+            20_000,
+            new ParallelOptions { CancellationToken = TestContext.Current.CancellationToken },
+            index =>
+            {
+                var typeIndex = index % types.Length;
+                if (!ReferenceEquals(expected[typeIndex], options.GetConverter(types[typeIndex])))
+                {
+                    Interlocked.Increment(ref mismatch);
+                }
+            });
+
+        Assert.Equal(0, mismatch);
+    }
+
     private static NbtRoot RoundTrip(NbtRoot root, NbtSerializerOptions? options = null)
     {
         using var stream = new MemoryStream();

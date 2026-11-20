@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
 
 namespace NbtSharp;
@@ -13,7 +14,8 @@ namespace NbtSharp;
 public sealed class NbtSerializerOptions
 {
     private readonly NbtConverterCollection _converters;
-    private volatile Dictionary<Type, NbtConverter> _cache = [];
+    private volatile ImmutableDictionary<Type, NbtConverter> _cache =
+        ImmutableDictionary<Type, NbtConverter>.Empty;
     private readonly Lock _cacheLock = new();
 
     /// <summary>Initializes the options with the default limits.</summary>
@@ -185,11 +187,7 @@ public sealed class NbtSerializerOptions
                 return false;
             }
 
-            var updated = new Dictionary<Type, NbtConverter>(_cache)
-            {
-                [typeToConvert] = converter,
-            };
-            _cache = updated;
+            _cache = _cache.Add(typeToConvert, converter);
             return true;
         }
     }
@@ -198,7 +196,7 @@ public sealed class NbtSerializerOptions
     {
         lock (_cacheLock)
         {
-            _cache = [];
+            _cache = ImmutableDictionary<Type, NbtConverter>.Empty;
         }
     }
 

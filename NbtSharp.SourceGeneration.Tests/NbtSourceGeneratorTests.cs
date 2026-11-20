@@ -1439,6 +1439,47 @@ public sealed class NbtSourceGeneratorTests
     }
 
     [Fact]
+    public void EmitsStaticMemberConvertersForGeneratedMemberTypes()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Wrapper))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Item
+            {
+                public int Value { get; set; }
+            }
+
+            internal sealed class Wrapper
+            {
+                public Item Item { get; set; } = new();
+            }
+            """);
+
+        AssertNoErrors(result);
+        Assert.Contains(
+            "private static readonly global::NbtSharp.NbtConverter<global::Item> __staticConverter1",
+            result.GeneratedSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "options.TypeInfoResolver is global::TestContext",
+            result.GeneratedSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "ReadValueWithConverter<global::Item>(ref reader, global::TestContext.__staticConverter1",
+            result.GeneratedSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "WriteMemberWithConverter(ref writer, \"Item\", ",
+            result.GeneratedSource,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void EmitsDirectPathsForUnsignedAndCharacterScalars()
     {
         var result = Run("""

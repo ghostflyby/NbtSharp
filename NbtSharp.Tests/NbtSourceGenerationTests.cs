@@ -1271,6 +1271,44 @@ public sealed class NbtSourceGenerationTests
     }
 
     [Fact]
+    public void StaticMemberConvertersHandleRecursiveTypes()
+    {
+        var context = SourceGenerationContext.Default;
+        var value = new SourceGenNode
+        {
+            Value = 1,
+            Next = new SourceGenNode { Value = 2 },
+        };
+
+        var data = NbtSerializer.Serialize(value, context.SourceGenNode, "root");
+        var copy = NbtSerializer.Deserialize(data, context.SourceGenNode);
+
+        Assert.Equal(1, copy.Value);
+        Assert.Equal(2, copy.Next?.Value);
+    }
+
+    [Fact]
+    public void CustomConvertersOverrideGeneratedMemberFastPath()
+    {
+        var options = new NbtSerializerOptions();
+        options.Converters.Add(new CustomItemConverter());
+        var context = new SourceGenerationContext(options);
+        var value = new SourceGenWrapper<SourceGenItem>
+        {
+            Value = new SourceGenItem { Id = "ignored", Count = 1 },
+        };
+
+        var data = NbtSerializer.Serialize(
+            value,
+            context.SourceGenWrapperOfSourceGenItem,
+            "root");
+        var copy = NbtSerializer.Deserialize(data, context.SourceGenWrapperOfSourceGenItem);
+
+        Assert.Equal("custom", copy.Value.Id);
+        Assert.Equal(999, copy.Value.Count);
+    }
+
+    [Fact]
     public void RejectsDuplicateMembersWithGeneratedConverters()
     {
         var context = new SourceGenerationContext(new NbtSerializerOptions
@@ -1327,6 +1365,7 @@ public sealed class NbtSourceGenerationTests
 [NbtSerializable(typeof(SourceGenOptionalDefaults))]
 [NbtSerializable(typeof(SourceGenSmallOptionalDefaults))]
 [NbtSerializable(typeof(SourceGenUnsignedScalars))]
+[NbtSerializable(typeof(SourceGenNode))]
 [NbtSerializable(typeof(SourceGenMappedOverrideDerived))]
 [NbtSerializable(typeof(SourceGenMappedGenericOverrideDerived))]
 [NbtSerializable(typeof(SourceGenSetsRequired))]
@@ -1830,6 +1869,13 @@ internal sealed class SourceGenOptionalDefaults
 
     [NbtUseConverter(typeof(SourceGenDecimalConverter))]
     public decimal Amount { get; }
+}
+
+internal sealed class SourceGenNode
+{
+    public int Value { get; set; }
+
+    public SourceGenNode? Next { get; set; }
 }
 
 internal sealed class SourceGenUnsignedScalars
