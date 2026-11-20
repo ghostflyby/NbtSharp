@@ -157,11 +157,14 @@ public sealed class NbtPolymorphismTests
             resolver.GetTypeInfo(typeof(ConcreteAnimal), options));
         var collectionDerived = Assert.Throws<NotSupportedException>(() =>
             resolver.GetTypeInfo(typeof(ICollectionBase), options));
+        var genericBase = Assert.Throws<NotSupportedException>(() =>
+            resolver.GetTypeInfo(typeof(IGenericBase<int>), options));
 
         Assert.Contains("registered more than once", duplicate.Message, StringComparison.Ordinal);
         Assert.Contains("not assignable", notAssignable.Message, StringComparison.Ordinal);
         Assert.Contains("must be abstract", concreteBase.Message, StringComparison.Ordinal);
         Assert.Contains("collection shape", collectionDerived.Message, StringComparison.Ordinal);
+        Assert.Contains("Generic polymorphic", genericBase.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -365,6 +368,15 @@ internal interface ICollectionBase
 }
 
 internal sealed class TagList : List<string>, ICollectionBase
+{
+}
+
+[NbtDerived(typeof(GenericCat))]
+internal interface IGenericBase<T>
+{
+}
+
+internal sealed class GenericCat : IGenericBase<int>
 {
 }
 
