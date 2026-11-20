@@ -237,7 +237,8 @@ and stream overloads leave the stream open.
 roots, lists, and maps), nested CLR collections, inherited mapping attributes and base fields, the
 first-match converter ordering and explicit-member-versus-built-in cells of the precedence matrix,
 deterministic random/mutation/truncation corpora for the reader, and a single generated context with
-120 linked DTOs. Moving the generator timing evidence into CI remains part of #15.
+120 linked DTOs. Generator timing evidence is provided by the benchmark project; automated CI
+thresholds are covered by the #15 scope decision.
 
 ### 15. Benchmarks and regression gates
 
@@ -256,12 +257,14 @@ complete `NBTSG` diagnostic reference, and performance/allocation notes under `d
 
 ## Suggested sequencing
 
-P0, P1 and P2 #9/#11/#13 are complete. For the remaining work:
-
-1. P2 #10/#12 and the P3 items when their design prerequisites are settled.
+All roadmap items are implemented or have an explicit scope decision. Future work should start from
+a concrete consumer request rather than from this list.
 
 ## Deliberate non-goals for now
 
 - A runtime schema/versioning system.
 - Binary-compatible support for every CLR collection interface.
 - Reflection-based AOT support; source generation remains the AOT path.
+- Generic polymorphic base types and nested polymorphic registrations.
+- A metadata-only source-generation mode (`GenerationMode.Metadata`).
+- Automated benchmark regression thresholds on hosted CI runners.
