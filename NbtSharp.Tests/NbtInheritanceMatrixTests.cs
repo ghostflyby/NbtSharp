@@ -1,7 +1,56 @@
+using System.Reflection;
+
 namespace NbtSharp.Tests;
 
 public sealed class NbtInheritanceMatrixTests
 {
+    [Fact]
+    public void ReflectionPropertyLookupSeesInheritedAttributes()
+    {
+        var property = typeof(InheritedDerived).GetProperty(nameof(InheritedDerived.Hidden))!;
+
+        Assert.NotNull(property.GetCustomAttribute<NbtIgnoreAttribute>(inherit: true));
+
+        // IsDefined ignores its inherit argument for properties, so the resolver must not use it
+        // for inherited member attributes.
+        Assert.False(property.IsDefined(typeof(NbtIgnoreAttribute), inherit: true));
+    }
+
+    [Fact]
+    public void IgnoredOverridesDoNotLeaveHiddenBaseMembers()
+    {
+        var reflection = new NbtSerializerOptions
+        {
+            TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
+        };
+        var leaf = new HiddenLeaf { Value = 5 };
+        var baseIgnored = new HiddenLeafFromIgnoredBase { Value = 6 };
+
+        var leafData = NbtSerializer.Serialize(
+            leaf,
+            InheritanceContext.Default.HiddenLeaf,
+            "root");
+        var baseIgnoredData = NbtSerializer.Serialize(
+            baseIgnored,
+            InheritanceContext.Default.HiddenLeafFromIgnoredBase,
+            "root");
+        var reflectedLeafData = NbtSerializer.Serialize(leaf, "root", reflection);
+        var reflectedBaseIgnoredData = NbtSerializer.Serialize(baseIgnored, "root", reflection);
+
+        Assert.Equal(5, NbtSerializer.Deserialize(leafData, InheritanceContext.Default.HiddenLeaf).Value);
+        Assert.Equal(
+            6,
+            NbtSerializer.Deserialize(
+                baseIgnoredData,
+                InheritanceContext.Default.HiddenLeafFromIgnoredBase).Value);
+        Assert.Equal(5, NbtSerializer.Deserialize<HiddenLeaf>(reflectedLeafData, reflection).Value);
+        Assert.Equal(
+            6,
+            NbtSerializer.Deserialize<HiddenLeafFromIgnoredBase>(
+                reflectedBaseIgnoredData,
+                reflection).Value);
+    }
+
     [Fact]
     public void OverriddenMembersInheritBaseAttributes()
     {
@@ -72,7 +121,41 @@ internal sealed class InheritedDerived : InheritedBase
     public override int Hidden { get; set; }
 }
 
+internal class HiddenBase
+{
+    public virtual int Value { get; set; }
+}
+
+internal class HiddenMid : HiddenBase
+{
+    [NbtIgnore]
+    public override int Value { get; set; }
+}
+
+internal sealed class HiddenLeaf : HiddenMid
+{
+    public new int Value { get; set; }
+}
+
+internal class IgnoredBase
+{
+    [NbtIgnore]
+    public virtual int Value { get; set; }
+}
+
+internal class IgnoredMid : IgnoredBase
+{
+    public override int Value { get; set; }
+}
+
+internal sealed class HiddenLeafFromIgnoredBase : IgnoredMid
+{
+    public new int Value { get; set; }
+}
+
 [NbtSerializable(typeof(InheritedDerived))]
+[NbtSerializable(typeof(HiddenLeaf))]
+[NbtSerializable(typeof(HiddenLeafFromIgnoredBase))]
 internal partial class InheritanceContext : NbtSerializerContext
 {
 }

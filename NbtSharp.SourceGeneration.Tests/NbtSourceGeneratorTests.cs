@@ -948,9 +948,7 @@ public sealed class NbtSourceGeneratorTests
 
         var result = Run(builder.ToString());
 
-        Assert.DoesNotContain(
-            result.CompilationDiagnostics,
-            static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+        AssertNoErrors(result);
         Assert.Equal(1, result.GeneratedSourceCount);
         Assert.Contains("Dto119", result.GeneratedSource, StringComparison.Ordinal);
     }

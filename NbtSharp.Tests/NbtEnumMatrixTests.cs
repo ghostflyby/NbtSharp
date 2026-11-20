@@ -41,6 +41,7 @@ public sealed class NbtEnumMatrixTests
         Assert.Equal(value.Values, generatedCopy.Values);
         Assert.Equal(value.Map, generatedCopy.Map);
         Assert.Equal(value.Flags, reflectedCopy.Flags);
+        Assert.Equal(value.Optional, reflectedCopy.Optional);
         Assert.Equal(value.Undefined, reflectedCopy.Undefined);
         Assert.Equal(value.Values, reflectedCopy.Values);
         Assert.Equal(value.Map, reflectedCopy.Map);
