@@ -1,6 +1,6 @@
 # NbtSharp Roadmap
 
-Status: 2026-11-18  
+Status: 2026-11-20  
 Baseline: PR #16 merged (`e8fb22a`) with source-generated serialization, enum support, strict
 `required` semantics, a lock-free converter cache, typed conversion fast paths, fully incremental
 generation, member converter opt-out, and broad collection/map shape support.
@@ -8,15 +8,19 @@ generation, member converter opt-out, and broad collection/map shape support.
 This document lists possible follow-up work. Priority reflects user impact and risk, not a strict
 schedule.
 
-## Implementation status (2026-11-18)
+## Implementation status (2026-11-20)
 
 - P0 #1 and #2 are implemented.
 - P0 #3 is implemented as compile-time AOT/trim analysis in the test projects. Native publish and
   package-content checks were deliberately excluded from scope.
-- P1 #4 and #6 are implemented.
-- P2 #11 is implemented (PR #16 and the collection wrap-up): sequence/map shape interfaces,
-  immutable/frozen/concurrent/sorted shapes, and `CollectionBuilderAttribute`/companion
-  factory/constructor/`Add` pattern discovery. String sorted sets use ordinal ordering;
+- P1 #4, #5, #6, #7, and #8 are implemented.
+- P2 #9, #10, #11, and #13 are implemented. Resolver chains, naming policies/context options, and
+  async serialization are covered by stacked PRs.
+- P3 #14 and #16 are implemented. #15 has benchmarks but no CI baseline comparison; #12 is deferred
+  pending a wire-format decision.
+- P2 #11 includes sequence/map shape interfaces, immutable/frozen/concurrent/sorted shapes, and
+  `CollectionBuilderAttribute`/companion factory/constructor/`Add` pattern discovery. Sorted maps
+  with string keys and sorted sets with string elements use ordinal ordering;
   `PriorityQueue<TElement,TPriority>` is rejected with a diagnostic. Span-only builders are
   supported by source generation and by the reflection resolver through runtime-created delegates.
 - Built-in scalar support also covers `byte`, `ushort`, `uint`, `ulong`, and `char`.
