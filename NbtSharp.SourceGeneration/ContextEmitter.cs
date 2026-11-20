@@ -74,7 +74,10 @@ internal sealed partial class ContextEmitter
             return Cache(model.CacheKey, CreatePrepared(model, graph: null, hintName, diagnostics));
         }
 
-        emitter._graph = new TypeGraph(contextType.ContainingAssembly, emitter._reportDiagnostic);
+        emitter._graph = new TypeGraph(
+            contextType.ContainingAssembly,
+            emitter._reportDiagnostic,
+            GetNamingPolicy(contextType));
         ContextSpecBuilder.RecordGraphBuild();
         foreach (var root in model.Roots)
         {
@@ -123,6 +126,30 @@ internal sealed partial class ContextEmitter
         var immutableDiagnostics = diagnostics.ToImmutable();
         var spec = ContextSpecBuilder.Build(model, graph, hintName, immutableDiagnostics);
         return new PreparedContext(spec);
+    }
+
+    private static AttributeData? GetGenerationOptionsAttribute(INamedTypeSymbol contextType) =>
+        contextType.GetAttributes().FirstOrDefault(static attribute =>
+            attribute.AttributeClass?.ToDisplayString() ==
+            "NbtSharp.NbtSourceGenerationOptionsAttribute");
+
+    private static Func<string, string>? GetNamingPolicy(INamedTypeSymbol contextType)
+    {
+        var attribute = GetGenerationOptionsAttribute(contextType);
+        if (attribute is null)
+        {
+            return null;
+        }
+
+        foreach (var argument in attribute.NamedArguments)
+        {
+            if (argument.Key == "NamingPolicy" && argument.Value.Value is int kind)
+            {
+                return NbtNamingPolicyConverter.Create(kind);
+            }
+        }
+
+        return null;
     }
 
     private bool Validate(INamedTypeSymbol contextType)
@@ -213,7 +240,76 @@ internal sealed partial class ContextEmitter
             return false;
         }
 
+        if (GetGenerationOptionsAttribute(contextType) is { } generationOptions)
+        {
+            foreach (var argument in generationOptions.NamedArguments)
+            {
+                if (argument.Key == "NamingPolicy" &&
+                    argument.Value.Value is int kind &&
+                    kind is not (>= 0 and <= 5))
+                {
+                    Report(
+                        Diagnostics.ContextInvalid,
+                        location,
+                        contextType.ToDisplayString(),
+                        "NbtSourceGenerationOptions.NamingPolicy must be a defined NbtNamingPolicyKind");
+                    return false;
+                }
+
+                if (argument.Key == "NullValueHandling" &&
+                    argument.Value.Value is int handling &&
+                    handling is not 0 and not 1)
+                {
+                    Report(
+                        Diagnostics.ContextInvalid,
+                        location,
+                        contextType.ToDisplayString(),
+                        "NbtSourceGenerationOptions.NullValueHandling must be NbtNullValueHandling.Omit or Throw");
+                    return false;
+                }
+            }
+
+            if (HasConflictingDefaultOptions(contextType))
+            {
+                Report(
+                    Diagnostics.GeneratedNameConflict,
+                    location,
+                    contextType.ToDisplayString(),
+                    "CreateDefaultOptions");
+                return false;
+            }
+        }
+
         return true;
+    }
+
+    private static bool HasConflictingDefaultOptions(INamedTypeSymbol contextType)
+    {
+        for (var type = contextType; type is not null; type = type.BaseType)
+        {
+            if (type.ToDisplayString(FullyQualified) == ContextBaseType)
+            {
+                return false;
+            }
+
+            foreach (var member in type.GetMembers("CreateDefaultOptions").OfType<IMethodSymbol>())
+            {
+                if (member.IsStatic ||
+                    member.Parameters.Length != 0 ||
+                    member.ReturnType.ToDisplayString(FullyQualified) !=
+                    "global::NbtSharp.NbtSerializerOptions")
+                {
+                    continue;
+                }
+
+                if (SymbolEqualityComparer.Default.Equals(type, contextType) || member.IsSealed)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private void AssignNames(INamedTypeSymbol contextType)
@@ -224,6 +320,7 @@ internal sealed partial class ContextEmitter
             "Default",
             "Options",
             "GetTypeInfo",
+            "CreateDefaultOptions",
             contextType.Name,
         };
 
@@ -346,6 +443,8 @@ internal sealed partial class ContextEmitter
         _writer.WriteLine($"public static {spec.ContextName} Default {{ get; }} = new();");
         _writer.WriteLine();
 
+        EmitDefaultOptions();
+
         foreach (var entry in spec.Entries)
         {
             EmitTypeInfoProperty(entry);
@@ -384,6 +483,33 @@ internal sealed partial class ContextEmitter
             _writer.Outdent();
             _writer.WriteLine("}");
         }
+    }
+
+    private void EmitDefaultOptions()
+    {
+        var spec = _spec!;
+        if (spec.NullValueHandlingExpression is null)
+        {
+            return;
+        }
+
+        _writer.WriteLine(
+            "protected override global::NbtSharp.NbtSerializerOptions CreateDefaultOptions() =>");
+        _writer.Indent();
+        _writer.WriteLine("new()");
+        _writer.WriteLine("{");
+        _writer.Indent();
+        _writer.WriteLine("TypeInfoResolver = this,");
+        if (spec.PropertyNamingPolicyExpression is not null)
+        {
+            _writer.WriteLine($"PropertyNamingPolicy = {spec.PropertyNamingPolicyExpression},");
+        }
+
+        _writer.WriteLine($"NullValueHandling = {spec.NullValueHandlingExpression},");
+        _writer.Outdent();
+        _writer.WriteLine("};");
+        _writer.Outdent();
+        _writer.WriteLine();
     }
 
     private void EmitTypeInfoProperty(TypeSpec entry)

@@ -13,6 +13,7 @@ namespace NbtSharp;
 internal sealed class NbtReflectionObjectConverter : NbtConverter
 {
     private readonly Type _type;
+    private readonly NbtNamingPolicy? _namingPolicy;
     private readonly NbtReflectionMember[] _members;
     private readonly Dictionary<string, int> _indexByName;
     private readonly ConstructorInfo? _constructor;
@@ -21,9 +22,10 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
     private readonly int[] _requiredMemberIndexes;
     private readonly bool[] _isRequiredMember;
 
-    public NbtReflectionObjectConverter(Type type)
+    public NbtReflectionObjectConverter(Type type, NbtNamingPolicy? namingPolicy = null)
     {
         _type = type;
+        _namingPolicy = namingPolicy;
         var hiddenMember = FindHiddenMember(type);
         if (hiddenMember is not null)
         {
@@ -32,7 +34,7 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
                 "Rename the derived member or exclude one of the members with [NbtIgnore].");
         }
 
-        _members = DiscoverMembers(type);
+        _members = DiscoverMembers(type, _namingPolicy);
         _indexByName = new Dictionary<string, int>(StringComparer.Ordinal);
         for (var i = 0; i < _members.Length; i++)
         {
@@ -406,7 +408,9 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
         return null;
     }
 
-    private static NbtReflectionMember[] DiscoverMembers(Type type)
+    private static NbtReflectionMember[] DiscoverMembers(
+        Type type,
+        NbtNamingPolicy? namingPolicy)
     {
         var members = new List<(int Token, NbtReflectionMember Member)>();
 
@@ -423,7 +427,9 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
                 continue;
             }
 
-            var name = property.GetCustomAttribute<NbtPropertyNameAttribute>(inherit: true)?.Name ?? property.Name;
+            var name = property.GetCustomAttribute<NbtPropertyNameAttribute>(inherit: true)?.Name ??
+                       namingPolicy?.ConvertName(property.Name) ??
+                       property.Name;
             members.Add((property.MetadataToken, new NbtReflectionMember(name, property)));
         }
 
@@ -440,7 +446,9 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
                 continue;
             }
 
-            var name = field.GetCustomAttribute<NbtPropertyNameAttribute>(inherit: true)?.Name ?? field.Name;
+            var name = field.GetCustomAttribute<NbtPropertyNameAttribute>(inherit: true)?.Name ??
+                       namingPolicy?.ConvertName(field.Name) ??
+                       field.Name;
             members.Add((field.MetadataToken, new NbtReflectionMember(name, field)));
         }
 

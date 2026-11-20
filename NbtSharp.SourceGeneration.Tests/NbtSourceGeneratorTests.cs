@@ -62,6 +62,60 @@ public sealed class NbtSourceGeneratorTests
     }
 
     [Fact]
+    public void ChangingGenerationOptionsRegeneratesTheContext()
+    {
+        var parseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
+        const string source = """
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            [NbtSourceGenerationOptions(NamingPolicy = NbtNamingPolicyKind.CamelCase)]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Player
+            {
+                public int HealthPoints { get; set; }
+            }
+            """;
+        var tree = CSharpSyntaxTree.ParseText(
+            source,
+            parseOptions,
+            path: "Player.cs",
+            cancellationToken: TestContext.Current.CancellationToken);
+        var compilation = CSharpCompilation.Create(
+            "GeneratorTests",
+            [tree],
+            References,
+            new CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable));
+        var driver = CreateTrackingDriver(parseOptions);
+        ContextSpecCache.ResetForTests();
+
+        driver = driver.RunGenerators(compilation, TestContext.Current.CancellationToken);
+        var before = GetGeneratedSource(driver.GetRunResult());
+        Assert.Contains("\"healthPoints\"", before, StringComparison.Ordinal);
+
+        var changedTree = CSharpSyntaxTree.ParseText(
+            source.Replace(
+                "NbtNamingPolicyKind.CamelCase",
+                "NbtNamingPolicyKind.SnakeCaseLower",
+                StringComparison.Ordinal),
+            parseOptions,
+            path: "Player.cs",
+            cancellationToken: TestContext.Current.CancellationToken);
+        driver = driver.RunGenerators(
+            compilation.ReplaceSyntaxTree(tree, changedTree),
+            TestContext.Current.CancellationToken);
+        var after = GetGeneratedSource(driver.GetRunResult());
+
+        Assert.Contains("\"health_points\"", after, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"healthPoints\"", after, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void RefreshesDiagnosticLocationsWhenDeclarationsShift()
     {
         var parseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
@@ -341,6 +395,8 @@ public sealed class NbtSourceGeneratorTests
                     isRecord: false,
                     hasSource: true,
                     ImmutableArray<TypeSpec>.Empty,
+                    propertyNamingPolicyExpression: null,
+                    nullValueHandlingExpression: null,
                     ImmutableArray<DiagnosticSpec>.Empty);
                 ContextSpecCache.Add($"key{i}", new PreparedContext(spec));
             }
@@ -358,6 +414,8 @@ public sealed class NbtSourceGeneratorTests
                 isRecord: false,
                 hasSource: false,
                 ImmutableArray<TypeSpec>.Empty,
+                propertyNamingPolicyExpression: null,
+                nullValueHandlingExpression: null,
                 ImmutableArray.Create(diagnostic));
             ContextSpecCache.Add("diagnostic", new PreparedContext(diagnosticSpec));
             Assert.False(ContextSpecCache.TryGet("diagnostic", out _));
@@ -1304,6 +1362,94 @@ public sealed class NbtSourceGeneratorTests
             """);
 
         Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG008");
+    }
+
+    [Fact]
+    public void ReportsDefaultOptionsConflictWithGenerationOptions()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Dto))]
+            [NbtSourceGenerationOptions(NamingPolicy = NbtNamingPolicyKind.CamelCase)]
+            public partial class TestContext : NbtSerializerContext
+            {
+                protected override NbtSerializerOptions CreateDefaultOptions() =>
+                    new() { TypeInfoResolver = this };
+            }
+
+            public sealed class Dto
+            {
+                public int Value { get; set; }
+            }
+            """);
+
+        Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG008");
+    }
+
+    [Fact]
+    public void ReportsGeneratedDefaultOptionsNameConflicts()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Dto), TypeInfoPropertyName = "CreateDefaultOptions")]
+            [NbtSourceGenerationOptions(NamingPolicy = NbtNamingPolicyKind.CamelCase)]
+            public partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            public sealed class Dto
+            {
+                public int Value { get; set; }
+            }
+            """);
+
+        Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG008");
+    }
+
+    [Fact]
+    public void ReportsNamingPolicyMemberCollisions()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Dto))]
+            [NbtSourceGenerationOptions(NamingPolicy = NbtNamingPolicyKind.SnakeCaseLower)]
+            public partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            public sealed class Dto
+            {
+                public int FooBar { get; set; }
+
+                public int Foo_Bar { get; set; }
+            }
+            """);
+
+        Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG005");
+    }
+
+    [Fact]
+    public void ReportsInvalidGenerationOptionValues()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Dto))]
+            [NbtSourceGenerationOptions(NullValueHandling = (NbtNullValueHandling)42)]
+            public partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            public sealed class Dto
+            {
+                public int Value { get; set; }
+            }
+            """);
+
+        Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG002");
     }
 
     [Fact]

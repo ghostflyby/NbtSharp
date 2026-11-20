@@ -91,6 +91,12 @@ the members is used. Unknown members are skipped; a missing constructor-bound me
 parameter's declared default value when it has one, falling back to the CLR default. Hidden (`new`)
 members are rejected because NBT has one member namespace per compound.
 
+Reflection mapping can apply a preset naming policy to members without `[NbtPropertyName]` by
+setting `NbtSerializerOptions.PropertyNamingPolicy`, for example
+`PropertyNamingPolicy = NbtNamingPolicy.SnakeCaseLower`. The presets are `CamelCase`,
+`SnakeCaseLower`, `SnakeCaseUpper`, `KebabCaseLower`, and `KebabCaseUpper`; an explicit
+`[NbtPropertyName]` always wins.
+
 ## Source generation
 
 Source-generated type information avoids reflection and runtime generic construction:
@@ -104,6 +110,25 @@ var context = GameContext.Default;
 byte[] data = NbtSerializer.Serialize(player, context.Player, "Player");
 Player copy = NbtSerializer.Deserialize(data, context.Player);
 ```
+
+A context can configure generation-time defaults:
+
+```csharp
+[NbtSerializable(typeof(Player))]
+[NbtSourceGenerationOptions(
+    NamingPolicy = NbtNamingPolicyKind.SnakeCaseLower,
+    NullValueHandling = NbtNullValueHandling.Throw)]
+partial class GameContext : NbtSerializerContext;
+```
+
+`NamingPolicy` renames mapped members that have no `[NbtPropertyName]` while generating converters.
+The generated context overrides `CreateDefaultOptions`, so `GameContext.Default.Options` exposes the
+same `PropertyNamingPolicy` and the configured `NullValueHandling`; a reflection resolver used with
+those options therefore applies the same policy. Setting
+`NbtSerializerOptions.PropertyNamingPolicy` directly does not rename members that were already
+generated. Declaring `CreateDefaultOptions` in the same context type while using
+`[NbtSourceGenerationOptions]` reports `NBTSG008`; generated defaults replace an inherited override
+unless it is sealed.
 
 The generator emits a converter for every reachable class or struct and type information for arrays,
 the supported sequence shapes (lists, sets, queues, stacks, linked lists, mutable/read-only wrappers,
@@ -339,6 +364,8 @@ the list is empty.
   `new NbtTypeInfoResolverChain(context, new NbtReflectionTypeInfoResolver())`.
 - `NullValueHandling`: omit a null compound member (default) or throw. Null roots and null list
   elements always throw because NBT has no null tag.
+- `PropertyNamingPolicy`: a preset `NbtNamingPolicy` that renames reflection-mapped members without
+  `[NbtPropertyName]`.
 - `RejectDuplicateCompoundNames`: while reading, keep the last duplicate (default) or throw.
 - `MaxDepth`, `MaxCollectionLength`, and `MaxDocumentBytes` safety limits. A value of 0 selects the
   library default; `MaxDocumentBytes` 0 means unlimited.

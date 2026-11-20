@@ -159,14 +159,19 @@ internal sealed class TypeGraph
 
     private readonly Action<DiagnosticSpec> _report;
     private readonly IAssemblySymbol _contextAssembly;
+    private readonly Func<string, string>? _namePolicy;
     private readonly Dictionary<ITypeSymbol, TypeEntry> _entries =
         new(SymbolEqualityComparer.Default);
     private readonly HashSet<ITypeSymbol> _reported = new(SymbolEqualityComparer.Default);
 
-    public TypeGraph(IAssemblySymbol contextAssembly, Action<DiagnosticSpec> report)
+    public TypeGraph(
+        IAssemblySymbol contextAssembly,
+        Action<DiagnosticSpec> report,
+        Func<string, string>? namePolicy = null)
     {
         _contextAssembly = contextAssembly;
         _report = report;
+        _namePolicy = namePolicy;
     }
 
     public List<TypeEntry> Entries { get; } = [];
@@ -561,7 +566,9 @@ internal sealed class TypeGraph
                     }
 
                     var nbtName = FindAttribute(property, PropertyNameAttribute)?.ConstructorArguments
-                        .FirstOrDefault().Value as string ?? property.Name;
+                            .FirstOrDefault().Value as string ??
+                        _namePolicy?.Invoke(property.Name) ??
+                        property.Name;
                     var setter = property.SetMethod;
                     var memberModel = new MemberModel(
                         property,
@@ -613,7 +620,9 @@ internal sealed class TypeGraph
                     }
 
                     var nbtName = FindAttribute(field, PropertyNameAttribute)?.ConstructorArguments
-                        .FirstOrDefault().Value as string ?? field.Name;
+                            .FirstOrDefault().Value as string ??
+                        _namePolicy?.Invoke(field.Name) ??
+                        field.Name;
                     var memberModel = new MemberModel(
                         field,
                         field.Name,

@@ -25,9 +25,33 @@ NbtSharp.NbtIgnoreAttribute
 NbtSharp.NbtIgnoreAttribute.NbtIgnoreAttribute() -> void
 NbtSharp.NbtIncludeAttribute
 NbtSharp.NbtIncludeAttribute.NbtIncludeAttribute() -> void
+NbtSharp.NbtNamingPolicy
+NbtSharp.NbtNamingPolicy.NbtNamingPolicy() -> void
+abstract NbtSharp.NbtNamingPolicy.ConvertName(string! name) -> string!
+static NbtSharp.NbtNamingPolicy.CamelCase.get -> NbtSharp.NbtNamingPolicy!
+static NbtSharp.NbtNamingPolicy.KebabCaseLower.get -> NbtSharp.NbtNamingPolicy!
+static NbtSharp.NbtNamingPolicy.KebabCaseUpper.get -> NbtSharp.NbtNamingPolicy!
+static NbtSharp.NbtNamingPolicy.SnakeCaseLower.get -> NbtSharp.NbtNamingPolicy!
+static NbtSharp.NbtNamingPolicy.SnakeCaseUpper.get -> NbtSharp.NbtNamingPolicy!
+static NbtSharp.NbtNamingPolicy.FromKind(NbtSharp.NbtNamingPolicyKind kind) -> NbtSharp.NbtNamingPolicy?
+NbtSharp.NbtNamingPolicyKind
+NbtSharp.NbtNamingPolicyKind.CamelCase = 1 -> NbtSharp.NbtNamingPolicyKind
+NbtSharp.NbtNamingPolicyKind.KebabCaseLower = 4 -> NbtSharp.NbtNamingPolicyKind
+NbtSharp.NbtNamingPolicyKind.KebabCaseUpper = 5 -> NbtSharp.NbtNamingPolicyKind
+NbtSharp.NbtNamingPolicyKind.SnakeCaseLower = 2 -> NbtSharp.NbtNamingPolicyKind
+NbtSharp.NbtNamingPolicyKind.SnakeCaseUpper = 3 -> NbtSharp.NbtNamingPolicyKind
+NbtSharp.NbtNamingPolicyKind.Unspecified = 0 -> NbtSharp.NbtNamingPolicyKind
 NbtSharp.NbtNullValueHandling
 NbtSharp.NbtNullValueHandling.Omit = 0 -> NbtSharp.NbtNullValueHandling
 NbtSharp.NbtNullValueHandling.Throw = 1 -> NbtSharp.NbtNullValueHandling
+NbtSharp.NbtSourceGenerationOptionsAttribute
+NbtSharp.NbtSourceGenerationOptionsAttribute.NamingPolicy.get -> NbtSharp.NbtNamingPolicyKind
+NbtSharp.NbtSourceGenerationOptionsAttribute.NamingPolicy.set -> void
+NbtSharp.NbtSourceGenerationOptionsAttribute.NbtSourceGenerationOptionsAttribute() -> void
+NbtSharp.NbtSourceGenerationOptionsAttribute.NullValueHandling.get -> NbtSharp.NbtNullValueHandling
+NbtSharp.NbtSourceGenerationOptionsAttribute.NullValueHandling.set -> void
+NbtSharp.NbtSerializerOptions.PropertyNamingPolicy.get -> NbtSharp.NbtNamingPolicy?
+NbtSharp.NbtSerializerOptions.PropertyNamingPolicy.init -> void
 NbtSharp.NbtPropertyNameAttribute
 NbtSharp.NbtPropertyNameAttribute.Name.get -> string!
 NbtSharp.NbtPropertyNameAttribute.NbtPropertyNameAttribute(string! name) -> void
@@ -271,6 +295,7 @@ NbtSharp.NbtSerializerContext.NbtSerializerContext() -> void
 NbtSharp.NbtSerializerContext.NbtSerializerContext(NbtSharp.NbtSerializerOptions? options) -> void
 NbtSharp.NbtSerializerContext.Options.get -> NbtSharp.NbtSerializerOptions!
 abstract NbtSharp.NbtSerializerContext.GetTypeInfo(System.Type! type, NbtSharp.NbtSerializerOptions! options) -> NbtSharp.NbtTypeInfo?
+virtual NbtSharp.NbtSerializerContext.CreateDefaultOptions() -> NbtSharp.NbtSerializerOptions!
 NbtSharp.NbtSerializerOptions.WithTypeInfoResolver(NbtSharp.INbtTypeInfoResolver! resolver) -> NbtSharp.NbtSerializerOptions!
 NbtSharp.NbtTypeInfo.NbtTypeInfo(System.Type! type, NbtSharp.NbtSerializerOptions? options) -> void
 NbtSharp.NbtTypeInfo.Options.get -> NbtSharp.NbtSerializerOptions!

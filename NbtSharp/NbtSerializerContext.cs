@@ -28,12 +28,21 @@ public abstract class NbtSerializerContext : INbtTypeInfoResolver
     protected NbtSerializerContext(NbtSerializerOptions? options)
     {
         Options = options is null
-            ? new NbtSerializerOptions { TypeInfoResolver = this }
+            ? CreateDefaultOptions()
             : options.WithTypeInfoResolver(this);
     }
 
     /// <summary>Gets the options bound to this context.</summary>
     public NbtSerializerOptions Options { get; }
+
+    /// <summary>Creates the options used when the constructor receives no explicit options.</summary>
+    /// <returns>The default options bound to this context.</returns>
+    /// <remarks>
+    /// The base constructor calls this method, so an override must not depend on derived instance
+    /// state that is initialized after the base constructor runs.
+    /// </remarks>
+    protected virtual NbtSerializerOptions CreateDefaultOptions() =>
+        new() { TypeInfoResolver = this };
 
     /// <inheritdoc/>
     public abstract NbtTypeInfo? GetTypeInfo(Type type, NbtSerializerOptions options);
