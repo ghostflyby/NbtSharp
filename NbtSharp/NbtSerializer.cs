@@ -145,7 +145,10 @@ public static class NbtSerializer
     /// <returns>A task that completes when the document has been flushed.</returns>
     /// <remarks>
     /// The caller owns <paramref name="destination"/>; this method flushes but does not complete it.
-    /// Writing is synchronous; only the flush observes cancellation.
+    /// Writing is synchronous; only the flush observes cancellation. When <typeparamref name="T"/>
+    /// is <see cref="NbtRoot"/>, only the contained value is written and <paramref name="rootName"/>
+    /// is used; call <see cref="SerializeDocumentAsync(PipeWriter,NbtRoot,NbtSerializerOptions?,CancellationToken)"/>
+    /// to preserve <see cref="NbtRoot.Name"/>.
     /// </remarks>
     [RequiresUnreferencedCode("Converter resolution may use reflection or runtime generic construction.")]
     [RequiresDynamicCode("Converter resolution may use runtime generic construction.")]
@@ -159,12 +162,7 @@ public static class NbtSerializer
         ArgumentNullException.ThrowIfNull(destination);
         cancellationToken.ThrowIfCancellationRequested();
         Serialize(destination, value, rootName, options);
-        var flushResult = await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
-        if (flushResult.IsCompleted)
-        {
-            throw new InvalidOperationException(
-                "The pipe reader has completed; the document could not be delivered.");
-        }
+        await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Serializes <paramref name="value"/> into a stream asynchronously.</summary>
@@ -177,7 +175,11 @@ public static class NbtSerializer
     /// <returns>A task that completes when the document has been flushed.</returns>
     /// <remarks>
     /// The document is written through a <see cref="PipeWriter"/> over the stream; the stream stays
-    /// open. Writing is synchronous; only the flush observes cancellation.
+    /// open. Writing is synchronous; only the flush observes cancellation. When
+    /// <typeparamref name="T"/> is <see cref="NbtRoot"/>, only the contained value is written and
+    /// <paramref name="rootName"/> is used; call
+    /// <see cref="SerializeDocumentAsync(Stream,NbtRoot,NbtSerializerOptions?,CancellationToken)"/>
+    /// to preserve <see cref="NbtRoot.Name"/>.
     /// </remarks>
     [RequiresUnreferencedCode("Converter resolution may use reflection or runtime generic construction.")]
     [RequiresDynamicCode("Converter resolution may use runtime generic construction.")]
@@ -242,12 +244,7 @@ public static class NbtSerializer
         ArgumentNullException.ThrowIfNull(typeInfo);
         cancellationToken.ThrowIfCancellationRequested();
         Serialize(destination, value, typeInfo, rootName);
-        var flushResult = await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
-        if (flushResult.IsCompleted)
-        {
-            throw new InvalidOperationException(
-                "The pipe reader has completed; the document could not be delivered.");
-        }
+        await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Serializes a value into a stream asynchronously using explicit type information.</summary>
@@ -309,6 +306,8 @@ public static class NbtSerializer
     /// <returns>A task that completes when the document has been flushed.</returns>
     /// <remarks>
     /// The caller owns <paramref name="destination"/>; this method flushes but does not complete it.
+    /// Writing is synchronous; only the flush observes cancellation. <paramref name="root"/>'s
+    /// name is preserved.
     /// </remarks>
     [UnconditionalSuppressMessage("Aot", "IL2026", Justification = "DOM values resolve to built-in converters.")]
     [UnconditionalSuppressMessage("Aot", "IL3050", Justification = "DOM values resolve to built-in converters.")]
@@ -319,6 +318,7 @@ public static class NbtSerializer
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(destination);
+        cancellationToken.ThrowIfCancellationRequested();
         options ??= new NbtSerializerOptions();
         ValidateRoot(root, options);
         await SerializeAsync(
@@ -337,7 +337,8 @@ public static class NbtSerializer
     /// <returns>A task that completes when the document has been flushed.</returns>
     /// <remarks>
     /// The document is written through a <see cref="PipeWriter"/> over the stream; the stream stays
-    /// open.
+    /// open. Writing is synchronous; only the flush observes cancellation. <paramref name="root"/>'s
+    /// name is preserved.
     /// </remarks>
     [UnconditionalSuppressMessage("Aot", "IL2026", Justification = "DOM values resolve to built-in converters.")]
     [UnconditionalSuppressMessage("Aot", "IL3050", Justification = "DOM values resolve to built-in converters.")]
@@ -348,6 +349,7 @@ public static class NbtSerializer
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(destination);
+        cancellationToken.ThrowIfCancellationRequested();
         options ??= new NbtSerializerOptions();
         ValidateRoot(root, options);
         await SerializeAsync(

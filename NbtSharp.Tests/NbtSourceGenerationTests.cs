@@ -1301,7 +1301,10 @@ public sealed class NbtSourceGenerationTests
             value,
             context.SourceGenItem,
             cancellationToken: TestContext.Current.CancellationToken);
-        var read = await pipe.Reader.ReadAsync(TestContext.Current.CancellationToken);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(
+            TestContext.Current.CancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(5));
+        var read = await pipe.Reader.ReadAsync(timeout.Token);
         var data = read.Buffer.ToArray();
         pipe.Reader.AdvanceTo(read.Buffer.End);
         await pipe.Writer.CompleteAsync();
@@ -1310,6 +1313,24 @@ public sealed class NbtSourceGenerationTests
 
         Assert.Equal("pipe", copy.Id);
         Assert.Equal(4, copy.Count);
+    }
+
+    [Fact]
+    public async Task SerializeAsyncTypeInfoHonorsCancellation()
+    {
+        var context = SourceGenerationContext.Default;
+        using var stream = new MemoryStream();
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            NbtSerializer.SerializeAsync(
+                stream,
+                new SourceGenItem { Id = "canceled", Count = 1 },
+                context.SourceGenItem,
+                cancellationToken: cancellation.Token));
+
+        Assert.Equal(0, stream.Length);
     }
 
     [Fact]

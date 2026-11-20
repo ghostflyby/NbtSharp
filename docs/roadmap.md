@@ -194,9 +194,10 @@ reported explicitly instead of being mapped as objects.
 ### 13. Asynchronous serialization
 
 **Status (2026-11-20): implemented.** `SerializeAsync` is available for `Stream` and `PipeWriter`,
-with and without explicit type information. It reuses the synchronous writer core and observes the
-cancellation token on the asynchronous flush; caller-owned `PipeWriter` instances are flushed but not
-completed, and stream overloads leave the stream open.
+with and without explicit type information, and `SerializeDocumentAsync` covers `NbtRoot` values
+while preserving `NbtRoot.Name`. It reuses the synchronous writer core and observes the cancellation
+token on the asynchronous flush; caller-owned `PipeWriter` instances are flushed but not completed,
+and stream overloads leave the stream open.
 
 ## P3: quality and documentation
 

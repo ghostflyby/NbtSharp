@@ -123,7 +123,10 @@ public sealed class NbtStreamAdapterTests
             value,
             options: null,
             cancellationToken: TestContext.Current.CancellationToken);
-        var read = await pipe.Reader.ReadAsync(TestContext.Current.CancellationToken);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(
+            TestContext.Current.CancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(5));
+        var read = await pipe.Reader.ReadAsync(timeout.Token);
         var data = read.Buffer.ToArray();
         pipe.Reader.AdvanceTo(read.Buffer.End);
         await pipe.Writer.CompleteAsync();
@@ -182,8 +185,44 @@ public sealed class NbtStreamAdapterTests
                 new NbtRoot("root", 1),
                 cancellationToken: cancellation.Token));
 
+        Assert.False(pipe.Reader.TryRead(out _));
         await pipe.Writer.CompleteAsync();
         await pipe.Reader.CompleteAsync();
+    }
+
+    [Fact]
+    public async Task SerializeAsyncRejectsANamedRootInUnnamedFormat()
+    {
+        using var stream = new MemoryStream();
+        var options = new NbtSerializerOptions { RootFormat = NbtRootFormat.Unnamed };
+
+        await Assert.ThrowsAsync<NbtException>(() =>
+            NbtSerializer.SerializeAsync(
+                stream,
+                1,
+                rootName: "root",
+                options: options,
+                cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Equal(0, stream.Length);
+    }
+
+    [Fact]
+    public async Task SerializeAsyncPropagatesConverterFailure()
+    {
+        using var stream = new MemoryStream();
+        var options = new NbtSerializerOptions();
+        options.Converters.Add(new ThrowingIntConverter());
+
+        var exception = await Assert.ThrowsAsync<NbtException>(() =>
+            NbtSerializer.SerializeAsync(
+                stream,
+                1,
+                options: options,
+                cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Contains("intentional", exception.Message, StringComparison.Ordinal);
+        Assert.True(stream.CanWrite);
     }
 
     [Fact]
@@ -625,6 +664,29 @@ public sealed class NbtStreamAdapterTests
         {
             writer.WriteInt32(value);
             cancellation.Cancel();
+        }
+
+        public override bool TryGetTagType(
+            int value,
+            NbtSerializerOptions options,
+            out NbtTagType tagType)
+        {
+            tagType = NbtTagType.Int;
+            return true;
+        }
+    }
+
+    private sealed class ThrowingIntConverter : NbtConverter<int>
+    {
+        public override int Read(ref NbtReader reader, NbtSerializerOptions options) => 0;
+
+        public override void Write(
+            ref NbtWriter writer,
+            int value,
+            NbtSerializerOptions options)
+        {
+            writer.WriteInt32(value);
+            throw new NbtException("intentional converter failure");
         }
 
         public override bool TryGetTagType(
