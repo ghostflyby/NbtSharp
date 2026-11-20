@@ -191,10 +191,19 @@ reported explicitly instead of being mapped as objects.
 
 ### 12. Polymorphic members
 
-- Current behavior rejects abstract/interface members.
-- Possible design: a discriminator member plus derived-type registration such as
-  `[NbtDerived(typeof(X))]`.
-- This requires a deliberate NBT representation choice because NBT has no native polymorphism.
+**Status (2026-11-20): deferred pending a wire-format decision.** Abstract and interface members
+still report `NBTSG003` / `NotSupportedException`. The implementation shape is understood:
+`[NbtDerived(typeof(X))]` registration on the base type, a discriminator member, and generated plus
+reflection dispatch. The unresolved choice is the NBT representation:
+
+- Flattened: `{ "$type": "Cat", ...derived members }` — compact and closest to `System.Text.Json`,
+  but reading needs buffering or DOM materialization and the writer must emit into an already-open
+  compound.
+- Envelope: `{ "$type": "Cat", "$value": { ...derived members } }` — isolated and simpler to
+  stream, but more verbose and unlike `System.Text.Json`.
+
+The discriminator value (short name, namespace-qualified name, or an explicit per-derived name) also
+needs to be fixed before the format becomes a compatibility contract.
 
 ### 13. Asynchronous serialization
 
