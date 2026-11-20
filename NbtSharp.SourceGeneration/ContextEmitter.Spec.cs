@@ -65,7 +65,7 @@ internal sealed partial class ContextEmitter
             }
 
             string? namingPolicy = null;
-            string? nullValueHandling = "global::NbtSharp.NbtNullValueHandling.Omit";
+            var nullValueHandling = "global::NbtSharp.NbtNullValueHandling.Omit";
             foreach (var argument in attribute.NamedArguments)
             {
                 switch (argument.Key)

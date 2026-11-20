@@ -17,6 +17,8 @@ namespace NbtSharp;
 /// </remarks>
 public abstract class NbtSerializerContext : INbtTypeInfoResolver
 {
+    private NbtSerializerOptions? _options;
+
     /// <summary>Initializes the context with default options.</summary>
     protected NbtSerializerContext()
         : this(options: null)
@@ -27,19 +29,22 @@ public abstract class NbtSerializerContext : INbtTypeInfoResolver
     /// <param name="options">The options to copy, or <see langword="null"/> for default options.</param>
     protected NbtSerializerContext(NbtSerializerOptions? options)
     {
-        Options = options is null
-            ? CreateDefaultOptions()
-            : options.WithTypeInfoResolver(this);
+        if (options is not null)
+        {
+            _options = options.WithTypeInfoResolver(this);
+        }
     }
 
     /// <summary>Gets the options bound to this context.</summary>
-    public NbtSerializerOptions Options { get; }
+    /// <remarks>Default options are created on first access when no explicit options were supplied.</remarks>
+    public NbtSerializerOptions Options =>
+        LazyInitializer.EnsureInitialized(ref _options, CreateDefaultOptions);
 
     /// <summary>Creates the options used when the constructor receives no explicit options.</summary>
     /// <returns>The default options bound to this context.</returns>
     /// <remarks>
-    /// The base constructor calls this method, so an override must not depend on derived instance
-    /// state that is initialized after the base constructor runs.
+    /// This method is called lazily on the first <see cref="Options"/> access, so an override may
+    /// depend on instance state initialized by the derived constructor.
     /// </remarks>
     protected virtual NbtSerializerOptions CreateDefaultOptions() =>
         new() { TypeInfoResolver = this };

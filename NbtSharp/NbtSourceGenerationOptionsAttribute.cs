@@ -15,8 +15,10 @@ namespace NbtSharp;
 public sealed class NbtSourceGenerationOptionsAttribute : Attribute
 {
     /// <summary>Gets or sets the naming policy for members without <see cref="NbtPropertyNameAttribute"/>.</summary>
+    // ReSharper disable once UnusedAutoPropertyAccessor.Global
     public NbtNamingPolicyKind NamingPolicy { get; set; }
 
     /// <summary>Gets or sets the default null handling for the context's default options.</summary>
+    // ReSharper disable once UnusedAutoPropertyAccessor.Global
     public NbtNullValueHandling NullValueHandling { get; set; } = NbtNullValueHandling.Omit;
 }

@@ -13,7 +13,6 @@ namespace NbtSharp;
 internal sealed class NbtReflectionObjectConverter : NbtConverter
 {
     private readonly Type _type;
-    private readonly NbtNamingPolicy? _namingPolicy;
     private readonly NbtReflectionMember[] _members;
     private readonly Dictionary<string, int> _indexByName;
     private readonly ConstructorInfo? _constructor;
@@ -25,7 +24,6 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
     public NbtReflectionObjectConverter(Type type, NbtNamingPolicy? namingPolicy = null)
     {
         _type = type;
-        _namingPolicy = namingPolicy;
         var hiddenMember = FindHiddenMember(type);
         if (hiddenMember is not null)
         {
@@ -34,7 +32,7 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
                 "Rename the derived member or exclude one of the members with [NbtIgnore].");
         }
 
-        _members = DiscoverMembers(type, _namingPolicy);
+        _members = DiscoverMembers(type, namingPolicy);
         _indexByName = new Dictionary<string, int>(StringComparer.Ordinal);
         for (var i = 0; i < _members.Length; i++)
         {
