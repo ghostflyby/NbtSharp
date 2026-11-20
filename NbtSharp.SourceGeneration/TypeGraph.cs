@@ -978,6 +978,8 @@ internal sealed class TypeGraph
 
     private static AttributeData? FindAttribute(ISymbol symbol, string metadataName)
     {
+        // All mapping attributes looked up here declare Inherited = true, so following the
+        // override chain matches their AttributeUsage contract.
         for (ISymbol? current = symbol;
              current is not null;
              current = current is IPropertySymbol property ? property.OverriddenProperty : null)

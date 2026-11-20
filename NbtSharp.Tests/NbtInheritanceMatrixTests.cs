@@ -52,6 +52,24 @@ public sealed class NbtInheritanceMatrixTests
     }
 
     [Fact]
+    public void OverridesInheritConverterAttributes()
+    {
+        var value = new InheritedConverterDerived { Value = 5 };
+
+        var data = NbtSerializer.Serialize(
+            value,
+            InheritanceContext.Default.InheritedConverterDerived,
+            "root");
+        var root = (NbtCompound)NbtSerializer.Deserialize(data).Value.Value!;
+        var copy = NbtSerializer.Deserialize(
+            data,
+            InheritanceContext.Default.InheritedConverterDerived);
+
+        Assert.Equal(105, (int)root["Value"].Value!);
+        Assert.Equal(5, copy.Value);
+    }
+
+    [Fact]
     public void OverriddenMembersInheritBaseAttributes()
     {
         var value = new InheritedDerived
@@ -153,7 +171,19 @@ internal sealed class HiddenLeafFromIgnoredBase : IgnoredMid
     public new int Value { get; set; }
 }
 
+internal class InheritedConverterBase
+{
+    [NbtUseConverter(typeof(OffsetIntConverter))]
+    public virtual int Value { get; set; }
+}
+
+internal sealed class InheritedConverterDerived : InheritedConverterBase
+{
+    public override int Value { get; set; }
+}
+
 [NbtSerializable(typeof(InheritedDerived))]
+[NbtSerializable(typeof(InheritedConverterDerived))]
 [NbtSerializable(typeof(HiddenLeaf))]
 [NbtSerializable(typeof(HiddenLeafFromIgnoredBase))]
 internal partial class InheritanceContext : NbtSerializerContext
