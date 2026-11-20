@@ -25,14 +25,18 @@ schedule.
 
 ### 1. Full transform-level incremental generation
 
-**Current state**
+**Status (2026-11-20): implemented.** The pipeline uses a symbol-free per-context structural model,
+a content-keyed reachability fingerprint, and a `ContextSpecCache`; unrelated edits leave prepared
+and generated steps cached, and tests cover 300 contexts plus a single 120-DTO context.
+
+**Original plan**
 
 - A `PreparedContext` model with a structural fingerprint caches validation, type-graph data, name
   assignment, and diagnostics.
 - Unrelated compilation changes skip source emission and `AddSource`.
 - Tests assert that prepared and generated steps are cached for unrelated changes.
 
-**Gap**
+**Original gap (addressed)**
 
 - Semantic model changes still rebuild the type graph for every context.
 - `Collect()` still merges all contexts into one batch, so one changed context can trigger
@@ -53,7 +57,12 @@ schedule.
 
 ### 2. Custom converters in source-generated DTOs
 
-**Current state**
+**Status (2026-11-19): implemented.** `[NbtUseConverter]` supports runtime resolution and
+`[NbtUseConverter(typeof(...))]` supplies an explicit typed converter or factory. Marked members are
+excluded from graph discovery, follow normal converter precedence, and remain AOT-safe when the
+explicit converter is AOT-safe.
+
+**Original gap**
 
 - Runtime converter lookup is `options.Converters` → type-info resolver → built-in converters.
 - A DTO member with a type unsupported by the generator (`Guid`, `decimal`, `DateTime`, custom
@@ -100,7 +109,11 @@ schedule.
 
 ### 4. Array and collection allocation improvements
 
-**Current state**
+**Status (2026-11-19): implemented.** Arrays with fixed-width element tags are allocated once at the
+declared length, `sbyte[]` is read directly, and lists up to 4096 elements use
+`CollectionsMarshal` span filling.
+
+**Original state**
 
 - Non-special `T[]` values are read into a `List<T>` and then copied with `ToArray()`.
 - `sbyte[]` is read as `byte[]` and copied again.
@@ -139,9 +152,10 @@ null checks; unsigned values and `char` preserve their bit patterns in the same-
 
 ### 7. Required and constructor semantics
 
-**Status (2026-11-18): implemented.** Required value types remain a permanent limitation
-(`NBTSG007`). `[SetsRequiredMembers]` only excuses required members that are excluded from the
-mapping; mapped required members are always presence-checked. Missing constructor-bound members use
+**Status (2026-11-18): implemented.** Required value types need an explicit public parameterless
+constructor marked `[SetsRequiredMembers]` (`NBTSG007` otherwise). `[SetsRequiredMembers]` only
+excuses required members that are excluded from the mapping; mapped required members are always
+presence-checked. Missing constructor-bound members use
 the parameter's declared default value when it has one, otherwise the CLR default. Hidden (`new`)
 members are rejected with `NBTSG017` and `NotSupportedException` from the reflection resolver.
 Cross-assembly `init`/required members and friend-assembly (`internal`) setters are covered by

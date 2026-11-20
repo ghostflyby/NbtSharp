@@ -1,7 +1,8 @@
 # Migrating from reflection to source generation
 
 The reflection path and the generated path share the same mapping rules and wire format for the
-supported shapes. Migration can be incremental.
+intersection of shapes they both support. Migration can be incremental. `[NbtUseConverter]` is a
+generated-only feature: reflection ignores it.
 
 ## Before
 
@@ -33,18 +34,21 @@ The context is the resolver. `Context.Default.Options` binds it as `TypeInfoReso
 Keep the reflection resolver as a fallback for types that are not generated yet:
 
 ```csharp
-var options = new NbtSerializerOptions
-{
-    TypeInfoResolver = new NbtTypeInfoResolverChain(
-        GameContext.Default,
-        new NbtReflectionTypeInfoResolver()),
-};
+var chain = new NbtTypeInfoResolverChain(
+    GameContext.Default,
+    new NbtReflectionTypeInfoResolver());
+var options = GameContext.Default.Options.WithTypeInfoResolver(chain);
 ```
+
+Start from `Context.Default.Options` so the configured `PropertyNamingPolicy` and
+`NullValueHandling` also apply to reflection fallbacks. A separately constructed
+`new NbtSerializerOptions` does not inherit `[NbtSourceGenerationOptions]` settings.
 
 Resolution order is first non-null result. `options.Converters` still outranks the resolver chain.
 A generated context wins for its own types; unknown types fall back to reflection. Nested members
-resolve through the same options, so a generated root can contain a reflection-mapped member and a
-reflection root can contain a generated member.
+resolve through the same options. A reflection root can contain a generated member; a generated root
+contains a reflection-mapped member only when that member is opted out with runtime
+`[NbtUseConverter]` and its converter is registered in `options.Converters`.
 
 Chains inherit the trimming/AOT requirements of their resolvers: a chain that includes
 `NbtReflectionTypeInfoResolver` is not AOT-safe. The type-information overloads use the options bound
@@ -65,9 +69,11 @@ Reflection applies `[NbtPropertyName]` and, when configured,
 
 - Unsupported types become build diagnostics (`NBTSG003`, `NBTSG011`, …) instead of runtime
   `NotSupportedException`. Apply the suggested fix before deleting the reflection fallback.
-- Private setters in another assembly are not visible to the generator. Expose them as
-  `public`/`init`, add `InternalsVisibleTo` for `internal` setters, or move the context into the
-  owning assembly.
+- Private setters in another assembly are not visible to the generator. The member is still
+  serialized through its getter, but generated deserialization silently leaves it at its default and
+  reports no diagnostic. Expose it as `public`/`init`, make it `internal` and add
+  `InternalsVisibleTo`, or move the context into the owning assembly. Reflection can write a private
+  setter, so this difference can corrupt data if the reflection fallback is removed too early.
 - Hidden (`new`) members are rejected by both paths; rename or exclude one.
 - Required members follow the same presence and null rules. A constructor that initializes a mapped
   required member still needs the member present in the compound; `[SetsRequiredMembers]` only

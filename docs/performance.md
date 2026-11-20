@@ -8,8 +8,10 @@ the intended hot paths and the trade-offs that can disable them.
 - `NbtSerializerOptions` caches resolved converters in an `ImmutableDictionary`. Reads are lock-free;
   a miss takes a lock, resolves once, and publishes a new dictionary. Resolving `n` distinct types
   costs O(n log n) instead of repeated dictionary copies.
-- Converters are created once per options instance and type. Reuse a single options instance (or a
-  context's `Default.Options`) across operations instead of constructing options per call.
+- Converters resolved through `NbtSerializerOptions.GetConverter` are created once per options
+  instance and type. Reuse a single options instance (or a context's `Default.Options`) across
+  operations instead of constructing options per call. Factory-based `[NbtUseConverter(typeof(...))]`
+  members call `CreateConverter` for every read or write instead of caching the produced converter.
 - `options.Converters` is consulted before the resolver and built-ins. Mutating the converter list
   invalidates the resolution cache; do that during setup, not on a hot path.
 - `NbtReflectionTypeInfoResolver` caches reflection converters per type and naming-policy instance.
@@ -40,16 +42,16 @@ the intended hot paths and the trade-offs that can disable them.
 - Lists at or below 4096 elements are filled through `CollectionsMarshal` span access; larger
   declared lengths grow as elements are read.
 - `Dictionary<string,TValue>` cannot be preallocated because compounds carry no member count.
-- Empty collections encode as `TAG_List<TAG_End>`; a non-empty declared element type is still
-  checked for built-in converters.
+- Empty collections encode as `TAG_List<TAG_End>`; a declared element type other than `TAG_End` is
+  still checked for built-in converters.
 
 ## Async paths
 
-`SerializeAsync` and `DeserializeAsync` reuse the synchronous writer/reader core and perform I/O
-asynchronously. Cancellation requested before the first write is observed before producing bytes;
-cancellation during stream serialization is checked on the final flush. `PipeReader` and
-`ReadOnlySequence<byte>` overloads leave bytes after the root available to the caller; stream
-overloads may read ahead.
+`DeserializeAsync` reads asynchronously through a `PipeReader`. `SerializeAsync` writes through the
+synchronous writer core and awaits the final flush. Cancellation requested before the first write is
+observed before producing bytes; cancellation during stream serialization is checked on the final
+flush. `PipeReader` and `ReadOnlySequence<byte>` overloads leave bytes after the root available to the
+caller; stream overloads may read ahead.
 
 ## Source generator
 

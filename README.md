@@ -208,7 +208,9 @@ excluded from the mapping requires the selected constructor to be marked with
 resolver throws `NotSupportedException`. `[SetsRequiredMembers]` only covers excluded members:
 mapped required members are still presence-checked, so a compound that omits one fails even when the
 constructor initializes it. Required members on a value type require the selected constructor to be
-marked with `[SetsRequiredMembers]`; otherwise the generator reports `NBTSG007`.
+marked with `[SetsRequiredMembers]`; because a parameterless constructor is preferred, this means an
+explicit public parameterless constructor with the attribute. Otherwise the generator reports
+`NBTSG007`.
 
 ## Streaming
 

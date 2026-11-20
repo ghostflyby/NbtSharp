@@ -2,8 +2,10 @@
 
 The source generator emits converters and `NbtTypeInfo<T>` instances at compile time. The
 type-information overloads of `NbtSerializer` use that generated metadata, so they carry no
-`RequiresUnreferencedCode` or `RequiresDynamicCode` annotations. Native AOT and trimming work when
-every reachable type is covered by a generated context or by an AOT-safe custom converter.
+`RequiresUnreferencedCode` or `RequiresDynamicCode` annotations. The generated path is designed to be
+safe for Native AOT and trimming when every reachable type is covered by a generated context or by an
+AOT-safe custom converter; the repository verifies this with the SDK AOT/trim analyzers at build time,
+not with an end-to-end native publish.
 
 ## Define a context
 
@@ -43,9 +45,10 @@ AOT-safe.
 - Types discovered through `CollectionBuilderAttribute`, companion `Create`/`CreateRange` factories,
   or public constructor/`Add` patterns.
 
-Set-like and sorted collection behavior follows the runtime collection type: string-keyed sorted
-sets use ordinal ordering, and unsupported shapes such as `PriorityQueue<TElement,TPriority>` are
-rejected with `NBTSG011` or the corresponding reflection exception.
+Set-like and sorted collection behavior follows the runtime collection type: sorted maps with string
+keys and sorted sets with string elements use ordinal ordering. Unsupported shapes such as
+`PriorityQueue<TElement,TPriority>` report `NBTSG003` from the generator and `NotSupportedException`
+from the reflection resolver.
 
 ## Member selection
 
@@ -55,9 +58,10 @@ rejected with `NBTSG011` or the corresponding reflection exception.
 - Public fields require `[NbtInclude]`; `[NbtIgnore]` on a field also applies.
 - Hidden (`new`) members report `NBTSG017` because NBT has one member namespace per compound.
 - Mapping attributes declared on a virtual base property are inherited by overrides.
-- Private setters in another assembly are not visible to the generator. Expose the member as
-  `public`/`init`, make it `internal` and add `InternalsVisibleTo`, or put the context in the same
-  assembly.
+- Private setters in another assembly are not visible to the generator. The member is still mapped
+  through its public getter, but generated deserialization leaves it at its default because there is
+  no writable setter symbol, and no diagnostic is reported. Expose the member as `public`/`init`, make
+  it `internal` and add `InternalsVisibleTo`, or put the context in the same assembly.
 
 ## Constructors and required members
 
@@ -73,10 +77,15 @@ Required members are strict:
   `NullValueHandling`.
 - A required member excluded from the mapping requires `[SetsRequiredMembers]` on the selected
   constructor; otherwise the generator reports `NBTSG015`.
-- Required members on a value type are not supported and report `NBTSG007`; use a class.
+Required members on a value type are supported only when the selected constructor is marked
+`[SetsRequiredMembers]`. Because the generator prefers a parameterless constructor, an explicit
+public parameterless constructor with the attribute is the usable form; otherwise the generator
+reports `NBTSG007`. A parameterized `[SetsRequiredMembers]` constructor is not selected while an
+implicit parameterless constructor exists.
 
-`init`-only and `required` setters are written through `UnsafeAccessor`, so they work without
-reflection.
+`init`-only setters and non-public setters that are visible to the context assembly are written
+through `UnsafeAccessor`. Required members are assigned directly when they have a public setter or
+passed to the selected constructor, so they also work without reflection.
 
 ## Custom converters for members
 
@@ -144,7 +153,9 @@ Each attributed context is prepared inside the incremental transform and emits a
 Generated source is cached per prepared context, a content-keyed reachability fingerprint skips
 graph construction for unchanged contexts, and no symbol-carrying value is retained by the pipeline.
 Editing an unrelated declaration does not regenerate the context; editing a reachable declaration
-does. The cache is process-wide, bounded, and FIFO-evicted.
+does. Prepared contexts that carry diagnostics, including `NBTSG013` warnings, are not cached, so
+those are prepared again on each generation pass. The cache is process-wide, bounded, and
+FIFO-evicted.
 
 See [diagnostics.md](diagnostics.md) for the complete `NBTSG` list and
 [migration.md](migration.md) for moving an existing reflection-based setup.
