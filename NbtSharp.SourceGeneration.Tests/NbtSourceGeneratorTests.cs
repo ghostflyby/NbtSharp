@@ -1479,6 +1479,15 @@ public sealed class NbtSourceGeneratorTests
             "value.Item, global::TestContext.__staticConverter1.Value",
             result.GeneratedSource,
             StringComparison.Ordinal);
+        var defaultIndex = result.GeneratedSource.IndexOf(
+            "public static TestContext Default",
+            StringComparison.Ordinal);
+        var staticConverterIndex = result.GeneratedSource.IndexOf(
+            "__staticConverter1",
+            StringComparison.Ordinal);
+        Assert.True(
+            staticConverterIndex >= 0 && defaultIndex > staticConverterIndex,
+            "Lazy converter fields must be declared before Default.");
     }
 
     [Fact]

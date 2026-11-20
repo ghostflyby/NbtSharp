@@ -329,9 +329,6 @@ internal sealed partial class ContextEmitter
             }
         }
 
-        _writer.WriteLine($"public static {spec.ContextName} Default {{ get; }} = new();");
-        _writer.WriteLine();
-
         foreach (var entry in spec.Entries)
         {
             if (!memberTypeNames.Contains(entry.TypeName))
@@ -345,6 +342,8 @@ internal sealed partial class ContextEmitter
                 $"{entry.StaticConverterName} = new(static () => {GetFactory(entry)});");
         }
 
+        _writer.WriteLine();
+        _writer.WriteLine($"public static {spec.ContextName} Default {{ get; }} = new();");
         _writer.WriteLine();
 
         foreach (var entry in spec.Entries)

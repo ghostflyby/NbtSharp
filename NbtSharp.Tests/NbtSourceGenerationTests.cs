@@ -1271,6 +1271,19 @@ public sealed class NbtSourceGenerationTests
     }
 
     [Fact]
+    public void StaticConverterFieldsAreLazy()
+    {
+        var context = SourceGenerationContext.Default;
+        var value = new SourceGenItem { Id = "ok", Count = 1 };
+
+        var data = NbtSerializer.Serialize(value, context.SourceGenItem, "root");
+        var copy = NbtSerializer.Deserialize(data, context.SourceGenItem);
+
+        Assert.Equal("ok", copy.Id);
+        Assert.Equal(1, copy.Count);
+    }
+
+    [Fact]
     public void DerivedContextResolverOverridesStaticMemberFastPath()
     {
         var context = new DerivedSourceGenerationContext();
@@ -1385,6 +1398,7 @@ public sealed class NbtSourceGenerationTests
 [NbtSerializable(typeof(SourceGenSmallOptionalDefaults))]
 [NbtSerializable(typeof(SourceGenUnsignedScalars))]
 [NbtSerializable(typeof(SourceGenNode))]
+[NbtSerializable(typeof(ThrowingConverterHolder))]
 [NbtSerializable(typeof(SourceGenMappedOverrideDerived))]
 [NbtSerializable(typeof(SourceGenMappedGenericOverrideDerived))]
 [NbtSerializable(typeof(SourceGenSetsRequired))]
@@ -1895,6 +1909,29 @@ internal sealed class SourceGenNode
     public int Value { get; set; }
 
     public SourceGenNode? Next { get; set; }
+}
+
+internal sealed class ThrowingConverterHolder
+{
+    public ThrowingConverterDto Value { get; set; } = new();
+}
+
+internal sealed class ThrowingConverterDto
+{
+    [NbtUseConverter(typeof(ThrowingConverter))]
+    public int Value { get; set; }
+}
+
+internal sealed class ThrowingConverter : NbtConverter<int>
+{
+    public ThrowingConverter() =>
+        throw new InvalidOperationException("The converter must be constructed lazily.");
+
+    public override int Read(ref NbtReader reader, NbtSerializerOptions options) => 0;
+
+    public override void Write(ref NbtWriter writer, int value, NbtSerializerOptions options)
+    {
+    }
 }
 
 internal sealed class SourceGenUnsignedScalars
