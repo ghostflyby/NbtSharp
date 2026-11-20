@@ -16,7 +16,8 @@ schedule.
 - P1 #4, #5, #6, #7, and #8 are implemented.
 - P2 #9, #10, #11, #12, and #13 are implemented. Resolver chains, naming policies/context options,
   polymorphic members, and async serialization are covered by stacked PRs.
-- P3 #14 and #16 are implemented. #15 has benchmarks but no CI baseline comparison.
+- P3 #14, #15, and #16 are implemented. #15 ships benchmarks without an automated regression gate,
+  which is a deliberate scope decision documented below.
 - P2 #11 includes sequence/map shape interfaces, immutable/frozen/concurrent/sorted shapes, and
   `CollectionBuilderAttribute`/companion factory/constructor/`Add` pattern discovery. Sorted maps
   with string keys and sorted sets with string elements use ordinal ordering;
@@ -194,9 +195,11 @@ camelCase, snake_case, and kebab-case presets for reflection through
 `NbtSerializerOptions.PropertyNamingPolicy`. `[NbtSourceGenerationOptions]` configures the naming
 policy and default null handling for a generated context; the emitted `CreateDefaultOptions`
 override exposes both through `Context.Default.Options`, and declaring a conflicting override reports
-`NBTSG008`. Generation mode selection (`Metadata` versus `Serialization`) remains undecided because
-the generator only emits serialization-oriented converters today; it is deferred until a concrete
-consumer requires metadata-only output.
+`NBTSG008`. Generation mode selection (`Metadata` versus `Serialization`) was considered and rejected for now:
+NbtSharp's generated type information always includes converters, and a metadata-only mode would
+have to construct converters at runtime, losing the AOT guarantees that are the main reason to use
+source generation. No `GenerationMode` option will be added unless a concrete metadata-only consumer
+appears.
 
 ### 11. Additional collection shapes
 
@@ -238,10 +241,12 @@ deterministic random/mutation/truncation corpora for the reader, and a single ge
 
 ### 15. Benchmarks and regression gates
 
-- A BenchmarkDotNet project covers scalar, nullable-scalar, array, collection-shape, enum, and mixed
-  DTOs, plus cold/warm generator incrementality at 100 and 300 contexts.
-- A before/after comparison gate in CI or a scheduled job is still missing. Threshold-based gates
-  need a stable runner and a chosen noise margin.
+**Status (2026-11-20): benchmarks implemented; automated regression gating deliberately excluded.**
+A BenchmarkDotNet project covers scalar, nullable-scalar, array, collection-shape, enum, and mixed
+DTOs, plus cold/warm generator incrementality at 100 and 300 contexts. A CI or scheduled
+before/after comparison gate is out of scope because GitHub-hosted runners do not provide a stable
+enough performance baseline for meaningful thresholds; benchmark results remain informational and
+can be compared manually when investigating a change.
 
 ### 16. Documentation
 
