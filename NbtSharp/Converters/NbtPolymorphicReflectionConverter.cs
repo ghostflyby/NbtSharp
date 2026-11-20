@@ -109,7 +109,7 @@ internal sealed class NbtPolymorphicReflectionConverter : NbtConverter
     /// <inheritdoc/>
     public override bool CanConvert(Type typeToConvert) => typeToConvert == _baseType;
 
-    internal override object? ReadValue(
+    internal override object ReadValue(
         ref NbtReader reader,
         Type typeToConvert,
         NbtSerializerOptions options)

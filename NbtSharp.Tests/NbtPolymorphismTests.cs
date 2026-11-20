@@ -374,10 +374,12 @@ internal sealed class TagList : List<string>, ICollectionBase
 [NbtDerived(typeof(GenericCat))]
 internal interface IGenericBase<T>
 {
+    T Value { get; }
 }
 
 internal sealed class GenericCat : IGenericBase<int>
 {
+    public int Value => 0;
 }
 
 [NbtSerializable(typeof(PolyZoo))]
