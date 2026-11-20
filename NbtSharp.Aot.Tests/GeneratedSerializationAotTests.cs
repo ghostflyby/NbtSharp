@@ -302,10 +302,21 @@ public sealed class GeneratedSerializationAotTests
         var cat = Assert.IsType<AotCat>(copy.Pet);
         Assert.Equal("Milo", cat.Name);
         Assert.Equal(9, cat.Lives);
+
+        var rockOwner = new AotPetOwner { Pet = new AotRock { Name = "rock" } };
+        var rockData = NbtSerializer.Serialize(
+            rockOwner,
+            AotContext.Default.AotPetOwner,
+            "root");
+        var rockCopy = NbtSerializer.Deserialize(rockData, AotContext.Default.AotPetOwner);
+
+        var rock = Assert.IsType<AotRock>(rockCopy.Pet);
+        Assert.Equal("rock", rock.Name);
     }
 }
 
 [NbtDerived(typeof(AotCat))]
+[NbtDerived(typeof(AotRock))]
 internal interface IAotAnimal
 {
     string Name { get; set; }
@@ -316,6 +327,11 @@ internal sealed class AotCat : IAotAnimal
     public string Name { get; set; } = "";
 
     public int Lives { get; set; }
+}
+
+internal struct AotRock : IAotAnimal
+{
+    public string Name { get; set; }
 }
 
 internal sealed class AotPetOwner
