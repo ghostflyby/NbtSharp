@@ -420,7 +420,7 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
                 continue;
             }
 
-            if (property.IsDefined(typeof(NbtIgnoreAttribute), inherit: true))
+            if (property.GetCustomAttribute<NbtIgnoreAttribute>(inherit: true) is not null)
             {
                 continue;
             }

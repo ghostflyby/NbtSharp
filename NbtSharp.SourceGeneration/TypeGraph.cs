@@ -976,9 +976,22 @@ internal sealed class TypeGraph
         _report(DiagnosticSpec.Create(descriptor, location, arguments));
     }
 
-    private static AttributeData? FindAttribute(ISymbol symbol, string metadataName) =>
-        symbol.GetAttributes().FirstOrDefault(attribute =>
-            attribute.AttributeClass?.ToDisplayString() == metadataName);
+    private static AttributeData? FindAttribute(ISymbol symbol, string metadataName)
+    {
+        for (ISymbol? current = symbol;
+             current is not null;
+             current = current is IPropertySymbol property ? property.OverriddenProperty : null)
+        {
+            var attribute = current.GetAttributes().FirstOrDefault(attribute =>
+                attribute.AttributeClass?.ToDisplayString() == metadataName);
+            if (attribute is not null)
+            {
+                return attribute;
+            }
+        }
+
+        return null;
+    }
 
     private static List<ISymbol> CollectRequiredMembers(INamedTypeSymbol type)
     {
