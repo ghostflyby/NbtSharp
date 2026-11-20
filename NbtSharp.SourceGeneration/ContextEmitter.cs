@@ -329,6 +329,9 @@ internal sealed partial class ContextEmitter
             }
         }
 
+        _writer.WriteLine($"public static {spec.ContextName} Default {{ get; }} = new();");
+        _writer.WriteLine();
+
         foreach (var entry in spec.Entries)
         {
             if (!memberTypeNames.Contains(entry.TypeName))
@@ -337,12 +340,11 @@ internal sealed partial class ContextEmitter
             }
 
             _writer.WriteLine(
-                $"private static readonly global::NbtSharp.NbtConverter<{entry.TypeName}> " +
-                $"{entry.StaticConverterName} = {GetFactory(entry)};");
+                $"private static readonly global::System.Lazy<" +
+                $"global::NbtSharp.NbtConverter<{entry.TypeName}>> " +
+                $"{entry.StaticConverterName} = new(static () => {GetFactory(entry)});");
         }
 
-        _writer.WriteLine();
-        _writer.WriteLine($"public static {spec.ContextName} Default {{ get; }} = new();");
         _writer.WriteLine();
 
         foreach (var entry in spec.Entries)
@@ -792,12 +794,12 @@ internal sealed partial class ContextEmitter
             {
                 _writer.WriteLine(
                     $"if (options.Converters.Count == 0 && " +
-                    $"options.TypeInfoResolver is {ContextTypeName})");
+                    $"options.TypeInfoResolver?.GetType() == typeof({ContextTypeName}))");
                 _writer.WriteLine("{");
                 _writer.Indent();
                 _writer.WriteLine(
                     $"__v{member.Index} = global::NbtSharp.NbtMetadataServices.ReadValueWithConverter<{member.TypeName}>(" +
-                    $"ref reader, {ContextTypeName}.{staticEntry.StaticConverterName}, options, {path});");
+                    $"ref reader, {ContextTypeName}.{staticEntry.StaticConverterName}.Value, options, {path});");
                 _writer.Outdent();
                 _writer.WriteLine("}");
                 _writer.WriteLine("else");
@@ -1064,12 +1066,12 @@ internal sealed partial class ContextEmitter
         {
             _writer.WriteLine(
                 $"if (options.Converters.Count == 0 && " +
-                $"options.TypeInfoResolver is {ContextTypeName})");
+                $"options.TypeInfoResolver?.GetType() == typeof({ContextTypeName}))");
             _writer.WriteLine("{");
             _writer.Indent();
             _writer.WriteLine(
                 $"{MetadataServices}.WriteMemberWithConverter(ref writer, {nbtName}, {value}, " +
-                $"{ContextTypeName}.{staticEntry.StaticConverterName}, options);");
+                $"{ContextTypeName}.{staticEntry.StaticConverterName}.Value, options);");
             _writer.Outdent();
             _writer.WriteLine("}");
             _writer.WriteLine("else");

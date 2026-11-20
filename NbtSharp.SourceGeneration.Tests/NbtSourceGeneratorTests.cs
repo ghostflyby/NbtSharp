@@ -1462,19 +1462,21 @@ public sealed class NbtSourceGeneratorTests
 
         AssertNoErrors(result);
         Assert.Contains(
-            "private static readonly global::NbtSharp.NbtConverter<global::Item> __staticConverter1",
+            "global::System.Lazy<global::NbtSharp.NbtConverter<global::Item>> __staticConverter1",
             result.GeneratedSource,
             StringComparison.Ordinal);
         Assert.Contains(
-            "options.TypeInfoResolver is global::TestContext",
+            "options.TypeInfoResolver?.GetType() == typeof(global::TestContext)",
             result.GeneratedSource,
             StringComparison.Ordinal);
         Assert.Contains(
-            "ReadValueWithConverter<global::Item>(ref reader, global::TestContext.__staticConverter1",
+            "ReadValueWithConverter<global::Item>(ref reader, " +
+            "global::TestContext.__staticConverter1.Value",
             result.GeneratedSource,
             StringComparison.Ordinal);
         Assert.Contains(
-            "WriteMemberWithConverter(ref writer, \"Item\", ",
+            "WriteMemberWithConverter(ref writer, \"Item\", " +
+            "value.Item, global::TestContext.__staticConverter1.Value",
             result.GeneratedSource,
             StringComparison.Ordinal);
     }

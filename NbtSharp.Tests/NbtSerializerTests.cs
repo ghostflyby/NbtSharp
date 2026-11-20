@@ -315,7 +315,7 @@ public sealed class NbtSerializerTests
             typeof(Dictionary<string, int>),
             typeof(HashSet<int>),
         };
-        var expected = types.Select(options.GetConverter).ToArray();
+        var firstObserved = new NbtConverter?[types.Length];
         var mismatch = 0;
 
         Parallel.For(
@@ -325,13 +325,82 @@ public sealed class NbtSerializerTests
             index =>
             {
                 var typeIndex = index % types.Length;
-                if (!ReferenceEquals(expected[typeIndex], options.GetConverter(types[typeIndex])))
+                var converter = options.GetConverter(types[typeIndex]);
+                var observed = Interlocked.CompareExchange(
+                    ref firstObserved[typeIndex],
+                    converter,
+                    null);
+                if (observed is not null && !ReferenceEquals(observed, converter))
                 {
                     Interlocked.Increment(ref mismatch);
                 }
             });
 
         Assert.Equal(0, mismatch);
+        Assert.All(firstObserved, static converter => Assert.NotNull(converter));
+    }
+
+    [Fact]
+    public void ConverterCacheCreatesEachTypeOnceUnderConcurrentColdStart()
+    {
+        var options = new NbtSerializerOptions();
+        var factory = new CountingCacheProbeFactory();
+        options.Converters.Add(factory);
+        var firstObserved = new NbtConverter?[1];
+        var mismatch = 0;
+
+        Parallel.For(
+            0,
+            20_000,
+            new ParallelOptions { CancellationToken = TestContext.Current.CancellationToken },
+            _ =>
+            {
+                var converter = options.GetConverter(typeof(CacheProbe));
+                var observed = Interlocked.CompareExchange(
+                    ref firstObserved[0],
+                    converter,
+                    null);
+                if (observed is not null && !ReferenceEquals(observed, converter))
+                {
+                    Interlocked.Increment(ref mismatch);
+                }
+            });
+
+        Assert.Equal(0, mismatch);
+        Assert.Equal(1, factory.CreateCount);
+    }
+
+    private sealed class CacheProbe
+    {
+    }
+
+    private sealed class CacheProbeConverter : NbtConverter<CacheProbe>
+    {
+        public override CacheProbe Read(ref NbtReader reader, NbtSerializerOptions options) => new();
+
+        public override void Write(
+            ref NbtWriter writer,
+            CacheProbe value,
+            NbtSerializerOptions options)
+        {
+        }
+    }
+
+    private sealed class CountingCacheProbeFactory : NbtConverterFactory
+    {
+        private int _createCount;
+
+        public int CreateCount => _createCount;
+
+        public override bool CanConvert(Type typeToConvert) => typeToConvert == typeof(CacheProbe);
+
+        public override NbtConverter CreateConverter(
+            Type typeToConvert,
+            NbtSerializerOptions options)
+        {
+            Interlocked.Increment(ref _createCount);
+            return new CacheProbeConverter();
+        }
     }
 
     private static NbtRoot RoundTrip(NbtRoot root, NbtSerializerOptions? options = null)
