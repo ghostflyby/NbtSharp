@@ -135,6 +135,10 @@ NbtSharp.NbtWriterOptions.NbtWriterOptions() -> void
 NbtSharp.NbtWriterOptions.RootFormat.get -> NbtSharp.NbtRootFormat
 NbtSharp.NbtWriterOptions.RootFormat.init -> void
 override NbtSharp.NbtTypeInfo<T>.Converter.get -> NbtSharp.NbtConverter!
+NbtSharp.NbtTypeInfoResolverChain
+NbtSharp.NbtTypeInfoResolverChain.GetTypeInfo(System.Type! type, NbtSharp.NbtSerializerOptions! options) -> NbtSharp.NbtTypeInfo?
+NbtSharp.NbtTypeInfoResolverChain.NbtTypeInfoResolverChain(params NbtSharp.INbtTypeInfoResolver![]! resolvers) -> void
+NbtSharp.NbtTypeInfoResolverChain.Resolvers.get -> System.Collections.Generic.IReadOnlyList<NbtSharp.INbtTypeInfoResolver!>!
 override sealed NbtSharp.NbtConverter<T>.CanConvert(System.Type! typeToConvert) -> bool
 static NbtSharp.NbtEndList.Instance.get -> NbtSharp.NbtEndList!
 NbtSharp.NbtException
