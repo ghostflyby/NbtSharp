@@ -410,6 +410,14 @@ non-cancellation failure and leaves the stream open. `SerializeDocumentAsync(Str
 NbtRoot, options, ...)` preserves `NbtRoot.Name`; the generic async overloads use `rootName`, like the
 generic synchronous overloads. The writer does not roll back partial output if a converter throws.
 
+## Documentation
+
+- [Source generation and Native AOT](docs/source-generation.md)
+- [Migrating from reflection](docs/migration.md)
+- [Diagnostics](docs/diagnostics.md)
+- [Performance characteristics](docs/performance.md)
+- [Roadmap](docs/roadmap.md)
+
 ## Build and test
 
 ```bash

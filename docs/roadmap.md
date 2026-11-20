@@ -216,18 +216,16 @@ deterministic random/mutation/truncation corpora for the reader, and a single ge
 
 ### 15. Benchmarks and regression gates
 
-- Add a BenchmarkDotNet project to the repository.
-- Keep stable benchmarks for mixed scalar/string DTOs, numeric DTOs, list-heavy DTOs, enums, and
-  large contexts.
-- Run comparisons against a baseline in CI or a scheduled job.
+- A BenchmarkDotNet project covers scalar, nullable-scalar, array, collection-shape, enum, and mixed
+  DTOs, plus cold/warm generator incrementality at 100 and 300 contexts.
+- A before/after comparison gate in CI or a scheduled job is still missing. Threshold-based gates
+  need a stable runner and a chosen noise margin.
 
 ### 16. Documentation
 
-- Source-generation and Native AOT guide.
-- Reflection-to-source-generation migration guide.
-- Required/null/constructor semantics and `[SetsRequiredMembers]` behavior.
-- Complete `NBTSG` diagnostic reference.
-- Performance characteristics and allocation notes.
+**Status (2026-11-20): implemented.** Documentation now includes a source-generation and Native AOT
+guide, a reflection-to-source-generation migration guide, required/null/constructor semantics, a
+complete `NBTSG` diagnostic reference, and performance/allocation notes under `docs/`.
 
 ## Suggested sequencing
 

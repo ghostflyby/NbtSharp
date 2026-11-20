@@ -18,6 +18,8 @@ public class SerializationBenchmarks
     private byte[] _collectionShapeData = null!;
     private MixedDto _mixed = null!;
     private byte[] _mixedData = null!;
+    private EnumDto _enums = null!;
+    private byte[] _enumData = null!;
 
     [GlobalSetup]
     public void Setup()
@@ -115,6 +117,20 @@ public class SerializationBenchmarks
             _mixed,
             SerializationContext.Default.MixedDto,
             "root");
+
+        _enums = new EnumDto
+        {
+            Status = BenchmarkStatus.Active,
+            OptionalStatus = BenchmarkStatus.Disabled,
+            Flags = BenchmarkFlags.Read | BenchmarkFlags.Write,
+            Values = [BenchmarkStatus.Active, BenchmarkStatus.Disabled, (BenchmarkStatus)99],
+            Map = new Dictionary<string, BenchmarkStatus>
+            {
+                ["active"] = BenchmarkStatus.Active,
+                ["undefined"] = (BenchmarkStatus)99,
+            },
+        };
+        _enumData = NbtSerializer.Serialize(_enums, SerializationContext.Default.EnumDto, "root");
     }
 
     [Benchmark(Baseline = true)]
@@ -143,6 +159,14 @@ public class SerializationBenchmarks
     [Benchmark]
     public MixedDto MixedDeserialize() =>
         NbtSerializer.Deserialize(_mixedData, SerializationContext.Default.MixedDto);
+
+    [Benchmark]
+    public byte[] EnumSerialize() =>
+        NbtSerializer.Serialize(_enums, SerializationContext.Default.EnumDto, "root");
+
+    [Benchmark]
+    public EnumDto EnumDeserialize() =>
+        NbtSerializer.Deserialize(_enumData, SerializationContext.Default.EnumDto);
 
     [Benchmark]
     public byte[] ArraySerialize() =>
@@ -178,6 +202,7 @@ public class SerializationBenchmarks
 [NbtSerializable(typeof(ArrayAllocationDto))]
 [NbtSerializable(typeof(CollectionShapeDto))]
 [NbtSerializable(typeof(MixedDto))]
+[NbtSerializable(typeof(EnumDto))]
 internal partial class SerializationContext : NbtSerializerContext
 {
 }
@@ -304,4 +329,32 @@ public sealed class MixedDto
     public List<ArrayItem> Items { get; set; } = [];
 
     public Dictionary<string, int> Map { get; set; } = [];
+}
+
+[Flags]
+public enum BenchmarkFlags : short
+{
+    None = 0,
+    Read = 1,
+    Write = 2,
+    Delete = 4,
+}
+
+public enum BenchmarkStatus : byte
+{
+    Active = 1,
+    Disabled = 2,
+}
+
+public sealed class EnumDto
+{
+    public BenchmarkStatus Status { get; set; }
+
+    public BenchmarkStatus? OptionalStatus { get; set; }
+
+    public BenchmarkFlags Flags { get; set; }
+
+    public List<BenchmarkStatus> Values { get; set; } = [];
+
+    public Dictionary<string, BenchmarkStatus> Map { get; set; } = [];
 }
