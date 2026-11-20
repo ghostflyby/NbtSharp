@@ -16,8 +16,10 @@ namespace NbtSharp;
 /// </para>
 /// <para>
 /// Synchronous deserialization reads a span, a sequence of spans, or a stream through a fixed-size
-/// buffer. Asynchronous deserialization reads through a <see cref="PipeReader"/>. Serialization
-/// into a <see cref="Stream"/> is backed by <see cref="PipeWriter"/>. Documents are consumed and
+/// buffer. Asynchronous deserialization reads through a <see cref="PipeReader"/>; asynchronous
+/// serialization writes into a <see cref="Stream"/> or <see cref="PipeWriter"/> and flushes
+/// asynchronously. Serialization into a <see cref="Stream"/> is backed by <see cref="PipeWriter"/>.
+/// Documents are consumed and
 /// produced incrementally, so a stream does not need to be seekable. Trailing bytes after the root
 /// value are ignored; a stream-backed source may read some of them into its buffer.
 /// </para>
@@ -157,7 +159,12 @@ public static class NbtSerializer
         ArgumentNullException.ThrowIfNull(destination);
         cancellationToken.ThrowIfCancellationRequested();
         Serialize(destination, value, rootName, options);
-        await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
+        var flushResult = await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
+        if (flushResult.IsCompleted)
+        {
+            throw new InvalidOperationException(
+                "The pipe reader has completed; the document could not be delivered.");
+        }
     }
 
     /// <summary>Serializes <paramref name="value"/> into a stream asynchronously.</summary>
@@ -190,6 +197,10 @@ public static class NbtSerializer
         {
             Serialize(pipeWriter, value, rootName, options);
             await pipeWriter.FlushAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -231,7 +242,12 @@ public static class NbtSerializer
         ArgumentNullException.ThrowIfNull(typeInfo);
         cancellationToken.ThrowIfCancellationRequested();
         Serialize(destination, value, typeInfo, rootName);
-        await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
+        var flushResult = await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
+        if (flushResult.IsCompleted)
+        {
+            throw new InvalidOperationException(
+                "The pipe reader has completed; the document could not be delivered.");
+        }
     }
 
     /// <summary>Serializes a value into a stream asynchronously using explicit type information.</summary>
@@ -264,6 +280,10 @@ public static class NbtSerializer
             Serialize(pipeWriter, value, typeInfo, rootName);
             await pipeWriter.FlushAsync(cancellationToken).ConfigureAwait(false);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             try
@@ -279,6 +299,63 @@ public static class NbtSerializer
         }
 
         await pipeWriter.CompleteAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>Writes a complete DOM document to a pipe writer asynchronously.</summary>
+    /// <param name="destination">The pipe writer that receives the document.</param>
+    /// <param name="root">The document, including its root name.</param>
+    /// <param name="options">The serializer options, or the defaults.</param>
+    /// <param name="cancellationToken">The token used to cancel the flush.</param>
+    /// <returns>A task that completes when the document has been flushed.</returns>
+    /// <remarks>
+    /// The caller owns <paramref name="destination"/>; this method flushes but does not complete it.
+    /// </remarks>
+    [UnconditionalSuppressMessage("Aot", "IL2026", Justification = "DOM values resolve to built-in converters.")]
+    [UnconditionalSuppressMessage("Aot", "IL3050", Justification = "DOM values resolve to built-in converters.")]
+    public static async Task SerializeDocumentAsync(
+        PipeWriter destination,
+        NbtRoot root,
+        NbtSerializerOptions? options,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+        options ??= new NbtSerializerOptions();
+        ValidateRoot(root, options);
+        await SerializeAsync(
+            destination,
+            root.Value,
+            root.Name ?? string.Empty,
+            options,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Writes a complete DOM document to a stream asynchronously.</summary>
+    /// <param name="destination">The stream that receives the document.</param>
+    /// <param name="root">The document, including its root name.</param>
+    /// <param name="options">The serializer options, or the defaults.</param>
+    /// <param name="cancellationToken">The token used to cancel the flush.</param>
+    /// <returns>A task that completes when the document has been flushed.</returns>
+    /// <remarks>
+    /// The document is written through a <see cref="PipeWriter"/> over the stream; the stream stays
+    /// open.
+    /// </remarks>
+    [UnconditionalSuppressMessage("Aot", "IL2026", Justification = "DOM values resolve to built-in converters.")]
+    [UnconditionalSuppressMessage("Aot", "IL3050", Justification = "DOM values resolve to built-in converters.")]
+    public static async Task SerializeDocumentAsync(
+        Stream destination,
+        NbtRoot root,
+        NbtSerializerOptions? options,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+        options ??= new NbtSerializerOptions();
+        ValidateRoot(root, options);
+        await SerializeAsync(
+            destination,
+            root.Value,
+            root.Name ?? string.Empty,
+            options,
+            cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Deserializes a complete NBT document from a span.</summary>

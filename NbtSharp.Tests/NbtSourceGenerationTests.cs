@@ -1290,6 +1290,29 @@ public sealed class NbtSourceGenerationTests
     }
 
     [Fact]
+    public async Task SerializeAsyncTypeInfoRoundTripsAPipeWriter()
+    {
+        var context = SourceGenerationContext.Default;
+        var value = new SourceGenItem { Id = "pipe", Count = 4 };
+        var pipe = new Pipe();
+
+        await NbtSerializer.SerializeAsync(
+            pipe.Writer,
+            value,
+            context.SourceGenItem,
+            cancellationToken: TestContext.Current.CancellationToken);
+        var read = await pipe.Reader.ReadAsync(TestContext.Current.CancellationToken);
+        var data = read.Buffer.ToArray();
+        pipe.Reader.AdvanceTo(read.Buffer.End);
+        await pipe.Writer.CompleteAsync();
+        await pipe.Reader.CompleteAsync();
+        var copy = NbtSerializer.Deserialize(data, context.SourceGenItem);
+
+        Assert.Equal("pipe", copy.Id);
+        Assert.Equal(4, copy.Count);
+    }
+
+    [Fact]
     public void StaticConverterFieldsAreLazy()
     {
         var context = SourceGenerationContext.Default;

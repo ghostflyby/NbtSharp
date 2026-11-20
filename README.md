@@ -362,7 +362,7 @@ analyzers. Generated converters suppress AOT/trim diagnostics only when every me
 generated graph or by an explicit typed converter; runtime and factory-based `[NbtUseConverter]`
 members remain analyzer-visible.
 
-The `Stream` overloads are synchronous. `Serialize(Stream)` flushes the document when serialization
+The synchronous `Serialize`/`Deserialize` Stream overloads are used without `Async`. `Serialize(Stream)` flushes the document when serialization
 completes and leaves the stream open; `Deserialize(Stream)` reads the stream through a fixed-size
 buffer, so non-seekable streams are supported. A stream is treated as one document: trailing bytes
 after the root value are ignored, and the stream may have been read ahead. `DeserializeAsync` is

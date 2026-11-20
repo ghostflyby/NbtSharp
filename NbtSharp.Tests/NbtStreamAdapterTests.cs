@@ -99,33 +99,91 @@ public sealed class NbtStreamAdapterTests
         using var stream = new MemoryStream();
         var value = new NbtRoot("root", 42);
 
-        await NbtSerializer.SerializeAsync(
+        await NbtSerializer.SerializeDocumentAsync(
             stream,
             value,
+            options: null,
             cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(stream.CanWrite);
         stream.Position = 0;
         var actual = NbtSerializer.Deserialize(stream);
+        Assert.Equal("root", actual.Name);
         Assert.Equal(42, actual.Value.Value is int stored ? stored : 0);
     }
 
     [Fact]
-    public async Task SerializeAsyncRoundTripsAPipeWriter()
+    public async Task SerializeAsyncRoundTripsAPipeWriterWithoutCompletingIt()
     {
-        using var stream = new MemoryStream();
-        var pipe = PipeWriter.Create(stream, new StreamPipeWriterOptions(leaveOpen: true));
+        var pipe = new Pipe();
         var value = new NbtRoot("root", 43);
 
-        await NbtSerializer.SerializeAsync(
-            pipe,
+        await NbtSerializer.SerializeDocumentAsync(
+            pipe.Writer,
             value,
+            options: null,
             cancellationToken: TestContext.Current.CancellationToken);
-        await pipe.CompleteAsync();
+        var read = await pipe.Reader.ReadAsync(TestContext.Current.CancellationToken);
+        var data = read.Buffer.ToArray();
+        pipe.Reader.AdvanceTo(read.Buffer.End);
+        await pipe.Writer.CompleteAsync();
+        await pipe.Reader.CompleteAsync();
 
-        Assert.True(stream.CanWrite);
-        var actual = NbtSerializer.Deserialize(stream.ToArray());
+        var actual = NbtSerializer.Deserialize(data);
+        Assert.Equal("root", actual.Name);
         Assert.Equal(43, actual.Value.Value is int stored ? stored : 0);
+    }
+
+    [Fact]
+    public async Task SerializeAsyncValidatesTheRootFormatBeforeWriting()
+    {
+        using var stream = new MemoryStream();
+        var options = new NbtSerializerOptions { RootFormat = NbtRootFormat.Unnamed };
+
+        await Assert.ThrowsAsync<NbtException>(() =>
+            NbtSerializer.SerializeDocumentAsync(
+                stream,
+                new NbtRoot("root", 1),
+                options,
+                TestContext.Current.CancellationToken));
+
+        Assert.Equal(0, stream.Length);
+    }
+
+    [Fact]
+    public async Task SerializeAsyncDoesNotFlushAfterMidWriteCancellation()
+    {
+        using var stream = new MemoryStream();
+        using var cancellation = new CancellationTokenSource();
+        var options = new NbtSerializerOptions();
+        options.Converters.Add(new CancelingIntConverter(cancellation));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            NbtSerializer.SerializeAsync(
+                stream,
+                1,
+                options: options,
+                cancellationToken: cancellation.Token));
+
+        Assert.Equal(0, stream.Length);
+        Assert.True(stream.CanWrite);
+    }
+
+    [Fact]
+    public async Task SerializeAsyncHonorsACanceledPipeToken()
+    {
+        var pipe = new Pipe();
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            NbtSerializer.SerializeAsync(
+                pipe.Writer,
+                new NbtRoot("root", 1),
+                cancellationToken: cancellation.Token));
+
+        await pipe.Writer.CompleteAsync();
+        await pipe.Reader.CompleteAsync();
     }
 
     [Fact]
@@ -553,6 +611,30 @@ public sealed class NbtStreamAdapterTests
         }
 
         throw new XunitException($"Expected {typeof(TException).Name} but nothing was thrown.");
+    }
+
+    private sealed class CancelingIntConverter(CancellationTokenSource cancellation)
+        : NbtConverter<int>
+    {
+        public override int Read(ref NbtReader reader, NbtSerializerOptions options) => 0;
+
+        public override void Write(
+            ref NbtWriter writer,
+            int value,
+            NbtSerializerOptions options)
+        {
+            writer.WriteInt32(value);
+            cancellation.Cancel();
+        }
+
+        public override bool TryGetTagType(
+            int value,
+            NbtSerializerOptions options,
+            out NbtTagType tagType)
+        {
+            tagType = NbtTagType.Int;
+            return true;
+        }
     }
 
     private sealed class KnownMemberDto
