@@ -11,7 +11,7 @@ namespace NbtSharp.SourceGeneration;
 /// </summary>
 internal static class ReachableFingerprint
 {
-    private const string FormatVersion = "reachable-fingerprint-v9";
+    private const string FormatVersion = "reachable-fingerprint-v10";
     private const string UseConverterAttribute = "NbtSharp.NbtUseConverterAttribute";
     private const string CollectionBuilderAttributeName =
         "System.Runtime.CompilerServices.CollectionBuilderAttribute";

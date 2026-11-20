@@ -1271,6 +1271,76 @@ public sealed class NbtSourceGenerationTests
     }
 
     [Fact]
+    public void StaticConverterFieldsAreLazy()
+    {
+        var context = SourceGenerationContext.Default;
+        var value = new SourceGenItem { Id = "ok", Count = 1 };
+
+        var data = NbtSerializer.Serialize(value, context.SourceGenItem, "root");
+        var copy = NbtSerializer.Deserialize(data, context.SourceGenItem);
+
+        Assert.Equal("ok", copy.Id);
+        Assert.Equal(1, copy.Count);
+    }
+
+    [Fact]
+    public void DerivedContextResolverOverridesStaticMemberFastPath()
+    {
+        var context = new DerivedSourceGenerationContext();
+        var value = new SourceGenWrapper<SourceGenItem>
+        {
+            Value = new SourceGenItem { Id = "ignored", Count = 1 },
+        };
+
+        var data = NbtSerializer.Serialize(
+            value,
+            context.SourceGenWrapperOfSourceGenItem,
+            "root");
+        var copy = NbtSerializer.Deserialize(data, context.SourceGenWrapperOfSourceGenItem);
+
+        Assert.Equal("custom", copy.Value.Id);
+        Assert.Equal(999, copy.Value.Count);
+    }
+
+    [Fact]
+    public void StaticMemberConvertersHandleRecursiveTypes()
+    {
+        var context = SourceGenerationContext.Default;
+        var value = new SourceGenNode
+        {
+            Value = 1,
+            Next = new SourceGenNode { Value = 2 },
+        };
+
+        var data = NbtSerializer.Serialize(value, context.SourceGenNode, "root");
+        var copy = NbtSerializer.Deserialize(data, context.SourceGenNode);
+
+        Assert.Equal(1, copy.Value);
+        Assert.Equal(2, copy.Next?.Value);
+    }
+
+    [Fact]
+    public void CustomConvertersOverrideGeneratedMemberFastPath()
+    {
+        var options = new NbtSerializerOptions();
+        options.Converters.Add(new CustomItemConverter());
+        var context = new SourceGenerationContext(options);
+        var value = new SourceGenWrapper<SourceGenItem>
+        {
+            Value = new SourceGenItem { Id = "ignored", Count = 1 },
+        };
+
+        var data = NbtSerializer.Serialize(
+            value,
+            context.SourceGenWrapperOfSourceGenItem,
+            "root");
+        var copy = NbtSerializer.Deserialize(data, context.SourceGenWrapperOfSourceGenItem);
+
+        Assert.Equal("custom", copy.Value.Id);
+        Assert.Equal(999, copy.Value.Count);
+    }
+
+    [Fact]
     public void RejectsDuplicateMembersWithGeneratedConverters()
     {
         var context = new SourceGenerationContext(new NbtSerializerOptions
@@ -1327,6 +1397,8 @@ public sealed class NbtSourceGenerationTests
 [NbtSerializable(typeof(SourceGenOptionalDefaults))]
 [NbtSerializable(typeof(SourceGenSmallOptionalDefaults))]
 [NbtSerializable(typeof(SourceGenUnsignedScalars))]
+[NbtSerializable(typeof(SourceGenNode))]
+[NbtSerializable(typeof(ThrowingConverterHolder))]
 [NbtSerializable(typeof(SourceGenMappedOverrideDerived))]
 [NbtSerializable(typeof(SourceGenMappedGenericOverrideDerived))]
 [NbtSerializable(typeof(SourceGenSetsRequired))]
@@ -1832,6 +1904,36 @@ internal sealed class SourceGenOptionalDefaults
     public decimal Amount { get; }
 }
 
+internal sealed class SourceGenNode
+{
+    public int Value { get; set; }
+
+    public SourceGenNode? Next { get; set; }
+}
+
+internal sealed class ThrowingConverterHolder
+{
+    public ThrowingConverterDto Value { get; set; } = new();
+}
+
+internal sealed class ThrowingConverterDto
+{
+    [NbtUseConverter(typeof(ThrowingConverter))]
+    public int Value { get; set; }
+}
+
+internal sealed class ThrowingConverter : NbtConverter<int>
+{
+    public ThrowingConverter() =>
+        throw new InvalidOperationException("The converter must be constructed lazily.");
+
+    public override int Read(ref NbtReader reader, NbtSerializerOptions options) => 0;
+
+    public override void Write(ref NbtWriter writer, int value, NbtSerializerOptions options)
+    {
+    }
+}
+
 internal sealed class SourceGenUnsignedScalars
 {
     public ushort UShort { get; set; }
@@ -2046,6 +2148,14 @@ internal struct SourceGenStruct
 
     [NbtInclude]
     public int Z;
+}
+
+internal sealed class DerivedSourceGenerationContext : SourceGenerationContext
+{
+    public override NbtTypeInfo? GetTypeInfo(Type type, NbtSerializerOptions options) =>
+        type == typeof(SourceGenItem)
+            ? new NbtTypeInfo<SourceGenItem>(new CustomItemConverter())
+            : base.GetTypeInfo(type, options);
 }
 
 internal sealed class CustomItemConverter : NbtConverter<SourceGenItem>

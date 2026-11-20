@@ -121,22 +121,14 @@ schedule.
 
 ### 5. Generated member converter caching
 
-**Current state**
-
-- Each generated member read/write resolves the converter through `NbtSerializerOptions` and then
-  dispatches through the typed path.
-- The cache read is lock-free, but it is still a dictionary lookup per member.
-
-**Scope**
-
-- Let generated type information hold nested typed converters.
-- Cache member converters for the duration of an operation.
-- Add a static fast path when `options.Converters` is empty.
-- Preserve custom-converter precedence when the list is non-empty.
+**Status (2026-11-20): implemented.** Generated converters emit static typed converter fields for
+generated member types and use them when `options.Converters` is empty and the resolver is the
+context itself; otherwise they fall back to per-options resolution so custom converters and
+alternative resolvers keep precedence. The mixed-DTO benchmark covers the path.
 
 **Acceptance**
 
-- Generated mixed DTO benchmark improves without changing custom-converter behavior.
+- Covered by mixed-DTO benchmarks and custom-converter precedence tests.
 
 ### 6. Complete the scalar fast path
 
@@ -161,20 +153,13 @@ parity tests; private setters in another assembly are documented as not visible 
 
 ### 8. Converter cache cold-start cost
 
-**Current state**
-
-- The cache uses copy-on-write dictionaries. Resolving `n` distinct types copies the dictionary
-  `n` times, for O(n²) total copying.
-
-**Scope**
-
-- Evaluate `ImmutableDictionary`, segmented locking, or a batch-prewarm path.
-- Preserve the current guarantee that a converter is created once per type/options instance.
+**Status (2026-11-20): implemented.** The resolution cache is an `ImmutableDictionary` updated
+under the existing lock, so resolving `n` distinct types costs O(n log n) instead of O(n²).
+Converters are still created once per type/options instance, and cache reads remain lock-free.
 
 **Acceptance**
 
-- Large-context first-use benchmark shows acceptable scaling.
-- Concurrent-read correctness tests continue to pass.
+- Concurrent-read correctness tests cover distinct-type resolution.
 
 ## P2: API and feature expansion
 

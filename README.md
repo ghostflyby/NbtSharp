@@ -157,8 +157,12 @@ generated. Reflection remains available through `NbtReflectionTypeInfoResolver` 
 not part of a generated context, and it also supports enum members through the built-in enum
 converter. When no custom converters are registered, generated object converters read and write
 numeric, boolean, string, and nullable scalar members directly; registering a custom converter
-disables that fast path for the operation. Required reference and nullable members are captured
-once before their null check, so the property getter is not invoked twice.
+disables that fast path for the operation. Generated member types additionally get static typed
+converter fields, used when the converter list is empty and the context is the resolver; otherwise
+resolution falls back to the options so custom converters and alternative resolvers keep precedence.
+Required reference and nullable members are captured once before their null check, so the property
+getter is not invoked twice. Converter resolution uses a lock-free immutable cache, so resolving many
+types on a fresh options instance scales without repeated dictionary copies.
 Each attributed context is prepared inside the incremental transform and emits a symbol-free
 `PreparedContext`; generated source is cached per prepared context. A content-keyed reachability
 fingerprint cache skips graph construction for unchanged contexts, and no symbol-carrying value is

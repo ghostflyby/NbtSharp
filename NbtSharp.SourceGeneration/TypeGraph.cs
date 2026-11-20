@@ -31,6 +31,8 @@ internal sealed class TypeEntry
 
     public string ConverterName { get; set; } = "";
 
+    public string StaticConverterName { get; set; } = "";
+
     public string? BuilderName { get; set; }
 
     public string? PublicPropertyName { get; set; }

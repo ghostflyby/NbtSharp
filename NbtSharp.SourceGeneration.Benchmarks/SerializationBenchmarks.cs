@@ -16,6 +16,8 @@ public class SerializationBenchmarks
     private byte[] _allocationArrayData = null!;
     private CollectionShapeDto _collectionShapes = null!;
     private byte[] _collectionShapeData = null!;
+    private MixedDto _mixed = null!;
+    private byte[] _mixedData = null!;
 
     [GlobalSetup]
     public void Setup()
@@ -98,6 +100,21 @@ public class SerializationBenchmarks
             _collectionShapes,
             SerializationContext.Default.CollectionShapeDto,
             "root");
+
+        _mixed = new MixedDto
+        {
+            Name = "mixed",
+            Scalars = _scalars,
+            Item = new ArrayItem { Id = 1, Name = "first" },
+            Items = Enumerable.Range(0, 16)
+                .Select(static index => new ArrayItem { Id = index, Name = "item" + index })
+                .ToList(),
+            Map = new Dictionary<string, int> { ["a"] = 1, ["b"] = 2 },
+        };
+        _mixedData = NbtSerializer.Serialize(
+            _mixed,
+            SerializationContext.Default.MixedDto,
+            "root");
     }
 
     [Benchmark(Baseline = true)]
@@ -118,6 +135,14 @@ public class SerializationBenchmarks
     [Benchmark]
     public NullableScalarDto NullableScalarDeserialize() =>
         NbtSerializer.Deserialize(_nullableScalarData, SerializationContext.Default.NullableScalarDto);
+
+    [Benchmark]
+    public byte[] MixedSerialize() =>
+        NbtSerializer.Serialize(_mixed, SerializationContext.Default.MixedDto, "root");
+
+    [Benchmark]
+    public MixedDto MixedDeserialize() =>
+        NbtSerializer.Deserialize(_mixedData, SerializationContext.Default.MixedDto);
 
     [Benchmark]
     public byte[] ArraySerialize() =>
@@ -152,6 +177,7 @@ public class SerializationBenchmarks
 [NbtSerializable(typeof(ArrayDto))]
 [NbtSerializable(typeof(ArrayAllocationDto))]
 [NbtSerializable(typeof(CollectionShapeDto))]
+[NbtSerializable(typeof(MixedDto))]
 internal partial class SerializationContext : NbtSerializerContext
 {
 }
@@ -265,4 +291,17 @@ public sealed class CollectionShapeDto
     public ImmutableList<int> ImmutableList { get; set; } = ImmutableList<int>.Empty;
 
     public IReadOnlyList<int> ListInterface { get; set; } = [];
+}
+
+public sealed class MixedDto
+{
+    public string Name { get; set; } = "";
+
+    public ScalarDto Scalars { get; set; } = new();
+
+    public ArrayItem Item { get; set; } = new();
+
+    public List<ArrayItem> Items { get; set; } = [];
+
+    public Dictionary<string, int> Map { get; set; } = [];
 }
