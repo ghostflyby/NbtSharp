@@ -362,14 +362,21 @@ analyzers. Generated converters suppress AOT/trim diagnostics only when every me
 generated graph or by an explicit typed converter; runtime and factory-based `[NbtUseConverter]`
 members remain analyzer-visible.
 
-The `Stream` overloads are synchronous. `Serialize(Stream)` flushes the document when serialization
-completes and leaves the stream open; `Deserialize(Stream)` reads the stream through a fixed-size
-buffer, so non-seekable streams are supported. A stream is treated as one document: trailing bytes
-after the root value are ignored, and the stream may have been read ahead. `DeserializeAsync` is
-available for `Stream`, `ReadOnlySequence<byte>`, and `PipeReader`; it consumes one document
-asynchronously through a `PipeReader`. The `PipeReader` and `ReadOnlySequence<byte>` overloads leave
-bytes after the root available to the caller, while the `Stream` overload may read ahead and discard
-them. The writer does not roll back partial output if a converter throws.
+Synchronous `Serialize(Stream)` flushes the document when serialization completes and leaves the
+stream open; `Deserialize(Stream)` reads the stream through a fixed-size buffer, so non-seekable
+streams are supported. A stream is treated as one document: trailing bytes after the root value are
+ignored, and the stream may have been read ahead. `DeserializeAsync` is available for `Stream`,
+`ReadOnlySequence<byte>`, and `PipeReader`; it consumes one document asynchronously through a
+`PipeReader`. The `PipeReader` and `ReadOnlySequence<byte>` overloads leave bytes after the root
+available to the caller, while the `Stream` overload may read ahead and discard them.
+
+`SerializeAsync` is available for `Stream` and `PipeWriter`, with and without type information.
+Writing is synchronous and the cancellation token is observed by the asynchronous flush; after a
+cancellation, the stream wrapper does not flush its buffered output. The caller owns a `PipeWriter`
+and must complete it; the `Stream` overload completes only its internal pipe after a successful or
+non-cancellation failure and leaves the stream open. `SerializeDocumentAsync(Stream/PipeWriter,
+NbtRoot, options, ...)` preserves `NbtRoot.Name`; the generic async overloads use `rootName`, like the
+generic synchronous overloads. The writer does not roll back partial output if a converter throws.
 
 ## Build and test
 

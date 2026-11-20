@@ -16,8 +16,10 @@ namespace NbtSharp;
 /// </para>
 /// <para>
 /// Synchronous deserialization reads a span, a sequence of spans, or a stream through a fixed-size
-/// buffer. Asynchronous deserialization reads through a <see cref="PipeReader"/>. Serialization
-/// into a <see cref="Stream"/> is backed by <see cref="PipeWriter"/>. Documents are consumed and
+/// buffer. Asynchronous deserialization reads through a <see cref="PipeReader"/>; asynchronous
+/// serialization writes into a <see cref="Stream"/> or <see cref="PipeWriter"/> and flushes
+/// asynchronously. Serialization into a <see cref="Stream"/> is backed by <see cref="PipeWriter"/>.
+/// Documents are consumed and
 /// produced incrementally, so a stream does not need to be seekable. Trailing bytes after the root
 /// value are ignored; a stream-backed source may read some of them into its buffer.
 /// </para>
@@ -131,6 +133,231 @@ public static class NbtSerializer
         }
 
         pipeWriter.Complete();
+    }
+
+    /// <summary>Serializes <paramref name="value"/> into a pipe writer asynchronously.</summary>
+    /// <typeparam name="T">The declared value type.</typeparam>
+    /// <param name="destination">The pipe writer that receives the document.</param>
+    /// <param name="value">The value to serialize.</param>
+    /// <param name="rootName">The root tag name. Empty is valid.</param>
+    /// <param name="options">The serializer options, or the defaults.</param>
+    /// <param name="cancellationToken">The token used to cancel the flush.</param>
+    /// <returns>A task that completes when the document has been flushed.</returns>
+    /// <remarks>
+    /// The caller owns <paramref name="destination"/>; this method flushes but does not complete it.
+    /// Writing is synchronous; only the flush observes cancellation. When <typeparamref name="T"/>
+    /// is <see cref="NbtRoot"/>, only the contained value is written and <paramref name="rootName"/>
+    /// is used; call <see cref="SerializeDocumentAsync(PipeWriter,NbtRoot,NbtSerializerOptions?,CancellationToken)"/>
+    /// to preserve <see cref="NbtRoot.Name"/>.
+    /// </remarks>
+    [RequiresUnreferencedCode("Converter resolution may use reflection or runtime generic construction.")]
+    [RequiresDynamicCode("Converter resolution may use runtime generic construction.")]
+    public static async Task SerializeAsync<T>(
+        PipeWriter destination,
+        T value,
+        string rootName = "",
+        NbtSerializerOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+        cancellationToken.ThrowIfCancellationRequested();
+        Serialize(destination, value, rootName, options);
+        await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Serializes <paramref name="value"/> into a stream asynchronously.</summary>
+    /// <typeparam name="T">The declared value type.</typeparam>
+    /// <param name="destination">The stream that receives the document.</param>
+    /// <param name="value">The value to serialize.</param>
+    /// <param name="rootName">The root tag name. Empty is valid.</param>
+    /// <param name="options">The serializer options, or the defaults.</param>
+    /// <param name="cancellationToken">The token used to cancel the flush.</param>
+    /// <returns>A task that completes when the document has been flushed.</returns>
+    /// <remarks>
+    /// The document is written through a <see cref="PipeWriter"/> over the stream; the stream stays
+    /// open. Writing is synchronous; only the flush observes cancellation. When
+    /// <typeparamref name="T"/> is <see cref="NbtRoot"/>, only the contained value is written and
+    /// <paramref name="rootName"/> is used; call
+    /// <see cref="SerializeDocumentAsync(Stream,NbtRoot,NbtSerializerOptions?,CancellationToken)"/>
+    /// to preserve <see cref="NbtRoot.Name"/>.
+    /// </remarks>
+    [RequiresUnreferencedCode("Converter resolution may use reflection or runtime generic construction.")]
+    [RequiresDynamicCode("Converter resolution may use runtime generic construction.")]
+    public static async Task SerializeAsync<T>(
+        Stream destination,
+        T value,
+        string rootName = "",
+        NbtSerializerOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+        cancellationToken.ThrowIfCancellationRequested();
+        var pipeWriter = PipeWriter.Create(
+            destination,
+            new StreamPipeWriterOptions(leaveOpen: true));
+        try
+        {
+            Serialize(pipeWriter, value, rootName, options);
+            await pipeWriter.FlushAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            try
+            {
+                await pipeWriter.CompleteAsync(ex).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Preserve the original serialization failure.
+            }
+
+            throw;
+        }
+
+        await pipeWriter.CompleteAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>Serializes a value into a pipe writer asynchronously using explicit type information.</summary>
+    /// <typeparam name="T">The declared value type.</typeparam>
+    /// <param name="destination">The pipe writer that receives the document.</param>
+    /// <param name="value">The value to serialize.</param>
+    /// <param name="typeInfo">The type information that supplies the root converter and options.</param>
+    /// <param name="rootName">The root tag name. Empty is valid.</param>
+    /// <param name="cancellationToken">The token used to cancel the flush.</param>
+    /// <returns>A task that completes when the document has been flushed.</returns>
+    /// <remarks>
+    /// The caller owns <paramref name="destination"/>; this method flushes but does not complete it.
+    /// Writing is synchronous; only the flush observes cancellation.
+    /// </remarks>
+    public static async Task SerializeAsync<T>(
+        PipeWriter destination,
+        T value,
+        NbtTypeInfo<T> typeInfo,
+        string rootName = "",
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+        ArgumentNullException.ThrowIfNull(typeInfo);
+        cancellationToken.ThrowIfCancellationRequested();
+        Serialize(destination, value, typeInfo, rootName);
+        await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Serializes a value into a stream asynchronously using explicit type information.</summary>
+    /// <typeparam name="T">The declared value type.</typeparam>
+    /// <param name="destination">The stream that receives the document.</param>
+    /// <param name="value">The value to serialize.</param>
+    /// <param name="typeInfo">The type information that supplies the root converter and options.</param>
+    /// <param name="rootName">The root tag name. Empty is valid.</param>
+    /// <param name="cancellationToken">The token used to cancel the flush.</param>
+    /// <returns>A task that completes when the document has been flushed.</returns>
+    /// <remarks>
+    /// The document is written through a <see cref="PipeWriter"/> over the stream; the stream stays
+    /// open. Writing is synchronous; only the flush observes cancellation.
+    /// </remarks>
+    public static async Task SerializeAsync<T>(
+        Stream destination,
+        T value,
+        NbtTypeInfo<T> typeInfo,
+        string rootName = "",
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+        ArgumentNullException.ThrowIfNull(typeInfo);
+        cancellationToken.ThrowIfCancellationRequested();
+        var pipeWriter = PipeWriter.Create(
+            destination,
+            new StreamPipeWriterOptions(leaveOpen: true));
+        try
+        {
+            Serialize(pipeWriter, value, typeInfo, rootName);
+            await pipeWriter.FlushAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            try
+            {
+                await pipeWriter.CompleteAsync(ex).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Preserve the original serialization failure.
+            }
+
+            throw;
+        }
+
+        await pipeWriter.CompleteAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>Writes a complete DOM document to a pipe writer asynchronously.</summary>
+    /// <param name="destination">The pipe writer that receives the document.</param>
+    /// <param name="root">The document, including its root name.</param>
+    /// <param name="options">The serializer options, or the defaults.</param>
+    /// <param name="cancellationToken">The token used to cancel the flush.</param>
+    /// <returns>A task that completes when the document has been flushed.</returns>
+    /// <remarks>
+    /// The caller owns <paramref name="destination"/>; this method flushes but does not complete it.
+    /// Writing is synchronous; only the flush observes cancellation. <paramref name="root"/>'s
+    /// name is preserved.
+    /// </remarks>
+    [UnconditionalSuppressMessage("Aot", "IL2026", Justification = "DOM values resolve to built-in converters.")]
+    [UnconditionalSuppressMessage("Aot", "IL3050", Justification = "DOM values resolve to built-in converters.")]
+    public static async Task SerializeDocumentAsync(
+        PipeWriter destination,
+        NbtRoot root,
+        NbtSerializerOptions? options,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+        cancellationToken.ThrowIfCancellationRequested();
+        options ??= new NbtSerializerOptions();
+        ValidateRoot(root, options);
+        await SerializeAsync(
+            destination,
+            root.Value,
+            root.Name ?? string.Empty,
+            options,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Writes a complete DOM document to a stream asynchronously.</summary>
+    /// <param name="destination">The stream that receives the document.</param>
+    /// <param name="root">The document, including its root name.</param>
+    /// <param name="options">The serializer options, or the defaults.</param>
+    /// <param name="cancellationToken">The token used to cancel the flush.</param>
+    /// <returns>A task that completes when the document has been flushed.</returns>
+    /// <remarks>
+    /// The document is written through a <see cref="PipeWriter"/> over the stream; the stream stays
+    /// open. Writing is synchronous; only the flush observes cancellation. <paramref name="root"/>'s
+    /// name is preserved.
+    /// </remarks>
+    [UnconditionalSuppressMessage("Aot", "IL2026", Justification = "DOM values resolve to built-in converters.")]
+    [UnconditionalSuppressMessage("Aot", "IL3050", Justification = "DOM values resolve to built-in converters.")]
+    public static async Task SerializeDocumentAsync(
+        Stream destination,
+        NbtRoot root,
+        NbtSerializerOptions? options,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+        cancellationToken.ThrowIfCancellationRequested();
+        options ??= new NbtSerializerOptions();
+        ValidateRoot(root, options);
+        await SerializeAsync(
+            destination,
+            root.Value,
+            root.Name ?? string.Empty,
+            options,
+            cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Deserializes a complete NBT document from a span.</summary>

@@ -31,6 +31,32 @@ public sealed class GeneratedSerializationAotTests
     }
 
     [Fact]
+    public async Task RoundTripsSimpleDtoAsynchronously()
+    {
+        var value = new AotSimple
+        {
+            Name = "Steve",
+            Health = 20,
+            Enabled = true,
+            Kind = AotKind.Creeper,
+        };
+        using var stream = new MemoryStream();
+
+        await NbtSerializer.SerializeAsync(
+            stream,
+            value,
+            AotContext.Default.AotSimple,
+            cancellationToken: TestContext.Current.CancellationToken);
+        stream.Position = 0;
+        var copy = NbtSerializer.Deserialize(stream, AotContext.Default.AotSimple);
+
+        Assert.Equal(value.Name, copy.Name);
+        Assert.Equal(value.Health, copy.Health);
+        Assert.Equal(value.Enabled, copy.Enabled);
+        Assert.Equal(value.Kind, copy.Kind);
+    }
+
+    [Fact]
     public void RoundTripsRequiredAndInitMembers()
     {
         var value = new AotRequired

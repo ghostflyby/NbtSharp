@@ -1271,6 +1271,69 @@ public sealed class NbtSourceGenerationTests
     }
 
     [Fact]
+    public async Task SerializeAsyncTypeInfoRoundTrips()
+    {
+        var context = SourceGenerationContext.Default;
+        var value = new SourceGenItem { Id = "async", Count = 3 };
+        using var stream = new MemoryStream();
+
+        await NbtSerializer.SerializeAsync(
+            stream,
+            value,
+            context.SourceGenItem,
+            cancellationToken: TestContext.Current.CancellationToken);
+        stream.Position = 0;
+        var copy = NbtSerializer.Deserialize(stream, context.SourceGenItem);
+
+        Assert.Equal("async", copy.Id);
+        Assert.Equal(3, copy.Count);
+    }
+
+    [Fact]
+    public async Task SerializeAsyncTypeInfoRoundTripsAPipeWriter()
+    {
+        var context = SourceGenerationContext.Default;
+        var value = new SourceGenItem { Id = "pipe", Count = 4 };
+        var pipe = new Pipe();
+
+        await NbtSerializer.SerializeAsync(
+            pipe.Writer,
+            value,
+            context.SourceGenItem,
+            cancellationToken: TestContext.Current.CancellationToken);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(
+            TestContext.Current.CancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(5));
+        var read = await pipe.Reader.ReadAsync(timeout.Token);
+        var data = read.Buffer.ToArray();
+        pipe.Reader.AdvanceTo(read.Buffer.End);
+        await pipe.Writer.CompleteAsync();
+        await pipe.Reader.CompleteAsync();
+        var copy = NbtSerializer.Deserialize(data, context.SourceGenItem);
+
+        Assert.Equal("pipe", copy.Id);
+        Assert.Equal(4, copy.Count);
+    }
+
+    [Fact]
+    public async Task SerializeAsyncTypeInfoHonorsCancellation()
+    {
+        var context = SourceGenerationContext.Default;
+        using var stream = new MemoryStream();
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            NbtSerializer.SerializeAsync(
+                stream,
+                new SourceGenItem { Id = "canceled", Count = 1 },
+                context.SourceGenItem,
+                cancellationToken: cancellation.Token));
+
+        Assert.Equal(0, stream.Length);
+    }
+
+    [Fact]
     public void StaticConverterFieldsAreLazy()
     {
         var context = SourceGenerationContext.Default;

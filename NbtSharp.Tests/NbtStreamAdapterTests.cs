@@ -94,6 +94,154 @@ public sealed class NbtStreamAdapterTests
     }
 
     [Fact]
+    public async Task SerializeAsyncRoundTripsAStream()
+    {
+        using var stream = new MemoryStream();
+        var value = new NbtRoot("root", 42);
+
+        await NbtSerializer.SerializeDocumentAsync(
+            stream,
+            value,
+            options: null,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(stream.CanWrite);
+        stream.Position = 0;
+        var actual = NbtSerializer.Deserialize(stream);
+        Assert.Equal("root", actual.Name);
+        Assert.Equal(42, actual.Value.Value is int stored ? stored : 0);
+    }
+
+    [Fact]
+    public async Task SerializeAsyncRoundTripsAPipeWriterWithoutCompletingIt()
+    {
+        var pipe = new Pipe();
+        var value = new NbtRoot("root", 43);
+
+        await NbtSerializer.SerializeDocumentAsync(
+            pipe.Writer,
+            value,
+            options: null,
+            cancellationToken: TestContext.Current.CancellationToken);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(
+            TestContext.Current.CancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(5));
+        var read = await pipe.Reader.ReadAsync(timeout.Token);
+        var data = read.Buffer.ToArray();
+        pipe.Reader.AdvanceTo(read.Buffer.End);
+        await pipe.Writer.CompleteAsync();
+        await pipe.Reader.CompleteAsync();
+
+        var actual = NbtSerializer.Deserialize(data);
+        Assert.Equal("root", actual.Name);
+        Assert.Equal(43, actual.Value.Value is int stored ? stored : 0);
+    }
+
+    [Fact]
+    public async Task SerializeAsyncValidatesTheRootFormatBeforeWriting()
+    {
+        using var stream = new MemoryStream();
+        var options = new NbtSerializerOptions { RootFormat = NbtRootFormat.Unnamed };
+
+        await Assert.ThrowsAsync<NbtException>(() =>
+            NbtSerializer.SerializeDocumentAsync(
+                stream,
+                new NbtRoot("root", 1),
+                options,
+                TestContext.Current.CancellationToken));
+
+        Assert.Equal(0, stream.Length);
+    }
+
+    [Fact]
+    public async Task SerializeAsyncDoesNotFlushAfterMidWriteCancellation()
+    {
+        using var stream = new MemoryStream();
+        using var cancellation = new CancellationTokenSource();
+        var options = new NbtSerializerOptions();
+        options.Converters.Add(new CancelingIntConverter(cancellation));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            NbtSerializer.SerializeAsync(
+                stream,
+                1,
+                options: options,
+                cancellationToken: cancellation.Token));
+
+        Assert.Equal(0, stream.Length);
+        Assert.True(stream.CanWrite);
+    }
+
+    [Fact]
+    public async Task SerializeAsyncHonorsACanceledPipeToken()
+    {
+        var pipe = new Pipe();
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            NbtSerializer.SerializeAsync(
+                pipe.Writer,
+                new NbtRoot("root", 1),
+                cancellationToken: cancellation.Token));
+
+        Assert.False(pipe.Reader.TryRead(out _));
+        await pipe.Writer.CompleteAsync();
+        await pipe.Reader.CompleteAsync();
+    }
+
+    [Fact]
+    public async Task SerializeAsyncRejectsANamedRootInUnnamedFormat()
+    {
+        using var stream = new MemoryStream();
+        var options = new NbtSerializerOptions { RootFormat = NbtRootFormat.Unnamed };
+
+        await Assert.ThrowsAsync<NbtException>(() =>
+            NbtSerializer.SerializeAsync(
+                stream,
+                1,
+                rootName: "root",
+                options: options,
+                cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Equal(0, stream.Length);
+    }
+
+    [Fact]
+    public async Task SerializeAsyncPropagatesConverterFailure()
+    {
+        using var stream = new MemoryStream();
+        var options = new NbtSerializerOptions();
+        options.Converters.Add(new ThrowingIntConverter());
+
+        var exception = await Assert.ThrowsAsync<NbtException>(() =>
+            NbtSerializer.SerializeAsync(
+                stream,
+                1,
+                options: options,
+                cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Contains("intentional", exception.Message, StringComparison.Ordinal);
+        Assert.True(stream.CanWrite);
+    }
+
+    [Fact]
+    public async Task SerializeAsyncHonorsACanceledToken()
+    {
+        using var stream = new MemoryStream();
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            NbtSerializer.SerializeAsync(
+                stream,
+                new NbtRoot("root", 1),
+                cancellationToken: cancellation.Token));
+
+        Assert.Equal(0, stream.Length);
+    }
+
+    [Fact]
     public async Task DeserializeAsyncRoundTripsAStream()
     {
         var data = CreateDocumentForStreaming();
@@ -502,6 +650,53 @@ public sealed class NbtStreamAdapterTests
         }
 
         throw new XunitException($"Expected {typeof(TException).Name} but nothing was thrown.");
+    }
+
+    private sealed class CancelingIntConverter(CancellationTokenSource cancellation)
+        : NbtConverter<int>
+    {
+        public override int Read(ref NbtReader reader, NbtSerializerOptions options) => 0;
+
+        public override void Write(
+            ref NbtWriter writer,
+            int value,
+            NbtSerializerOptions options)
+        {
+            writer.WriteInt32(value);
+            cancellation.Cancel();
+        }
+
+        public override bool TryGetTagType(
+            int value,
+            NbtSerializerOptions options,
+            out NbtTagType tagType)
+        {
+            tagType = NbtTagType.Int;
+            return true;
+        }
+    }
+
+    private sealed class ThrowingIntConverter : NbtConverter<int>
+    {
+        public override int Read(ref NbtReader reader, NbtSerializerOptions options) => 0;
+
+        public override void Write(
+            ref NbtWriter writer,
+            int value,
+            NbtSerializerOptions options)
+        {
+            writer.WriteInt32(value);
+            throw new NbtException("intentional converter failure");
+        }
+
+        public override bool TryGetTagType(
+            int value,
+            NbtSerializerOptions options,
+            out NbtTagType tagType)
+        {
+            tagType = NbtTagType.Int;
+            return true;
+        }
     }
 
     private sealed class KnownMemberDto

@@ -193,9 +193,11 @@ reported explicitly instead of being mapped as objects.
 
 ### 13. Asynchronous serialization
 
-- Add `SerializeAsync` overloads for `Stream`/`PipeWriter` with explicit type information.
-- Reuse the existing writer core and keep cancellation behavior consistent with
-  `DeserializeAsync`.
+**Status (2026-11-20): implemented.** `SerializeAsync` is available for `Stream` and `PipeWriter`,
+with and without explicit type information, and `SerializeDocumentAsync` covers `NbtRoot` values
+while preserving `NbtRoot.Name`. It reuses the synchronous writer core and observes the cancellation
+token on the asynchronous flush; caller-owned `PipeWriter` instances are flushed but not completed,
+and stream overloads leave the stream open.
 
 ## P3: quality and documentation
 
@@ -224,11 +226,10 @@ reported explicitly instead of being mapped as objects.
 
 ## Suggested sequencing
 
-P0 and P1 #4/#6/#7 are complete. For the remaining work:
+P0, P1, P2 #11 and P2 #13 are complete. For the remaining work:
 
-1. P1 #8 and #5: converter-cache cold start, then generated member converter caching.
-2. P2 #13 and #9: `SerializeAsync`, then resolver-chain migration support.
-3. P2 #10/#12 and the P3 items when their design prerequisites are settled.
+1. P2 #9: resolver-chain migration support.
+2. P2 #10/#12 and the P3 items when their design prerequisites are settled.
 
 ## Deliberate non-goals for now
 
