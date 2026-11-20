@@ -168,6 +168,45 @@ public sealed class GeneratedSerializationAotTests
     }
 
     [Fact]
+    public void RoundTripsUnsignedAndCharacterScalars()
+    {
+        var value = new AotUnsignedScalars
+        {
+            UShort = ushort.MaxValue,
+            UInt = uint.MaxValue,
+            ULong = ulong.MaxValue,
+            Character = '你',
+            OptionalUShort = 3,
+            OptionalUInt = 4,
+            OptionalULong = 5,
+            OptionalCharacter = '\n',
+            UShorts = [0, 1],
+            UInts = [0, 1],
+            ULongs = [0, 1],
+            Characters = ['a', '你'],
+        };
+
+        var data = NbtSerializer.Serialize(
+            value,
+            AotContext.Default.AotUnsignedScalars,
+            "root");
+        var copy = NbtSerializer.Deserialize(data, AotContext.Default.AotUnsignedScalars);
+
+        Assert.Equal(value.UShort, copy.UShort);
+        Assert.Equal(value.UInt, copy.UInt);
+        Assert.Equal(value.ULong, copy.ULong);
+        Assert.Equal(value.Character, copy.Character);
+        Assert.Equal(value.OptionalUShort, copy.OptionalUShort);
+        Assert.Equal(value.OptionalUInt, copy.OptionalUInt);
+        Assert.Equal(value.OptionalULong, copy.OptionalULong);
+        Assert.Equal(value.OptionalCharacter, copy.OptionalCharacter);
+        Assert.Equal(value.UShorts, copy.UShorts);
+        Assert.Equal(value.UInts, copy.UInts);
+        Assert.Equal(value.ULongs, copy.ULongs);
+        Assert.Equal(value.Characters, copy.Characters);
+    }
+
+    [Fact]
     public void RoundTripsDiscoveredCollectionPatterns()
     {
         var value = new AotDiscoveredCollections
@@ -230,6 +269,7 @@ public sealed class GeneratedSerializationAotTests
 [NbtSerializable(typeof(AotWrapper<AotSimple>))]
 [NbtSerializable(typeof(AotCollections))]
 [NbtSerializable(typeof(AotCollectionShapes))]
+[NbtSerializable(typeof(AotUnsignedScalars))]
 [NbtSerializable(typeof(AotDiscoveredCollections))]
 [NbtSerializable(typeof(AotRecord))]
 [NbtSerializable(typeof(AotConverters))]
@@ -332,6 +372,33 @@ internal sealed class AotCollectionShapes
 
     public ImmutableSortedSet<string> ImmutableSortedStrings { get; init; } =
         ImmutableSortedSet.Create<string>(StringComparer.Ordinal);
+}
+
+internal sealed class AotUnsignedScalars
+{
+    public ushort UShort { get; init; }
+
+    public uint UInt { get; init; }
+
+    public ulong ULong { get; init; }
+
+    public char Character { get; init; }
+
+    public ushort? OptionalUShort { get; init; }
+
+    public uint? OptionalUInt { get; init; }
+
+    public ulong? OptionalULong { get; init; }
+
+    public char? OptionalCharacter { get; init; }
+
+    public ushort[] UShorts { get; init; } = [];
+
+    public uint[] UInts { get; init; } = [];
+
+    public ulong[] ULongs { get; init; } = [];
+
+    public char[] Characters { get; init; } = [];
 }
 
 internal sealed class AotDiscoveredCollections

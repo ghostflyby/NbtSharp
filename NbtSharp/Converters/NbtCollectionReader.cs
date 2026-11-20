@@ -360,7 +360,7 @@ internal static class NbtCollectionReader
             return true;
         }
 
-        if (type == typeof(short) || type == typeof(ushort))
+        if (type == typeof(short) || type == typeof(ushort) || type == typeof(char))
         {
             tagType = NbtTagType.Short;
             return true;

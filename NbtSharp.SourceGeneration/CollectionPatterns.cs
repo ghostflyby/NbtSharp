@@ -19,6 +19,7 @@ internal static class CollectionPatterns
     private enum BuilderArgumentKind
     {
         Enumerable,
+        ReadOnlySpan,
         Span,
         Array,
     }
@@ -234,8 +235,9 @@ internal static class CollectionPatterns
     private static int Priority(BuilderArgumentKind kind) => kind switch
     {
         BuilderArgumentKind.Enumerable => 0,
-        BuilderArgumentKind.Span => 1,
-        _ => 2,
+        BuilderArgumentKind.ReadOnlySpan => 1,
+        BuilderArgumentKind.Span => 2,
+        _ => 3,
     };
 
     private static bool TryMatchBuilderParameter(
@@ -290,8 +292,14 @@ internal static class CollectionPatterns
                 return true;
             }
 
-            if ((IsNamed(definition, "System", "ReadOnlySpan", 1) ||
-                 IsNamed(definition, "System", "Span", 1)) &&
+            if (IsNamed(definition, "System", "ReadOnlySpan", 1) &&
+                MatchesKeyValuePair(named.TypeArguments[0], valueType!))
+            {
+                kind = BuilderArgumentKind.ReadOnlySpan;
+                return true;
+            }
+
+            if (IsNamed(definition, "System", "Span", 1) &&
                 MatchesKeyValuePair(named.TypeArguments[0], valueType!))
             {
                 kind = BuilderArgumentKind.Span;
@@ -313,8 +321,14 @@ internal static class CollectionPatterns
             return true;
         }
 
-        if ((IsNamed(definition, "System", "ReadOnlySpan", 1) ||
-             IsNamed(definition, "System", "Span", 1)) &&
+        if (IsNamed(definition, "System", "ReadOnlySpan", 1) &&
+            Matches(named.TypeArguments[0], elementType!))
+        {
+            kind = BuilderArgumentKind.ReadOnlySpan;
+            return true;
+        }
+
+        if (IsNamed(definition, "System", "Span", 1) &&
             Matches(named.TypeArguments[0], elementType!))
         {
             kind = BuilderArgumentKind.Span;
@@ -377,7 +391,8 @@ internal static class CollectionPatterns
         }
 
         complete.Add(
-            $"return {Fq(builderType)}.{method.Name}({BuilderArgument(argumentKind)});");
+            $"return {Fq(builderType)}.{method.Name}(" +
+            $"{BuilderArgument(argumentKind, Fq(elementType))});");
         return new GeneratedBuilderSpec(
             isMap: false,
             listType,
@@ -396,7 +411,7 @@ internal static class CollectionPatterns
     {
         _ = type;
         var valueName = Fq(valueType);
-        if (argumentKind == BuilderArgumentKind.Span)
+        if (argumentKind is BuilderArgumentKind.ReadOnlySpan or BuilderArgumentKind.Span)
         {
             var pairType = $"global::System.Collections.Generic.KeyValuePair<string, {valueName}>";
             var listType = $"global::System.Collections.Generic.List<{pairType}>";
@@ -409,7 +424,7 @@ internal static class CollectionPatterns
                 "__state.Exists(pair => pair.Key == key)",
                 ImmutableArray.Create(
                     $"return {Fq(builderType)}.{method.Name}(" +
-                    "global::System.Runtime.InteropServices.CollectionsMarshal.AsSpan(__state));"));
+                    $"{BuilderArgument(argumentKind, pairType)});"));
         }
 
         var dictionaryType =
@@ -929,11 +944,15 @@ internal static class CollectionPatterns
 
     private static string Fq(ITypeSymbol type) => type.ToDisplayString(FullyQualified);
 
-    private static string BuilderArgument(BuilderArgumentKind kind) => kind switch
-    {
-        BuilderArgumentKind.Enumerable => "__state",
-        BuilderArgumentKind.Span =>
-            "global::System.Runtime.InteropServices.CollectionsMarshal.AsSpan(__state)",
-        _ => "__state.ToArray()",
-    };
+    private static string BuilderArgument(BuilderArgumentKind kind, string elementTypeName) =>
+        kind switch
+        {
+            BuilderArgumentKind.Enumerable => "__state",
+            BuilderArgumentKind.ReadOnlySpan =>
+                $"(global::System.ReadOnlySpan<{elementTypeName}>)" +
+                "global::System.Runtime.InteropServices.CollectionsMarshal.AsSpan(__state)",
+            BuilderArgumentKind.Span =>
+                "global::System.Runtime.InteropServices.CollectionsMarshal.AsSpan(__state)",
+            _ => "__state.ToArray()",
+        };
 }

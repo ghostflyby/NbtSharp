@@ -211,40 +211,89 @@ public sealed class CollectionShapeTests
     }
 
     [Fact]
-    public void ReflectionRejectsSpanOnlySequenceBuilderWithGuidance()
+    public void ReflectionSupportsSpanOnlySequenceBuilders()
     {
-        var value = SpanOnlyCollectionFactory.Create(new[] { 1, 2 });
+        var readOnlySpan = SpanOnlyCollectionFactory.Create(new[] { 1, 2 });
+        var writableSpan = CompanionSpanCollection.Create(new[] { 3, 4 });
 
-        var exception = Assert.ThrowsAny<NotSupportedException>(() =>
-            NbtSerializer.Serialize(value, "root"));
-
-        Assert.Contains("span", exception.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("source generator", exception.Message);
+        Assert.Equal([1, 2], RoundTrip(readOnlySpan).ToArray());
+        Assert.Equal([3, 4], RoundTrip(writableSpan).ToArray());
+        Assert.Empty(RoundTrip(SpanOnlyCollectionFactory.Create<int>([])));
     }
 
     [Fact]
-    public void ReflectionRejectsSpanOnlyMapBuilderWithGuidance()
+    public void ReflectionSupportsSpanOnlyMapBuilders()
     {
         var value = SpanOnlyMapFactory.Create(
             new[] { new KeyValuePair<string, int>("a", 1) });
 
-        var exception = Assert.ThrowsAny<NotSupportedException>(() =>
-            NbtSerializer.Serialize(value, "root"));
+        var copy = RoundTrip(value);
 
-        Assert.Contains("span", exception.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("source generator", exception.Message);
+        Assert.Equal(1, copy["a"]);
+        Assert.Empty(RoundTrip(SpanOnlyMapFactory.Create<int>([])));
     }
 
     [Fact]
-    public void ReflectionRejectsCompanionSpanFactoryWithGuidance()
+    public void ReflectionReversesStackLikeSpanFactories()
     {
-        var value = CompanionSpanCollection.Create(new[] { 1, 2 });
+        var value = StackSpanFactory.Create(new[] { 1, 2, 3 });
 
-        var exception = Assert.ThrowsAny<NotSupportedException>(() =>
-            NbtSerializer.Serialize(value, "root"));
+        var copy = RoundTrip(value);
 
-        Assert.Contains("span", exception.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("source generator", exception.Message);
+        Assert.Equal([3, 2, 1], copy.ToArray());
+    }
+
+    [Fact]
+    public void ReflectionPrefersEnumerableFactoriesOverSpanAndArray()
+    {
+        MultiFactory.Reset();
+        var options = new NbtSerializerOptions();
+        var value = new MultiFactoryCollection<int>([1, 2]);
+
+        var data = NbtSerializer.Serialize(value, "root", options);
+        var copy = NbtSerializer.Deserialize<MultiFactoryCollection<int>>(data, options);
+
+        Assert.Equal([1, 2], copy.ToArray());
+        Assert.Equal(1, MultiFactory.EnumerableCalls);
+        Assert.Equal(0, MultiFactory.ArrayCalls);
+        Assert.Equal(0, MultiFactory.ReadOnlySpanCalls);
+        Assert.Equal(0, MultiFactory.WritableSpanCalls);
+    }
+
+    [Fact]
+    public void ReflectionPrefersReadOnlySpanFactories()
+    {
+        SpanPreferenceFactory.Reset();
+        var options = new NbtSerializerOptions();
+        var value = new SpanPreferenceCollection<int>([1, 2]);
+
+        var data = NbtSerializer.Serialize(value, "root", options);
+        var copy = NbtSerializer.Deserialize<SpanPreferenceCollection<int>>(data, options);
+
+        Assert.Equal([1, 2], copy.ToArray());
+        Assert.Equal(1, SpanPreferenceFactory.ReadOnlyCalls);
+        Assert.Equal(0, SpanPreferenceFactory.WritableCalls);
+    }
+
+    [Fact]
+    public void ReflectionSupportsNonPublicSpanFactories()
+    {
+        var value = new NonPublicSpanCollection<int>([1, 2]);
+
+        var copy = RoundTrip(value);
+
+        Assert.Equal([1, 2], copy.ToArray());
+    }
+
+    [Fact]
+    public void ReflectionSupportsCompanionWritableSpanMapFactories()
+    {
+        var value = WritableSpanMap.CreateRange(
+            new[] { new KeyValuePair<string, int>("a", 1) });
+
+        var copy = RoundTrip(value);
+
+        Assert.Equal(1, copy["a"]);
     }
 
     [Fact]
@@ -446,6 +495,198 @@ internal sealed class CompanionSpanCollection<T> : IReadOnlyList<T>
 internal static class CompanionSpanCollection
 {
     public static CompanionSpanCollection<T> Create<T>(Span<T> items) => new(items.ToArray());
+}
+
+[CollectionBuilder(typeof(MultiFactory), "Create")]
+internal sealed class MultiFactoryCollection<T> : IReadOnlyList<T>
+{
+    private readonly T[] _items;
+
+    internal MultiFactoryCollection(T[] items) => _items = items;
+
+    public T this[int index] => _items[index];
+
+    public int Count => _items.Length;
+
+    public IEnumerator<T> GetEnumerator() => ((IEnumerable<T>)_items).GetEnumerator();
+
+    IEnumerator IEnumerable.GetEnumerator() => _items.GetEnumerator();
+}
+
+internal static class MultiFactory
+{
+    public static int EnumerableCalls;
+    public static int ArrayCalls;
+    public static int ReadOnlySpanCalls;
+    public static int WritableSpanCalls;
+
+    public static void Reset()
+    {
+        EnumerableCalls = 0;
+        ArrayCalls = 0;
+        ReadOnlySpanCalls = 0;
+        WritableSpanCalls = 0;
+    }
+
+    public static MultiFactoryCollection<T> Create<T>(IEnumerable<T> items)
+    {
+        EnumerableCalls++;
+        return new([.. items]);
+    }
+
+    public static MultiFactoryCollection<T> Create<T>(T[] items)
+    {
+        ArrayCalls++;
+        return new(items);
+    }
+
+    public static MultiFactoryCollection<T> Create<T>(ReadOnlySpan<T> items)
+    {
+        ReadOnlySpanCalls++;
+        return new(items.ToArray());
+    }
+
+    public static MultiFactoryCollection<T> Create<T>(Span<T> items)
+    {
+        WritableSpanCalls++;
+        return new(items.ToArray());
+    }
+}
+
+[CollectionBuilder(typeof(SpanPreferenceFactory), "Create")]
+internal sealed class SpanPreferenceCollection<T> : IReadOnlyList<T>
+{
+    private readonly T[] _items;
+
+    internal SpanPreferenceCollection(T[] items) => _items = items;
+
+    public T this[int index] => _items[index];
+
+    public int Count => _items.Length;
+
+    public IEnumerator<T> GetEnumerator() => ((IEnumerable<T>)_items).GetEnumerator();
+
+    IEnumerator IEnumerable.GetEnumerator() => _items.GetEnumerator();
+}
+
+internal static class SpanPreferenceFactory
+{
+    public static int ReadOnlyCalls;
+    public static int WritableCalls;
+
+    public static void Reset()
+    {
+        ReadOnlyCalls = 0;
+        WritableCalls = 0;
+    }
+
+    public static SpanPreferenceCollection<T> Create<T>(ReadOnlySpan<T> items)
+    {
+        ReadOnlyCalls++;
+        return new(items.ToArray());
+    }
+
+    public static SpanPreferenceCollection<T> Create<T>(Span<T> items)
+    {
+        WritableCalls++;
+        return new(items.ToArray());
+    }
+}
+
+[CollectionBuilder(typeof(StackSpanFactory), "Create")]
+internal sealed class StackSpanCollection<T> : IEnumerable<T>
+{
+    private readonly List<T> _items = [];
+
+    public void Push(T item) => _items.Insert(0, item);
+
+    public IEnumerator<T> GetEnumerator() => _items.GetEnumerator();
+
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+}
+
+internal static class StackSpanFactory
+{
+    public static StackSpanCollection<T> Create<T>(ReadOnlySpan<T> items)
+    {
+        var stack = new StackSpanCollection<T>();
+        foreach (var item in items)
+        {
+            stack.Push(item);
+        }
+
+        return stack;
+    }
+}
+
+[CollectionBuilder(typeof(NonPublicSpanFactory), "Create")]
+internal sealed class NonPublicSpanCollection<T> : IReadOnlyList<T>
+{
+    private readonly T[] _items;
+
+    internal NonPublicSpanCollection(T[] items) => _items = items;
+
+    public T this[int index] => _items[index];
+
+    public int Count => _items.Length;
+
+    public IEnumerator<T> GetEnumerator() => ((IEnumerable<T>)_items).GetEnumerator();
+
+    IEnumerator IEnumerable.GetEnumerator() => _items.GetEnumerator();
+}
+
+internal static class NonPublicSpanFactory
+{
+    internal static NonPublicSpanCollection<T> Create<T>(ReadOnlySpan<T> items) =>
+        new(items.ToArray());
+}
+
+internal sealed class WritableSpanMap<TValue> : IReadOnlyDictionary<string, TValue>
+{
+    private readonly Dictionary<string, TValue> _items;
+
+    internal WritableSpanMap(Dictionary<string, TValue> items) => _items = items;
+
+    public TValue this[string key] => _items[key];
+
+    public IEnumerable<string> Keys => _items.Keys;
+
+    public IEnumerable<TValue> Values => _items.Values;
+
+    public int Count => _items.Count;
+
+    public bool ContainsKey(string key) => _items.ContainsKey(key);
+
+    public bool TryGetValue(string key, out TValue value)
+    {
+        if (_items.TryGetValue(key, out var stored))
+        {
+            value = stored;
+            return true;
+        }
+
+        value = default!;
+        return false;
+    }
+
+    public IEnumerator<KeyValuePair<string, TValue>> GetEnumerator() => _items.GetEnumerator();
+
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+}
+
+internal static class WritableSpanMap
+{
+    public static WritableSpanMap<TValue> CreateRange<TValue>(
+        Span<KeyValuePair<string, TValue>> items)
+    {
+        var map = new Dictionary<string, TValue>(StringComparer.Ordinal);
+        foreach (var pair in items)
+        {
+            map[pair.Key] = pair.Value;
+        }
+
+        return new WritableSpanMap<TValue>(map);
+    }
 }
 
 [CollectionBuilder(typeof(SpanOnlyMapFactory), "Create")]

@@ -48,6 +48,8 @@ internal sealed class NbtReflectionSequenceConverter<TCollection, TElement> :
         private readonly bool _constructorTakesArray;
         private readonly MethodInfo? _factory;
         private readonly bool _factoryTakesArray;
+        private readonly NbtReadOnlySpanFactory<TCollection, TElement>? _readOnlySpanFactory;
+        private readonly NbtSpanFactory<TCollection, TElement>? _spanFactory;
         private readonly ConstructorInfo? _defaultConstructor;
         private readonly MethodInfo? _add;
         private readonly bool _reverse;
@@ -57,6 +59,8 @@ internal sealed class NbtReflectionSequenceConverter<TCollection, TElement> :
             bool constructorTakesArray,
             MethodInfo? factory,
             bool factoryTakesArray,
+            NbtReadOnlySpanFactory<TCollection, TElement>? readOnlySpanFactory,
+            NbtSpanFactory<TCollection, TElement>? spanFactory,
             ConstructorInfo? defaultConstructor,
             MethodInfo? add,
             bool reverse)
@@ -65,6 +69,8 @@ internal sealed class NbtReflectionSequenceConverter<TCollection, TElement> :
             _constructorTakesArray = constructorTakesArray;
             _factory = factory;
             _factoryTakesArray = factoryTakesArray;
+            _readOnlySpanFactory = readOnlySpanFactory;
+            _spanFactory = spanFactory;
             _defaultConstructor = defaultConstructor;
             _add = add;
             _reverse = reverse;
@@ -79,76 +85,60 @@ internal sealed class NbtReflectionSequenceConverter<TCollection, TElement> :
             var stackLike = addMethods.Any(static pair => pair.Name == "Push") &&
                             addMethods.All(static pair => pair.Name is not ("Add" or "Enqueue"));
             var attribute = collectionType.GetCustomAttribute<CollectionBuilderAttribute>();
-            string? spanFactory = null;
-            if (attribute is not null)
+            if (attribute is not null &&
+                TryFindFactory(
+                    attribute.BuilderType,
+                    attribute.MethodName,
+                    collectionType,
+                    elementType,
+                    out var factory,
+                    out var factoryTakesArray,
+                    out var readOnlySpanFactory,
+                    out var spanFactory))
             {
-                if (TryFindFactory(
-                        attribute.BuilderType,
-                        attribute.MethodName,
-                        collectionType,
-                        elementType,
-                        out var factory,
-                        out var factoryTakesArray))
-                {
-                    return new SequencePlan(
-                        null,
-                        false,
-                        factory,
-                        factoryTakesArray,
-                        null,
-                        null,
-                        stackLike);
-                }
-
-                if (HasSpanFactory(
-                        attribute.BuilderType,
-                        attribute.MethodName,
-                        collectionType,
-                        elementType))
-                {
-                    spanFactory = $"{attribute.BuilderType}.{attribute.MethodName}";
-                }
+                return new SequencePlan(
+                    null,
+                    false,
+                    factory,
+                    factoryTakesArray,
+                    readOnlySpanFactory,
+                    spanFactory,
+                    null,
+                    null,
+                    stackLike);
             }
 
             var companion = FindCompanionType(collectionType);
-            if (companion is not null)
+            if (companion is not null &&
+                (TryFindFactory(
+                     companion,
+                     "CreateRange",
+                     collectionType,
+                     elementType,
+                     out factory,
+                     out factoryTakesArray,
+                     out readOnlySpanFactory,
+                     out spanFactory) ||
+                 TryFindFactory(
+                     companion,
+                     "Create",
+                     collectionType,
+                     elementType,
+                     out factory,
+                     out factoryTakesArray,
+                     out readOnlySpanFactory,
+                     out spanFactory)))
             {
-                if (TryFindFactory(
-                        companion,
-                        "CreateRange",
-                        collectionType,
-                        elementType,
-                        out var factory,
-                        out var factoryTakesArray) ||
-                    TryFindFactory(
-                        companion,
-                        "Create",
-                        collectionType,
-                        elementType,
-                        out factory,
-                        out factoryTakesArray))
-                {
-                    return new SequencePlan(
-                        null,
-                        false,
-                        factory,
-                        factoryTakesArray,
-                        null,
-                        null,
-                        stackLike);
-                }
-
-                if (spanFactory is null)
-                {
-                    foreach (var methodName in new[] { "CreateRange", "Create" })
-                    {
-                        if (HasSpanFactory(companion, methodName, collectionType, elementType))
-                        {
-                            spanFactory = $"{companion}.{methodName}";
-                            break;
-                        }
-                    }
-                }
+                return new SequencePlan(
+                    null,
+                    false,
+                    factory,
+                    factoryTakesArray,
+                    readOnlySpanFactory,
+                    spanFactory,
+                    null,
+                    null,
+                    stackLike);
             }
 
             var defaultConstructor = collectionType.GetConstructor(Type.EmptyTypes);
@@ -163,6 +153,8 @@ internal sealed class NbtReflectionSequenceConverter<TCollection, TElement> :
                     false,
                     null,
                     false,
+                    null,
+                    null,
                     defaultConstructor,
                     add,
                     stackLike);
@@ -186,6 +178,8 @@ internal sealed class NbtReflectionSequenceConverter<TCollection, TElement> :
                         false,
                         null,
                         null,
+                        null,
+                        null,
                         stackLike);
                 }
 
@@ -198,14 +192,14 @@ internal sealed class NbtReflectionSequenceConverter<TCollection, TElement> :
                         false,
                         null,
                         null,
+                        null,
+                        null,
                         stackLike);
                 }
             }
 
-            throw spanFactory is null
-                ? new NotSupportedException(
-                    $"No supported construction pattern was found for {collectionType}.")
-                : new NbtSpanCollectionBuilderException(spanFactory, collectionType);
+            throw new NotSupportedException(
+                $"No supported construction pattern was found for {collectionType}.");
         }
 
         private static Type? FindCompanionType(Type collectionType)
@@ -220,51 +214,6 @@ internal sealed class NbtReflectionSequenceConverter<TCollection, TElement> :
             return collectionType.Assembly.GetType($"{collectionType.Namespace}.{name}");
         }
 
-        private static bool HasSpanFactory(
-            Type builderType,
-            string methodName,
-            Type collectionType,
-            Type elementType)
-        {
-            foreach (var candidate in builderType.GetMethods(
-                         BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static))
-            {
-                if (candidate.Name != methodName || candidate.GetParameters().Length != 1)
-                {
-                    continue;
-                }
-
-                var methodToCheck = candidate;
-                if (candidate.IsGenericMethodDefinition)
-                {
-                    try
-                    {
-                        methodToCheck = candidate.MakeGenericMethod(elementType);
-                    }
-                    catch (ArgumentException)
-                    {
-                        continue;
-                    }
-                }
-
-                if (!collectionType.IsAssignableFrom(methodToCheck.ReturnType))
-                {
-                    continue;
-                }
-
-                var parameterType = methodToCheck.GetParameters()[0].ParameterType;
-                if (parameterType.IsGenericType &&
-                    (parameterType.GetGenericTypeDefinition() == typeof(ReadOnlySpan<>) ||
-                     parameterType.GetGenericTypeDefinition() == typeof(Span<>)) &&
-                    parameterType.GetGenericArguments()[0] == elementType)
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
         private static MethodInfo? FindMutator(Type collectionType, string name, Type elementType) =>
             collectionType.GetMethods(BindingFlags.Public | BindingFlags.Instance)
                 .FirstOrDefault(method =>
@@ -275,6 +224,26 @@ internal sealed class NbtReflectionSequenceConverter<TCollection, TElement> :
 
         public object Create(List<TElement> elements)
         {
+            if (_readOnlySpanFactory is not null)
+            {
+                if (_reverse)
+                {
+                    elements.Reverse();
+                }
+
+                return _readOnlySpanFactory(elements.ToArray());
+            }
+
+            if (_spanFactory is not null)
+            {
+                if (_reverse)
+                {
+                    elements.Reverse();
+                }
+
+                return _spanFactory(elements.ToArray());
+            }
+
             if (_factory is not null)
             {
                 if (_reverse)
@@ -331,9 +300,18 @@ internal sealed class NbtReflectionSequenceConverter<TCollection, TElement> :
         Type collectionType,
         Type elementType,
         out MethodInfo method,
-        out bool takesArray)
+        out bool takesArray,
+        out NbtReadOnlySpanFactory<TCollection, TElement>? readOnlySpanFactory,
+        out NbtSpanFactory<TCollection, TElement>? spanFactory)
     {
+        method = null!;
         takesArray = false;
+        readOnlySpanFactory = null;
+        spanFactory = null;
+        MethodInfo? enumerableMethod = null;
+        MethodInfo? arrayMethod = null;
+        MethodInfo? readOnlySpanMethod = null;
+        MethodInfo? writableSpanMethod = null;
         foreach (var candidate in builderType.GetMethods(
                      BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static))
         {
@@ -363,21 +341,99 @@ internal sealed class NbtReflectionSequenceConverter<TCollection, TElement> :
             var parameterType = methodToCheck.GetParameters()[0].ParameterType;
             if (parameterType == elementType.MakeArrayType())
             {
-                method = methodToCheck;
-                takesArray = true;
-                return true;
+                arrayMethod ??= methodToCheck;
             }
-
-            if (parameterType.IsAssignableFrom(typeof(List<TElement>)))
+            else if (parameterType.IsAssignableFrom(typeof(List<TElement>)))
             {
-                method = methodToCheck;
-                return true;
+                enumerableMethod ??= methodToCheck;
+            }
+            else if (parameterType.IsGenericType &&
+                     parameterType.GetGenericArguments()[0] == elementType)
+            {
+                if (parameterType.GetGenericTypeDefinition() == typeof(ReadOnlySpan<>))
+                {
+                    readOnlySpanMethod ??= methodToCheck;
+                }
+                else if (parameterType.GetGenericTypeDefinition() == typeof(Span<>))
+                {
+                    writableSpanMethod ??= methodToCheck;
+                }
             }
         }
 
-        method = null!;
+        if (enumerableMethod is not null)
+        {
+            method = enumerableMethod;
+            return true;
+        }
+
+        if (TryCreateSpanFactory(
+                readOnlySpanMethod,
+                writableSpanMethod,
+                collectionType,
+                elementType,
+                out readOnlySpanFactory,
+                out spanFactory))
+        {
+            return true;
+        }
+
+        if (arrayMethod is not null)
+        {
+            method = arrayMethod;
+            takesArray = true;
+            return true;
+        }
+
         return false;
     }
+
+    private static bool TryCreateSpanFactory(
+        MethodInfo? readOnlySpanMethod,
+        MethodInfo? writableSpanMethod,
+        Type collectionType,
+        Type elementType,
+        out NbtReadOnlySpanFactory<TCollection, TElement>? readOnlySpanFactory,
+        out NbtSpanFactory<TCollection, TElement>? spanFactory)
+    {
+        readOnlySpanFactory = null;
+        spanFactory = null;
+        if (readOnlySpanMethod is not null)
+        {
+            try
+            {
+                readOnlySpanFactory =
+                    (NbtReadOnlySpanFactory<TCollection, TElement>)readOnlySpanMethod.CreateDelegate(
+                        typeof(NbtReadOnlySpanFactory<,>).MakeGenericType(
+                            collectionType,
+                            elementType));
+                return true;
+            }
+            catch (Exception ex) when (IsSpanFactoryBindingFailure(ex))
+            {
+            }
+        }
+
+        if (writableSpanMethod is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            spanFactory = (NbtSpanFactory<TCollection, TElement>)writableSpanMethod.CreateDelegate(
+                typeof(NbtSpanFactory<,>).MakeGenericType(collectionType, elementType));
+            return true;
+        }
+        catch (Exception ex) when (IsSpanFactoryBindingFailure(ex))
+        {
+            return false;
+        }
+    }
+
+    private static bool IsSpanFactoryBindingFailure(Exception exception) =>
+        exception is ArgumentException or NotSupportedException or
+            MethodAccessException or InvalidOperationException;
 }
 
 internal static class NbtReflectionInvoke

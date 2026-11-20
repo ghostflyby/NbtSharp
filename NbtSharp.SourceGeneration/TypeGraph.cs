@@ -1047,6 +1047,10 @@ internal sealed class TypeGraph
             SpecialType.System_Int16 or
             SpecialType.System_Int32 or
             SpecialType.System_Int64 or
+            SpecialType.System_UInt16 or
+            SpecialType.System_UInt32 or
+            SpecialType.System_UInt64 or
+            SpecialType.System_Char or
             SpecialType.System_Single or
             SpecialType.System_Double or
             SpecialType.System_String or
@@ -1089,10 +1093,6 @@ internal sealed class TypeGraph
     {
         if (type.SpecialType is
             SpecialType.System_Object or
-            SpecialType.System_Char or
-            SpecialType.System_UInt16 or
-            SpecialType.System_UInt32 or
-            SpecialType.System_UInt64 or
             SpecialType.System_IntPtr or
             SpecialType.System_UIntPtr or
             SpecialType.System_Decimal)
@@ -1135,10 +1135,6 @@ internal sealed class TypeGraph
             "global::System.Object" or
             "global::NbtSharp.NbtRoot" or
             "global::NbtSharp.NbtEndList" or
-            "global::System.Char" or
-            "global::System.UInt16" or
-            "global::System.UInt32" or
-            "global::System.UInt64" or
             "global::System.IntPtr" or
             "global::System.UIntPtr" or
             "global::System.Decimal" or

@@ -1439,6 +1439,58 @@ public sealed class NbtSourceGeneratorTests
     }
 
     [Fact]
+    public void EmitsDirectPathsForUnsignedAndCharacterScalars()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Player
+            {
+                public ushort UShort { get; set; }
+
+                public uint UInt { get; set; }
+
+                public ulong ULong { get; set; }
+
+                public char Character { get; set; }
+
+                public ulong? OptionalULong { get; set; }
+            }
+            """);
+
+        AssertNoErrors(result);
+        Assert.Contains("unchecked((ushort)reader.GetInt16())", result.GeneratedSource, StringComparison.Ordinal);
+        Assert.Contains("unchecked((uint)reader.GetInt32())", result.GeneratedSource, StringComparison.Ordinal);
+        Assert.Contains("unchecked((ulong)reader.GetInt64())", result.GeneratedSource, StringComparison.Ordinal);
+        Assert.Contains("unchecked((char)reader.GetInt16())", result.GeneratedSource, StringComparison.Ordinal);
+        Assert.Contains(
+            "writer.WriteInt16(\"UShort\", unchecked((short)",
+            result.GeneratedSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "writer.WriteInt32(\"UInt\", unchecked((int)",
+            result.GeneratedSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "writer.WriteInt64(\"ULong\", unchecked((long)",
+            result.GeneratedSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "writer.WriteInt16(\"Character\", unchecked((short)",
+            result.GeneratedSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "writer.WriteInt64(\"OptionalULong\", unchecked((long)__m",
+            result.GeneratedSource,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ReportsNonPartialContext()
     {
         var result = Run("""

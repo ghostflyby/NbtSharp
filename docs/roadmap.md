@@ -17,8 +17,9 @@ schedule.
 - P2 #11 is implemented (PR #16 and the collection wrap-up): sequence/map shape interfaces,
   immutable/frozen/concurrent/sorted shapes, and `CollectionBuilderAttribute`/companion
   factory/constructor/`Add` pattern discovery. String sorted sets use ordinal ordering;
-  `PriorityQueue<TElement,TPriority>` is rejected with a diagnostic, and span-only reflection
-  builders report a source-generation/custom-converter path.
+  `PriorityQueue<TElement,TPriority>` is rejected with a diagnostic. Span-only builders are
+  supported by source generation and by the reflection resolver through runtime-created delegates.
+- Built-in scalar support also covers `byte`, `ushort`, `uint`, `ulong`, and `char`.
 
 ## P0: highest impact
 
@@ -139,22 +140,10 @@ schedule.
 
 ### 6. Complete the scalar fast path
 
-**Current state**
-
-- Generated converters directly read/write `sbyte`, `byte`, `short`, `int`, `long`, `float`, and
-  `double` when no custom converters are registered.
-- `bool` and `string` still use the converter path.
-
-**Scope**
-
-- Add a direct `bool` path with the existing 0/1 validation.
-- Add a direct `string` path that preserves `NullValueHandling` and error paths.
-- Add a typed `Nullable<T>` path that avoids boxing.
-- Avoid reading required properties twice when performing null checks.
-
-**Acceptance**
-
-- Scalar-heavy benchmarks improve; null and error-path tests remain unchanged.
+**Status (2026-11-19): implemented.** Generated converters directly read/write `sbyte`, `byte`,
+`short`, `ushort`, `int`, `uint`, `long`, `ulong`, `char`, `float`, `double`, `bool`, `string`, and
+their nullable variants when no custom converters are registered. Required getters are read once for
+null checks; unsigned values and `char` preserve their bit patterns in the same-width signed tags.
 
 ### 7. Required and constructor semantics
 
