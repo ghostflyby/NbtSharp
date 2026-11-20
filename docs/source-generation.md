@@ -115,6 +115,48 @@ internal sealed class Player
 
 Invalid declarations report `NBTSG016`.
 
+## Polymorphic members
+
+Register concrete implementations on an abstract class or interface:
+
+```csharp
+[NbtDerived(typeof(Cat))]
+[NbtDerived(typeof(Dog), TypeDiscriminator = "dog")]
+internal interface IAnimal
+{
+    string Name { get; set; }
+}
+
+internal sealed class PetOwner
+{
+    public IAnimal? Pet { get; set; }
+}
+```
+
+A base-typed value is written as an envelope:
+
+```text
+{ "$type": "Cat", "$value": { "Name": "Milo", "Lives": 9 } }
+```
+
+- The discriminator defaults to the derived type's short name. Set
+  `NbtDerivedAttribute.TypeDiscriminator` when short names collide.
+- The base must be a non-generic abstract class or interface. Registrations must be closed, concrete
+  classes or structs assignable to the base, must not be collection shapes or polymorphic
+  themselves, and each derived type may be registered once. Discriminators must be unique.
+- Invalid declarations report `NBTSG018`; abstract or interface types without registrations remain
+  unsupported (`NBTSG003`).
+- Generated dispatch uses the generated converter for each registered derived type. It does not
+  consult `options.Converters` for individual derived types; register a converter for the base type
+  to override the whole dispatch.
+- The reflection resolver uses the same envelope and resolves the concrete type through the
+  options, so custom converters for derived types apply there.
+- Writing a runtime type that is not registered throws `NbtException`. Reading an unknown or missing
+  discriminator, a missing `$value`, or a value member before the discriminator throws `NbtException`.
+
+Polymorphic roots work too: add the base type to `[NbtSerializable]` and use its generated type
+information.
+
 ## Context options
 
 ```csharp

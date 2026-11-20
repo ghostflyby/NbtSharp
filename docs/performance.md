@@ -28,6 +28,9 @@ the intended hot paths and the trade-offs that can disable them.
   member-level explicit converters when only one member needs special handling.
 - Required reference and nullable members are captured once before their null check, so the getter is
   not invoked twice.
+- Polymorphic values add one envelope compound plus a discriminator string. Generated dispatch uses
+  static typed converters and an exact runtime-type check; reflection resolves the concrete type
+  through the options.
 - The `byte[]` overloads write through an `ArrayBufferWriter<byte>` and return a right-sized copy.
   Use the `IBufferWriter<byte>` overload to avoid the final copy. Stream serialization flushes once
   at the end and leaves the stream open.

@@ -175,6 +175,37 @@ internal sealed class TypeSpec
     public string? UnderlyingTypeName { get; set; }
 
     public EnumMappingSpec? EnumMapping { get; set; }
+
+    public PolymorphicSpec? Polymorphic { get; set; }
+}
+
+/// <summary>
+/// A symbol-free description of a polymorphic base converter.
+/// </summary>
+internal sealed class PolymorphicSpec
+{
+    public PolymorphicSpec(ImmutableArray<PolymorphicDerivedSpec> derivedTypes)
+    {
+        DerivedTypes = derivedTypes;
+    }
+
+    public ImmutableArray<PolymorphicDerivedSpec> DerivedTypes { get; }
+}
+
+/// <summary>
+/// One registered derived type and its wire discriminator.
+/// </summary>
+internal sealed class PolymorphicDerivedSpec
+{
+    public PolymorphicDerivedSpec(string typeName, string discriminator)
+    {
+        TypeName = typeName;
+        Discriminator = discriminator;
+    }
+
+    public string TypeName { get; }
+
+    public string Discriminator { get; }
 }
 
 /// <summary>
@@ -625,6 +656,21 @@ internal static class ContextSpecFingerprint
             hash.Add(mapping.Tag);
             hash.Add(mapping.ReadExpression);
             hash.Add(mapping.WriteStatement);
+        }
+        else
+        {
+            hash.Add(-1);
+        }
+
+        if (entry.Polymorphic is { } polymorphic)
+        {
+            hash.Add("polymorphic");
+            hash.Add(polymorphic.DerivedTypes.Length);
+            foreach (var derivedType in polymorphic.DerivedTypes)
+            {
+                hash.Add(derivedType.TypeName);
+                hash.Add(derivedType.Discriminator);
+            }
         }
         else
         {

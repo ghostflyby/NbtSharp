@@ -19,6 +19,7 @@ diagnostics are listed here; gaps in the numeric sequence are retired identifier
 | `NBTSG015` | Error | A `required` member is excluded from the mapping and the selected constructor is not marked `[SetsRequiredMembers]`. | Mark the constructor with `[SetsRequiredMembers]`, include the member in the mapping, or remove `required`. |
 | `NBTSG016` | Error | A `[NbtUseConverter]` declaration is invalid. | The converter type must be closed, non-abstract, derived from `NbtConverter<T>` for the member type (or `NbtConverterFactory`), and have a public parameterless constructor. It must be public or internal in the context assembly; `InternalsVisibleTo` is not considered. Fields also need `[NbtInclude]`. |
 | `NBTSG017` | Error | A mapped member is hidden by a member with the same name. | Rename the hiding member, or exclude the base member with `[NbtIgnore]`. NBT maps each type to one compound, so hidden members are ambiguous. |
+| `NBTSG018` | Error | A `[NbtDerived]` declaration is invalid. | The base must be a non-generic abstract class or interface; the derived type must be a closed concrete class or struct assignable to it, not a collection shape, and not itself polymorphic. Each derived type may be registered only once; discriminators must be unique and non-empty. Generic polymorphic bases are rejected. |
 
 ## Notes
 

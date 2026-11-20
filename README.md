@@ -212,6 +212,49 @@ marked with `[SetsRequiredMembers]`; because a parameterless constructor is pref
 explicit public parameterless constructor with the attribute. Otherwise the generator reports
 `NBTSG007`.
 
+### Polymorphic members
+
+Abstract classes and interfaces opt in to polymorphic members with `[NbtDerived]`:
+
+```csharp
+[NbtDerived(typeof(Cat))]
+[NbtDerived(typeof(Dog), TypeDiscriminator = "dog")]
+interface IAnimal
+{
+    string Name { get; set; }
+}
+
+sealed class Cat : IAnimal { /* ... */ public int Lives { get; set; } }
+sealed class Dog : IAnimal { /* ... */ public bool GoodBoy { get; set; } }
+
+sealed class PetOwner
+{
+    public IAnimal? Pet { get; set; }
+}
+```
+
+A base-typed value is encoded as an envelope compound:
+
+```text
+Pet = {
+  "$type": "Cat",
+  "$value": { "Name": "Milo", "Lives": 9 }
+}
+```
+
+The discriminator defaults to the derived type's short name and can be overridden with
+`TypeDiscriminator`. The base must be a non-generic abstract class or interface. Registrations must
+be closed concrete classes or structs assignable to the base, must not be collection shapes or
+polymorphic themselves, and each derived type may be registered only once. Discriminators must be
+unique. Invalid declarations report `NBTSG018` in generated contexts and throw
+`NotSupportedException` from the reflection resolver. Unknown or missing discriminators and missing
+`$value` members throw `NbtException`.
+
+Generated contexts dispatch through generated converters, and an unregistered runtime type throws
+`NbtException` on write. Register a converter for the base type to override the whole dispatch.
+Reflection dispatch resolves the concrete type through the options, so custom converters for
+derived types keep working there.
+
 ## Streaming
 
 The reader produces value and container tokens. Compound members carry a name; list elements do not:
@@ -391,10 +434,10 @@ Generic serializer entry points that may resolve converters or reflection are an
 remain AOT-clean. The reflection resolver is opt-in. Source-generated type information and the
 type-information serializer overloads provide the fully AOT-safe path. The `NbtSharp.Aot.Tests`
 project sets `IsAotCompatible` and covers generated converters, required/init members, enums,
-generic DTOs, collections, nullable values, and explicit member converters under the SDK AOT/trim
-analyzers. Generated converters suppress AOT/trim diagnostics only when every member is covered by the
-generated graph or by an explicit typed converter; runtime and factory-based `[NbtUseConverter]`
-members remain analyzer-visible.
+generic DTOs, collections, nullable values, explicit member converters, and polymorphic
+registrations under the SDK AOT/trim analyzers. Generated converters suppress AOT/trim diagnostics
+only when every member is covered by the generated graph or by an explicit typed converter; runtime
+and factory-based `[NbtUseConverter]` members remain analyzer-visible.
 
 Synchronous `Serialize(Stream)` flushes the document when serialization completes and leaves the
 stream open; `Deserialize(Stream)` reads the stream through a fixed-size buffer, so non-seekable

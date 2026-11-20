@@ -14,10 +14,9 @@ schedule.
 - P0 #3 is implemented as compile-time AOT/trim analysis in the test projects. Native publish and
   package-content checks were deliberately excluded from scope.
 - P1 #4, #5, #6, #7, and #8 are implemented.
-- P2 #9, #10, #11, and #13 are implemented. Resolver chains, naming policies/context options, and
-  async serialization are covered by stacked PRs.
-- P3 #14 and #16 are implemented. #15 has benchmarks but no CI baseline comparison; #12 is deferred
-  pending a wire-format decision.
+- P2 #9, #10, #11, #12, and #13 are implemented. Resolver chains, naming policies/context options,
+  polymorphic members, and async serialization are covered by stacked PRs.
+- P3 #14 and #16 are implemented. #15 has benchmarks but no CI baseline comparison.
 - P2 #11 includes sequence/map shape interfaces, immutable/frozen/concurrent/sorted shapes, and
   `CollectionBuilderAttribute`/companion factory/constructor/`Add` pattern discovery. Sorted maps
   with string keys and sorted sets with string elements use ordinal ordering;
@@ -209,19 +208,15 @@ reported explicitly instead of being mapped as objects.
 
 ### 12. Polymorphic members
 
-**Status (2026-11-20): deferred pending a wire-format decision.** Abstract and interface members
-still report `NBTSG003` / `NotSupportedException`. The implementation shape is understood:
-`[NbtDerived(typeof(X))]` registration on the base type, a discriminator member, and generated plus
-reflection dispatch. The unresolved choice is the NBT representation:
-
-- Flattened: `{ "$type": "Cat", ...derived members }` — compact and closest to `System.Text.Json`,
-  but reading needs buffering or DOM materialization and the writer must emit into an already-open
-  compound.
-- Envelope: `{ "$type": "Cat", "$value": { ...derived members } }` — isolated and simpler to
-  stream, but more verbose and unlike `System.Text.Json`.
-
-The discriminator value (short name, namespace-qualified name, or an explicit per-derived name) also
-needs to be fixed before the format becomes a compatibility contract.
+**Status (2026-11-20): implemented.** Abstract classes and interfaces opt in with
+`[NbtDerived(typeof(X))]`. The chosen representation is an envelope,
+`{ "$type": "X", "$value": { ...derived members... } }`, because it streams without buffering and
+keeps the discriminator out of the user member namespace. The discriminator defaults to the
+derived type's short name and can be overridden with `TypeDiscriminator`; the base must be a
+non-generic abstract class or interface and registrations must be closed concrete non-collection
+types assignable to it. Generated contexts emit static typed dispatch and reflection uses the same
+envelope, with `NBTSG018` / `NotSupportedException` for invalid declarations. Generic polymorphic
+base types and nested polymorphism remain unsupported.
 
 ### 13. Asynchronous serialization
 

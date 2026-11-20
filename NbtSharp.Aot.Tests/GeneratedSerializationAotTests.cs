@@ -287,6 +287,40 @@ public sealed class GeneratedSerializationAotTests
         Assert.Equal(value.Id, copy.Id);
         Assert.Equal(value.Amount, copy.Amount);
     }
+
+    [Fact]
+    public void RoundTripsPolymorphicMembers()
+    {
+        var value = new AotPetOwner
+        {
+            Pet = new AotCat { Name = "Milo", Lives = 9 },
+        };
+
+        var data = NbtSerializer.Serialize(value, AotContext.Default.AotPetOwner, "root");
+        var copy = NbtSerializer.Deserialize(data, AotContext.Default.AotPetOwner);
+
+        var cat = Assert.IsType<AotCat>(copy.Pet);
+        Assert.Equal("Milo", cat.Name);
+        Assert.Equal(9, cat.Lives);
+    }
+}
+
+[NbtDerived(typeof(AotCat))]
+internal interface IAotAnimal
+{
+    string Name { get; set; }
+}
+
+internal sealed class AotCat : IAotAnimal
+{
+    public string Name { get; set; } = "";
+
+    public int Lives { get; set; }
+}
+
+internal sealed class AotPetOwner
+{
+    public IAotAnimal? Pet { get; set; }
 }
 
 [NbtSerializable(typeof(AotSimple))]
@@ -299,6 +333,7 @@ public sealed class GeneratedSerializationAotTests
 [NbtSerializable(typeof(AotDiscoveredCollections))]
 [NbtSerializable(typeof(AotRecord))]
 [NbtSerializable(typeof(AotConverters))]
+[NbtSerializable(typeof(AotPetOwner))]
 internal partial class AotContext : NbtSerializerContext
 {
     public AotContext()
