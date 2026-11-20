@@ -166,9 +166,11 @@ Converters are still created once per type/options instance, and cache reads rem
 ### 9. Resolver chain and migration support
 
 **Status (2026-11-20): implemented.** `NbtTypeInfoResolverChain` consults resolvers in order and
-uses the first non-null result. A generated context can be combined with
-`NbtReflectionTypeInfoResolver` for migration; overlapping resolvers are resolved by order and the
-precedence is documented in the README.
+uses the first non-null result. It exposes a read-only resolver view, snapshots the constructor
+array, and rejects type information returned for a different type. A generated context can be
+combined with `NbtReflectionTypeInfoResolver` for migration; overlapping resolvers are resolved by
+order and the precedence is documented in the README. Additional overlap diagnostics remain out of
+scope.
 
 ### 10. Naming policy and generation options
 

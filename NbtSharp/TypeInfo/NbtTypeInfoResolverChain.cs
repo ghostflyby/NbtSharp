@@ -10,12 +10,18 @@ namespace NbtSharp;
 /// fallback for types that are not part of the generated context.
 /// </para>
 /// <para>
+/// A chain affects converter resolution through <see cref="NbtSerializerOptions"/>; the type-info
+/// overloads use the options bound to the returned <see cref="NbtTypeInfo"/>, which for a generated
+/// context is the context's own <see cref="NbtSerializerContext.Options"/>.
+/// </para>
+/// <para>
 /// The chain is immutable after construction. At least one resolver is required.
 /// </para>
 /// </remarks>
 public sealed class NbtTypeInfoResolverChain : INbtTypeInfoResolver
 {
     private readonly INbtTypeInfoResolver[] _resolvers;
+    private readonly IReadOnlyList<INbtTypeInfoResolver> _resolverView;
 
     /// <summary>Initializes a resolver chain consulted in the given order.</summary>
     /// <param name="resolvers">The resolvers, from highest to lowest precedence.</param>
@@ -34,10 +40,12 @@ public sealed class NbtTypeInfoResolverChain : INbtTypeInfoResolver
         {
             ArgumentNullException.ThrowIfNull(resolver);
         }
+
+        _resolverView = Array.AsReadOnly(_resolvers);
     }
 
-    /// <summary>Gets the resolvers in precedence order.</summary>
-    public IReadOnlyList<INbtTypeInfoResolver> Resolvers => _resolvers;
+    /// <summary>Gets a read-only view of the resolvers in precedence order.</summary>
+    public IReadOnlyList<INbtTypeInfoResolver> Resolvers => _resolverView;
 
     /// <inheritdoc/>
     public NbtTypeInfo? GetTypeInfo(Type type, NbtSerializerOptions options)
@@ -48,10 +56,19 @@ public sealed class NbtTypeInfoResolverChain : INbtTypeInfoResolver
         foreach (var resolver in _resolvers)
         {
             var typeInfo = resolver.GetTypeInfo(type, options);
-            if (typeInfo is not null)
+            if (typeInfo is null)
             {
-                return typeInfo;
+                continue;
             }
+
+            if (typeInfo.Type != type)
+            {
+                throw new InvalidOperationException(
+                    $"The resolver '{resolver.GetType()}' returned type information for " +
+                    $"'{typeInfo.Type}' when '{type}' was requested.");
+            }
+
+            return typeInfo;
         }
 
         return null;
