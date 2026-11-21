@@ -159,6 +159,7 @@ public sealed class NbtConverterParityTests
 
         Assert.Contains("converter handles", mismatched.Message, StringComparison.Ordinal);
         Assert.Contains("fields require [NbtInclude]", missingInclude.Message, StringComparison.Ordinal);
+        Assert.Equal(0, new InvalidFieldConverterDto().Value);
     }
 
     private static TestPath CreatePath(
