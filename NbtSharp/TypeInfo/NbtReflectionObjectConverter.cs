@@ -131,11 +131,29 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
 
             try
             {
-                values[index] = NbtSerializer.DeserializeValueInternal(
-                    ref reader,
-                    _members[index].Type,
-                    options,
-                    pathSegment: null);
+                var member = _members[index];
+                if (member.ExplicitConverter is { } converter)
+                {
+                    if (converter is NbtConverterFactory factory)
+                    {
+                        converter = factory.CreateConverter(member.Type, options);
+                    }
+
+                    values[index] = NbtSerializer.DeserializeValueCore(
+                        ref reader,
+                        member.Type,
+                        converter,
+                        options,
+                        pathSegment: null);
+                }
+                else
+                {
+                    values[index] = NbtSerializer.DeserializeValueInternal(
+                        ref reader,
+                        member.Type,
+                        options,
+                        pathSegment: null);
+                }
             }
             catch (NbtException ex)
             {
@@ -175,12 +193,25 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
                 };
             }
 
-            NbtSerializer.SerializeMemberInternal(
-                ref writer,
-                member.Name,
-                memberValue,
-                member.Type,
-                options);
+            if (member.ExplicitConverter is { } converter)
+            {
+                NbtSerializer.SerializeMemberWithConverterInternal(
+                    ref writer,
+                    member.Name,
+                    memberValue,
+                    member.Type,
+                    converter,
+                    options);
+            }
+            else
+            {
+                NbtSerializer.SerializeMemberInternal(
+                    ref writer,
+                    member.Name,
+                    memberValue,
+                    member.Type,
+                    options);
+            }
         }
 
         writer.WriteEndCompound();
@@ -433,7 +464,13 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
             var name = property.GetCustomAttribute<NbtPropertyNameAttribute>(inherit: true)?.Name ??
                        namingPolicy?.ConvertName(property.Name) ??
                        property.Name;
-            members.Add((property.MetadataToken, new NbtReflectionMember(name, property)));
+            var useConverter = property.GetCustomAttribute<NbtUseConverterAttribute>(inherit: true);
+            var explicitConverter = useConverter is null
+                ? null
+                : ResolveMemberConverter(property.PropertyType, useConverter, property.Name);
+            members.Add((
+                property.MetadataToken,
+                new NbtReflectionMember(name, property, explicitConverter)));
         }
 
         foreach (var field in type.GetFields(BindingFlags.Public | BindingFlags.Instance))
@@ -443,19 +480,112 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
                 continue;
             }
 
-            if (!field.IsDefined(typeof(NbtIncludeAttribute), inherit: true) ||
-                field.IsDefined(typeof(NbtIgnoreAttribute), inherit: true))
+            if (field.GetCustomAttribute<NbtIgnoreAttribute>(inherit: true) is not null)
             {
+                continue;
+            }
+
+            var useConverter = field.GetCustomAttribute<NbtUseConverterAttribute>(inherit: true);
+            if (field.GetCustomAttribute<NbtIncludeAttribute>(inherit: true) is null)
+            {
+                if (useConverter is not null)
+                {
+                    throw new NotSupportedException(
+                        $"The [NbtUseConverter] declaration on member '{field.Name}' is invalid: " +
+                        "fields require [NbtInclude] in addition to [NbtUseConverter].");
+                }
+
                 continue;
             }
 
             var name = field.GetCustomAttribute<NbtPropertyNameAttribute>(inherit: true)?.Name ??
                        namingPolicy?.ConvertName(field.Name) ??
                        field.Name;
-            members.Add((field.MetadataToken, new NbtReflectionMember(name, field)));
+            var explicitConverter = useConverter is null
+                ? null
+                : ResolveMemberConverter(field.FieldType, useConverter, field.Name);
+            members.Add((
+                field.MetadataToken,
+                new NbtReflectionMember(name, field, explicitConverter)));
         }
 
         return members.OrderBy(static member => member.Token).Select(static member => member.Member).ToArray();
+    }
+
+    private static NbtConverter? ResolveMemberConverter(
+        Type memberType,
+        NbtUseConverterAttribute attribute,
+        string memberName)
+    {
+        if (memberType == typeof(void) || memberType.IsPointer || memberType.IsByRefLike)
+        {
+            throw new NotSupportedException(
+                $"The [NbtUseConverter] declaration on member '{memberName}' is invalid: " +
+                "the member type cannot be used as a generic argument.");
+        }
+
+        var converterType = attribute.ConverterType;
+        if (converterType is null)
+        {
+            return null;
+        }
+
+        if (converterType.IsGenericTypeDefinition || converterType.ContainsGenericParameters)
+        {
+            return Invalid("the converter type must be a closed generic type");
+        }
+
+        if (converterType.IsAbstract)
+        {
+            return Invalid("the converter type must not be abstract");
+        }
+
+        if (!typeof(NbtConverter).IsAssignableFrom(converterType))
+        {
+            return Invalid("the converter type must derive from NbtSharp.NbtConverter");
+        }
+
+        var constructor = converterType.GetConstructor(Type.EmptyTypes);
+        if (constructor is null || !constructor.IsPublic)
+        {
+            return Invalid("the converter type must have a public parameterless constructor");
+        }
+
+        if (!typeof(NbtConverterFactory).IsAssignableFrom(converterType))
+        {
+            var handledType = FindConverterType(converterType);
+            if (handledType is null)
+            {
+                return Invalid(
+                    "the converter type must derive from NbtConverter<T> or NbtConverterFactory");
+            }
+
+            if (handledType != memberType)
+            {
+                return Invalid(
+                    $"the converter handles '{handledType}' but the member type is '{memberType}'");
+            }
+        }
+
+        return (NbtConverter)constructor.Invoke(null);
+
+        NbtConverter Invalid(string reason) =>
+            throw new NotSupportedException(
+                $"The [NbtUseConverter] declaration on member '{memberName}' is invalid: {reason}.");
+    }
+
+    private static Type? FindConverterType(Type type)
+    {
+        for (var current = type.BaseType; current is not null; current = current.BaseType)
+        {
+            if (current.IsGenericType &&
+                current.GetGenericTypeDefinition() == typeof(NbtConverter<>))
+            {
+                return current.GetGenericArguments()[0];
+            }
+        }
+
+        return null;
     }
 
     private static (ConstructorInfo? Constructor, int[] MemberIndexes) SelectConstructor(

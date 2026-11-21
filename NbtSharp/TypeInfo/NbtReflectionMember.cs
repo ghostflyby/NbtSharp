@@ -11,17 +11,25 @@ internal sealed class NbtReflectionMember
     private readonly PropertyInfo? _property;
     private readonly FieldInfo? _field;
 
-    public NbtReflectionMember(string name, PropertyInfo property)
+    public NbtReflectionMember(
+        string name,
+        PropertyInfo property,
+        NbtConverter? explicitConverter = null)
     {
         Name = name;
         Type = property.PropertyType;
+        ExplicitConverter = explicitConverter;
         _property = property;
     }
 
-    public NbtReflectionMember(string name, FieldInfo field)
+    public NbtReflectionMember(
+        string name,
+        FieldInfo field,
+        NbtConverter? explicitConverter = null)
     {
         Name = name;
         Type = field.FieldType;
+        ExplicitConverter = explicitConverter;
         _field = field;
     }
 
@@ -30,6 +38,8 @@ internal sealed class NbtReflectionMember
     public string ClrName => _property?.Name ?? _field!.Name;
 
     public Type Type { get; }
+
+    public NbtConverter? ExplicitConverter { get; }
 
     public bool CanWrite => _property?.CanWrite == true || _field is { IsInitOnly: false, IsLiteral: false };
 

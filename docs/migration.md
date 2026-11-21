@@ -1,8 +1,9 @@
 # Migrating from reflection to source generation
 
 The reflection path and the generated path share the same mapping rules and wire format for the
-intersection of shapes they both support. Migration can be incremental. `[NbtUseConverter]` is a
-generated-only feature: reflection ignores it.
+intersection of shapes they both support. Migration can be incremental. `[NbtUseConverter]` works on
+both paths: runtime mode resolves through `options.Converters`, and the explicit form uses the given
+converter (or factory) for that member.
 
 ## Before
 

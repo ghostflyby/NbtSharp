@@ -61,10 +61,12 @@ and generated steps cached, and tests cover 300 contexts plus a single 120-DTO c
 
 ### 2. Custom converters in source-generated DTOs
 
-**Status (2026-11-19): implemented.** `[NbtUseConverter]` supports runtime resolution and
-`[NbtUseConverter(typeof(...))]` supplies an explicit typed converter or factory. Marked members are
-excluded from graph discovery, follow normal converter precedence, and remain AOT-safe when the
-explicit converter is AOT-safe.
+**Status (2026-11-21): implemented on both mapping paths.** `[NbtUseConverter]` supports runtime
+resolution and `[NbtUseConverter(typeof(...))]` supplies an explicit typed converter or factory.
+Generated members exclude the type from graph discovery; reflection validates and applies the same
+attribute when building its object converter. Both honor `options.Converters` precedence for runtime
+mode and give the explicit converter precedence over options. Marked members are AOT-safe in the
+generated path when the explicit converter is AOT-safe.
 
 **Original gap**
 

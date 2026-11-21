@@ -338,11 +338,14 @@ public sealed class CompactInt32Converter : NbtConverter<int>
 ```
 
 Add converters to `options.Converters`. Custom converters are checked before built-in converters.
-For source-generated DTOs, `[NbtUseConverter]` opts a member out of the generated type graph and
-resolves its converter at runtime; `[NbtUseConverter(typeof(MyConverter))]` uses a specific converter
-and does not consult `options.Converters` for that member. Null member values follow the normal
+Both generated and reflection mapping honor `[NbtUseConverter]`: the attribute opts a member out of
+the generated type graph or reflection's object mapping and resolves its converter at runtime;
+`[NbtUseConverter(typeof(MyConverter))]` uses a specific converter and does not consult
+`options.Converters` for that member. Invalid declarations report `NBTSG016` during generation and
+throw `NotSupportedException` from the reflection resolver. Null member values follow the normal
 `NullValueHandling` rules and are not passed to the member converter. The explicit form requires the
-converter to be an `NbtConverter<T>` for the exact member type or a `NbtConverterFactory`.
+converter to be an `NbtConverter<T>` for the exact member type or a `NbtConverterFactory`. Fields
+also require `[NbtInclude]`.
 `TryGetTagType` is required for named compound members, root values, and the first element of a
 non-empty list, because the tag type must be known before the header is written. If it returns
 `false`, those operations throw `NotSupportedException`; implement the prediction to use the
