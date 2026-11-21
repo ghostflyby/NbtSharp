@@ -270,13 +270,14 @@ public sealed class NbtObjectMappingTests
         public int Count { get; init; }
     }
 
-    [SuppressMessage("ReSharper", "UnusedAutoPropertyAccessor.Local")]
+    [SuppressMessage("ReSharper", "UnusedAutoPropertyAccessor.Global")]
     internal sealed class RenamedDto
     {
         [NbtPropertyName("n")]
         public int Value { get; init; }
 
         [NbtIgnore]
+        // ReSharper disable once UnusedAutoPropertyAccessor.Global
         public int Ignored { get; set; }
     }
 
@@ -346,7 +347,7 @@ public sealed class NbtObjectMappingTests
         }
 
         [NbtIgnore]
-        // ReSharper disable once UnusedAutoPropertyAccessor.Local
+        // ReSharper disable once UnusedAutoPropertyAccessor.Global
         public required string Ignored { get; init; }
 
         public int Value { get; set; }
