@@ -89,7 +89,9 @@ member, `[NbtIgnore]` excludes it, and public fields are included only with `[Nb
 public parameterless constructor is preferred; otherwise a constructor whose parameter names match
 the members is used. Unknown members are skipped; a missing constructor-bound member uses the
 parameter's declared default value when it has one, falling back to the CLR default. Hidden (`new`)
-members are rejected because NBT has one member namespace per compound.
+members are rejected because NBT has one member namespace per compound. Mapping attributes declared
+on a virtual base property are inherited by overrides, matching their `AttributeUsage.Inherited`
+contract; public `[NbtInclude]` fields declared on a base type are included too.
 
 Reflection mapping can apply a preset naming policy to members without `[NbtPropertyName]` by
 setting `NbtSerializerOptions.PropertyNamingPolicy`, for example

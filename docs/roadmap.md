@@ -210,11 +210,11 @@ and stream overloads leave the stream open.
 
 ### 14. Test matrix expansion
 
-- Enum flags, undefined values, nested collections, and enum dictionaries.
-- Override attribute inheritance and inherited fields.
-- Custom-converter precedence matrix.
-- Malformed-input and fuzz tests for the reader.
-- Generator performance tests with large contexts.
+**Status (2026-11-20): implemented.** Coverage now includes flags and undefined enum values (members,
+roots, lists, and maps), nested CLR collections, inherited mapping attributes and base fields, the
+first-match converter ordering and explicit-member-versus-built-in cells of the precedence matrix,
+deterministic random/mutation/truncation corpora for the reader, and a single generated context with
+120 linked DTOs. Moving the generator timing evidence into CI remains part of #15.
 
 ### 15. Benchmarks and regression gates
 

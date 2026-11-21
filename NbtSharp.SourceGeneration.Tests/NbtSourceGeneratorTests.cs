@@ -915,6 +915,45 @@ public sealed class NbtSourceGeneratorTests
     }
 
     [Fact]
+    public void GeneratesLargeSingleContext()
+    {
+        const int dtoCount = 120;
+        var builder = new System.Text.StringBuilder();
+        builder.AppendLine("using NbtSharp;");
+        builder.AppendLine();
+        for (var i = 0; i < dtoCount; i++)
+        {
+            builder.Append("[NbtSerializable(typeof(Dto").Append(i).AppendLine("))]");
+        }
+
+        builder.AppendLine("internal partial class LargeContext : NbtSerializerContext");
+        builder.AppendLine("{");
+        builder.AppendLine("}");
+        builder.AppendLine();
+        for (var i = 0; i < dtoCount; i++)
+        {
+            builder.Append("internal sealed class Dto").Append(i).AppendLine();
+            builder.AppendLine("{");
+            if (i + 1 < dtoCount)
+            {
+                builder.Append("    public Dto")
+                    .Append(i + 1)
+                    .AppendLine("? Next { get; set; }");
+            }
+
+            builder.AppendLine("    public int Value { get; set; }");
+            builder.AppendLine("}");
+            builder.AppendLine();
+        }
+
+        var result = Run(builder.ToString());
+
+        AssertNoErrors(result);
+        Assert.Equal(1, result.GeneratedSourceCount);
+        Assert.Contains("Dto119", result.GeneratedSource, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void OnlyRebuildsChangedContextInLargeCompilation()
     {
         const int contextCount = 300;

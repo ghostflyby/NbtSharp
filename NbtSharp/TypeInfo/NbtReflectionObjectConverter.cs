@@ -346,9 +346,14 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
                 var getter = property.GetMethod;
                 if (getter is null ||
                     !getter.IsPublic ||
-                    property.GetIndexParameters().Length != 0 ||
-                    property.IsDefined(typeof(NbtIgnoreAttribute), inherit: true))
+                    property.GetIndexParameters().Length != 0)
                 {
+                    continue;
+                }
+
+                if (property.GetCustomAttribute<NbtIgnoreAttribute>(inherit: true) is not null)
+                {
+                    mappedProperties.Remove(getter.GetBaseDefinition());
                     continue;
                 }
 
@@ -420,7 +425,7 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
                 continue;
             }
 
-            if (property.IsDefined(typeof(NbtIgnoreAttribute), inherit: true))
+            if (property.GetCustomAttribute<NbtIgnoreAttribute>(inherit: true) is not null)
             {
                 continue;
             }
