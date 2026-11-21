@@ -166,6 +166,24 @@ public sealed class NbtConverterParityTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public void ExplicitFactoryCannotReturnAConverterForAnotherType(bool reflection)
+    {
+        var path = CreatePath(reflection);
+
+        var write = Assert.Throws<NotSupportedException>(() =>
+            path.Serialize(new WrongTypeFactoryDto { Value = 5 }));
+        var data = NbtSerializer.Serialize(
+            new NbtRoot("root", new NbtCompound { ["Value"] = 5 }));
+        var read = Assert.Throws<NotSupportedException>(() =>
+            path.Deserialize<WrongTypeFactoryDto>(data));
+
+        Assert.Contains("does not support", write.Message, StringComparison.Ordinal);
+        Assert.Contains("does not support", read.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public void ExplicitConverterWithoutTagPredictionFailsOnlyOnWrite(bool reflection)
     {
         var path = CreatePath(reflection);
@@ -198,6 +216,10 @@ public sealed class NbtConverterParityTests
             resolver.GetTypeInfo(typeof(InvalidCtorConverterDto), options));
         var openGeneric = Assert.Throws<NotSupportedException>(() =>
             resolver.GetTypeInfo(typeof(InvalidOpenGenericConverterDto), options));
+        var nonGeneric = Assert.Throws<NotSupportedException>(() =>
+            resolver.GetTypeInfo(typeof(InvalidNonGenericConverterDto), options));
+        var factoryCtor = Assert.Throws<NotSupportedException>(() =>
+            resolver.GetTypeInfo(typeof(InvalidFactoryCtorDto), options));
 
         Assert.Contains("converter handles", mismatched.Message, StringComparison.Ordinal);
         Assert.Contains("fields require [NbtInclude]", missingInclude.Message, StringComparison.Ordinal);
@@ -205,6 +227,11 @@ public sealed class NbtConverterParityTests
         Assert.Contains("must not be abstract", abstractConverter.Message, StringComparison.Ordinal);
         Assert.Contains("public parameterless constructor", missingCtor.Message, StringComparison.Ordinal);
         Assert.Contains("closed generic type", openGeneric.Message, StringComparison.Ordinal);
+        Assert.Contains(
+            "must derive from NbtConverter<T> or NbtConverterFactory",
+            nonGeneric.Message,
+            StringComparison.Ordinal);
+        Assert.Contains("public parameterless constructor", factoryCtor.Message, StringComparison.Ordinal);
         Assert.Equal(0, new InvalidFieldConverterDto().Value);
     }
 
@@ -288,6 +315,34 @@ internal sealed class BadFactoryDto
     public Guid Id { get; set; }
 }
 
+internal sealed class WrongTypeFactoryDto
+{
+    [NbtUseConverter(typeof(WrongTypeFactory))]
+    public int Value { get; set; }
+}
+
+internal sealed class WrongTypeFactory : NbtConverterFactory
+{
+    public override bool CanConvert(Type typeToConvert) => typeToConvert == typeof(int);
+
+    public override NbtConverter CreateConverter(
+        Type typeToConvert,
+        NbtSerializerOptions options) =>
+        new WrongTypeLongConverter();
+}
+
+internal sealed class WrongTypeLongConverter : NbtConverter<long>
+{
+    public override long Read(ref NbtReader reader, NbtSerializerOptions options) =>
+        reader.GetInt64();
+
+    public override void Write(
+        ref NbtWriter writer,
+        long value,
+        NbtSerializerOptions options) =>
+        writer.WriteInt64(value);
+}
+
 internal sealed class NoTagTypeDto
 {
     [NbtUseConverter(typeof(NoTagTypeIntConverter))]
@@ -338,6 +393,26 @@ internal sealed class InvalidFieldConverterDto
 
 internal sealed class NotAConverter
 {
+}
+
+internal sealed class NonGenericNbtConverter : NbtConverter
+{
+    public override bool CanConvert(Type typeToConvert) => true;
+}
+
+internal sealed class FactoryWithoutDefaultConstructor : NbtConverterFactory
+{
+    public FactoryWithoutDefaultConstructor(int value)
+    {
+        _ = value;
+    }
+
+    public override bool CanConvert(Type typeToConvert) => typeToConvert == typeof(int);
+
+    public override NbtConverter CreateConverter(
+        Type typeToConvert,
+        NbtSerializerOptions options) =>
+        new OffsetIntConverter();
 }
 
 internal abstract class AbstractIntConverter : NbtConverter<int>
@@ -398,6 +473,18 @@ internal sealed class InvalidOpenGenericConverterDto
     public int Value { get; set; }
 }
 
+internal sealed class InvalidNonGenericConverterDto
+{
+    [NbtUseConverter(typeof(NonGenericNbtConverter))]
+    public int Value { get; set; }
+}
+
+internal sealed class InvalidFactoryCtorDto
+{
+    [NbtUseConverter(typeof(FactoryWithoutDefaultConstructor))]
+    public int Value { get; set; }
+}
+
 internal sealed class OffsetIntFactory : NbtConverterFactory
 {
     public override bool CanConvert(Type typeToConvert) => typeToConvert == typeof(int);
@@ -432,6 +519,7 @@ internal sealed class ParityStringConverter : NbtConverter<string>
 [NbtSerializable(typeof(ConverterParityDto))]
 [NbtSerializable(typeof(RuntimeConverterDto))]
 [NbtSerializable(typeof(BadFactoryDto))]
+[NbtSerializable(typeof(WrongTypeFactoryDto))]
 [NbtSerializable(typeof(NoTagTypeDto))]
 [NbtSerializable(typeof(ConverterFieldDto))]
 [NbtSerializable(typeof(ConverterOverrideDto))]

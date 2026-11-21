@@ -516,7 +516,10 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
         NbtUseConverterAttribute attribute,
         string memberName)
     {
-        if (memberType == typeof(void) || memberType.IsPointer || memberType.IsByRefLike)
+        if (memberType == typeof(void) ||
+            memberType.IsPointer ||
+            memberType.IsFunctionPointer ||
+            memberType.IsByRefLike)
         {
             throw new NotSupportedException(
                 $"The [NbtUseConverter] declaration on member '{memberName}' is invalid: " +
