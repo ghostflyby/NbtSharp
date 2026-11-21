@@ -1294,8 +1294,8 @@ public static class NbtSerializer
             return converter;
         }
 
-        var resolved = factory.CreateConverter(type, options);
-        if (resolved is null || !resolved.CanConvert(type))
+        object? candidate = factory.CreateConverter(type, options);
+        if (candidate is not NbtConverter resolved || !resolved.CanConvert(type))
         {
             throw new NotSupportedException(
                 $"The converter {converter.GetType()} does not support {type}.");
