@@ -2,8 +2,50 @@ namespace NbtSharp.Tests;
 
 public sealed class NbtEnumMatrixTests
 {
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void FlagsAndUndefinedValuesRoundTrip(SerializationMode mode)
+    {
+        var path = CreatePath(mode);
+        var value = new EnumMatrixDto
+        {
+            Flags = MatrixFlags.Alpha | MatrixFlags.Gamma,
+            Optional = MatrixFlags.Beta,
+            Undefined = (MatrixByteEnum)200,
+            Values = [MatrixByteEnum.One, (MatrixByteEnum)255],
+            Map = new Dictionary<string, MatrixByteEnum>
+            {
+                ["defined"] = MatrixByteEnum.One,
+                ["undefined"] = (MatrixByteEnum)200,
+            },
+        };
+
+        var data = path.Serialize(value);
+        var copy = path.Deserialize<EnumMatrixDto>(data);
+
+        Assert.Equal(value.Flags, copy.Flags);
+        Assert.Equal(value.Optional, copy.Optional);
+        Assert.Equal(value.Undefined, copy.Undefined);
+        Assert.Equal(value.Values, copy.Values);
+        Assert.Equal(value.Map, copy.Map);
+    }
+
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void UndefinedRootEnumValueRoundTrips(SerializationMode mode)
+    {
+        var path = CreatePath(mode);
+        var value = (MatrixByteEnum)200;
+
+        var data = path.Serialize(value);
+
+        Assert.Equal(value, path.Deserialize<MatrixByteEnum>(data));
+    }
+
     [Fact]
-    public void FlagsAndUndefinedValuesRoundTripThroughBothPaths()
+    public void BothPathsProduceTheSameBytes()
     {
         var value = new EnumMatrixDto
         {
@@ -17,57 +59,19 @@ public sealed class NbtEnumMatrixTests
                 ["undefined"] = (MatrixByteEnum)200,
             },
         };
-        var reflection = new NbtSerializerOptions
-        {
-            TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
-        };
 
-        var generatedData = NbtSerializer.Serialize(
-            value,
-            EnumMatrixContext.Default.EnumMatrixDto,
-            "root");
-        var reflectedData = NbtSerializer.Serialize(value, "root", reflection);
-
-        Assert.Equal(reflectedData, generatedData);
-
-        var generatedCopy = NbtSerializer.Deserialize(
-            generatedData,
-            EnumMatrixContext.Default.EnumMatrixDto);
-        var reflectedCopy = NbtSerializer.Deserialize<EnumMatrixDto>(reflectedData, reflection);
-
-        Assert.Equal(value.Flags, generatedCopy.Flags);
-        Assert.Equal(value.Optional, generatedCopy.Optional);
-        Assert.Equal(value.Undefined, generatedCopy.Undefined);
-        Assert.Equal(value.Values, generatedCopy.Values);
-        Assert.Equal(value.Map, generatedCopy.Map);
-        Assert.Equal(value.Flags, reflectedCopy.Flags);
-        Assert.Equal(value.Optional, reflectedCopy.Optional);
-        Assert.Equal(value.Undefined, reflectedCopy.Undefined);
-        Assert.Equal(value.Values, reflectedCopy.Values);
-        Assert.Equal(value.Map, reflectedCopy.Map);
-    }
-
-    [Fact]
-    public void UndefinedRootEnumValueRoundTrips()
-    {
-        var value = (MatrixByteEnum)200;
-        var reflection = new NbtSerializerOptions
-        {
-            TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
-        };
-
-        var generatedData = NbtSerializer.Serialize(
-            value,
-            EnumMatrixContext.Default.MatrixByteEnum,
-            "root");
-        var reflectedData = NbtSerializer.Serialize(value, "root", reflection);
-
-        Assert.Equal(reflectedData, generatedData);
         Assert.Equal(
-            value,
-            NbtSerializer.Deserialize(generatedData, EnumMatrixContext.Default.MatrixByteEnum));
-        Assert.Equal(value, NbtSerializer.Deserialize<MatrixByteEnum>(reflectedData, reflection));
+            CreatePath(SerializationMode.Reflection).Serialize(value),
+            CreatePath(SerializationMode.Generated).Serialize(value));
     }
+
+    private static SerializationTestPath CreatePath(SerializationMode mode) =>
+        mode == SerializationMode.Reflection
+            ? SerializationTestPath.Reflection(new NbtSerializerOptions
+            {
+                TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
+            })
+            : SerializationTestPath.Generated(EnumMatrixContext.Default);
 }
 
 [Flags]
