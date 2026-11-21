@@ -74,7 +74,11 @@ Reflection applies `[NbtPropertyName]` and, when configured,
   change their wire output (an explicit converter takes precedence over `options.Converters`) or
   start throwing for declarations the generator would reject, such as a field with
   `[NbtUseConverter]` but no `[NbtInclude]`. Previously the attribute was ignored on the reflection
-  path.
+  path. Runtime-mode `[NbtUseConverter]` still leaves the member inside reflection's object mapping;
+  only generated contexts remove it from the graph.
+- For a closed generic DTO, reflection validates an explicit converter against the substituted
+  member type. Generation validates the open member type, so a converter declared on a generic type
+  parameter may need restructuring before that model can move to source generation.
 - Unsupported types become build diagnostics (`NBTSG003`, `NBTSG011`, …) instead of runtime
   `NotSupportedException`. Apply the suggested fix before deleting the reflection fallback.
 - Private setters in another assembly are not visible to the generator. The member is still

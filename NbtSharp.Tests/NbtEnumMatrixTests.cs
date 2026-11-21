@@ -63,6 +63,9 @@ public sealed class NbtEnumMatrixTests
         Assert.Equal(
             CreatePath(SerializationMode.Reflection).Serialize(value),
             CreatePath(SerializationMode.Generated).Serialize(value));
+        Assert.Equal(
+            CreatePath(SerializationMode.Reflection).Serialize((MatrixByteEnum)200),
+            CreatePath(SerializationMode.Generated).Serialize((MatrixByteEnum)200));
     }
 
     private static SerializationTestPath CreatePath(SerializationMode mode) =>

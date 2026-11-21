@@ -75,7 +75,10 @@ public sealed class NbtConverterParityTests
     [InlineData(true)]
     public void ExplicitConverterFactoryIsUsed(bool reflection)
     {
-        var path = CreatePath(reflection);
+        var path = CreatePath(
+            reflection,
+            addConverters: static options =>
+                options.Converters.Add(new OffsetIntConverter(200)));
         var value = new ConverterParityDto { ExplicitFactoryInt = 7 };
 
         var data = path.Serialize(value);
@@ -220,6 +223,8 @@ public sealed class NbtConverterParityTests
             resolver.GetTypeInfo(typeof(InvalidNonGenericConverterDto), options));
         var factoryCtor = Assert.Throws<NotSupportedException>(() =>
             resolver.GetTypeInfo(typeof(InvalidFactoryCtorDto), options));
+        var nullableMismatch = Assert.Throws<NotSupportedException>(() =>
+            resolver.GetTypeInfo(typeof(InvalidNullableConverterDto), options));
 
         Assert.Contains("converter handles", mismatched.Message, StringComparison.Ordinal);
         Assert.Contains("fields require [NbtInclude]", missingInclude.Message, StringComparison.Ordinal);
@@ -232,6 +237,7 @@ public sealed class NbtConverterParityTests
             nonGeneric.Message,
             StringComparison.Ordinal);
         Assert.Contains("public parameterless constructor", factoryCtor.Message, StringComparison.Ordinal);
+        Assert.Contains("converter handles", nullableMismatch.Message, StringComparison.Ordinal);
         Assert.Equal(0, new InvalidFieldConverterDto().Value);
     }
 
@@ -483,6 +489,12 @@ internal sealed class InvalidFactoryCtorDto
 {
     [NbtUseConverter(typeof(FactoryWithoutDefaultConstructor))]
     public int Value { get; set; }
+}
+
+internal sealed class InvalidNullableConverterDto
+{
+    [NbtUseConverter(typeof(SourceGenGuidConverter))]
+    public Guid? Value { get; set; }
 }
 
 internal sealed class OffsetIntFactory : NbtConverterFactory

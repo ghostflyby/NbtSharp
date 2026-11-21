@@ -14,9 +14,9 @@ namespace NbtSharp;
 /// <para>
 /// Properties are mapped by name; public fields are included only when marked with
 /// <see cref="NbtIncludeAttribute"/>. <see cref="NbtIgnoreAttribute"/> excludes a member,
-/// <see cref="NbtPropertyNameAttribute"/> renames it, and
+/// <see cref="NbtPropertyNameAttribute"/> renames it,
 /// <see cref="NbtSerializerOptions.PropertyNamingPolicy"/> renames members without an explicit
-/// name.
+/// name, and <see cref="NbtUseConverterAttribute"/> selects a runtime or explicit member converter.
 /// </para>
 /// <para>
 /// This resolver uses reflection and runtime generic construction. It is not safe for Native AOT

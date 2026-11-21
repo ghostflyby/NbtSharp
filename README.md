@@ -85,7 +85,8 @@ int value = NbtSerializer.Deserialize<int>(data, out string? rootName);
 ```
 
 Reflection mapping uses public instance properties by default. `[NbtPropertyName("name")]` renames a
-member, `[NbtIgnore]` excludes it, and public fields are included only with `[NbtInclude]`. A
+member, `[NbtIgnore]` excludes it, `[NbtUseConverter]` selects a runtime or explicit member converter,
+and public fields are included only with `[NbtInclude]`. A
 public parameterless constructor is preferred; otherwise a constructor whose parameter names match
 the members is used. Unknown members are skipped; a missing constructor-bound member uses the
 parameter's declared default value when it has one, falling back to the CLR default. Hidden (`new`)
