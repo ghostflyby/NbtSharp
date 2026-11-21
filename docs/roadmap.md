@@ -165,9 +165,12 @@ Converters are still created once per type/options instance, and cache reads rem
 
 ### 9. Resolver chain and migration support
 
-- Add an `NbtTypeInfoResolverChain` or an equivalent fallback mechanism.
-- Allow generated contexts to be combined with the reflection resolver during migration.
-- Define precedence and diagnostics for overlapping resolvers.
+**Status (2026-11-20): implemented.** `NbtTypeInfoResolverChain` consults resolvers in order and
+uses the first non-null result. It exposes a read-only resolver view, snapshots the constructor
+array, and rejects type information returned for a different type. A generated context can be
+combined with `NbtReflectionTypeInfoResolver` for migration; overlapping resolvers are resolved by
+order and the precedence is documented in the README. Additional overlap diagnostics remain out of
+scope.
 
 ### 10. Naming policy and generation options
 
@@ -226,10 +229,9 @@ and stream overloads leave the stream open.
 
 ## Suggested sequencing
 
-P0, P1, P2 #11 and P2 #13 are complete. For the remaining work:
+P0, P1 and P2 #9/#11/#13 are complete. For the remaining work:
 
-1. P2 #9: resolver-chain migration support.
-2. P2 #10/#12 and the P3 items when their design prerequisites are settled.
+1. P2 #10/#12 and the P3 items when their design prerequisites are settled.
 
 ## Deliberate non-goals for now
 

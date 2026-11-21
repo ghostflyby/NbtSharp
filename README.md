@@ -333,7 +333,13 @@ the list is empty.
 - `Converters`, `TypeInfoResolver`, and `RootFormat` (named or unnamed root).
   Converter lookup checks `Converters` first, then `TypeInfoResolver`, then the built-in
   converters, so a resolver can supply converters for collection types that the built-in
-  factories would otherwise construct dynamically.
+  factories would otherwise construct dynamically. `NbtTypeInfoResolverChain` consults resolvers
+  in order and uses the first non-null result; for migration, combine a generated context with
+  the reflection resolver, for example
+  `new NbtTypeInfoResolverChain(context, new NbtReflectionTypeInfoResolver())`. A chain inherits
+  the trimming/AOT requirements of its resolvers, so the reflection fallback is not AOT-safe.
+  Type-information serializer overloads use the options bound to the matched type information;
+  for a generated context that is the context's own `Options`.
 - `NullValueHandling`: omit a null compound member (default) or throw. Null roots and null list
   elements always throw because NBT has no null tag.
 - `RejectDuplicateCompoundNames`: while reading, keep the last duplicate (default) or throw.
