@@ -345,7 +345,9 @@ the generated type graph or reflection's object mapping and resolves its convert
 throw `NotSupportedException` from the reflection resolver. Null member values follow the normal
 `NullValueHandling` rules and are not passed to the member converter. The explicit form requires the
 converter to be an `NbtConverter<T>` for the exact member type or a `NbtConverterFactory`. Fields
-also require `[NbtInclude]`.
+also require `[NbtInclude]`. Generated code additionally requires the converter type to be accessible
+from the context assembly; reflection instantiates it directly and does not apply that
+context-assembly check.
 `TryGetTagType` is required for named compound members, root values, and the first element of a
 non-empty list, because the tag type must be known before the header is written. If it returns
 `false`, those operations throw `NotSupportedException`; implement the prediction to use the

@@ -134,11 +134,10 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
                 var member = _members[index];
                 if (member.ExplicitConverter is { } converter)
                 {
-                    if (converter is NbtConverterFactory factory)
-                    {
-                        converter = factory.CreateConverter(member.Type, options);
-                    }
-
+                    converter = NbtSerializer.ResolveConverterForType(
+                        converter,
+                        member.Type,
+                        options);
                     values[index] = NbtSerializer.DeserializeValueCore(
                         ref reader,
                         member.Type,

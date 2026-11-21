@@ -1250,10 +1250,7 @@ public static class NbtSerializer
         NbtConverter resolved = converter;
         try
         {
-            if (resolved is NbtConverterFactory factory)
-            {
-                resolved = factory.CreateConverter(type, options);
-            }
+            resolved = ResolveConverterForType(resolved, type, options);
 
             if (!resolved.TryGetTagType(value, type, options, out var tagType))
             {
@@ -1285,6 +1282,26 @@ public static class NbtSerializer
             PrependPath(ex, "." + name);
             throw;
         }
+    }
+
+    internal static NbtConverter ResolveConverterForType(
+        NbtConverter converter,
+        Type type,
+        NbtSerializerOptions options)
+    {
+        if (converter is not NbtConverterFactory factory)
+        {
+            return converter;
+        }
+
+        var resolved = factory.CreateConverter(type, options);
+        if (resolved is null || !resolved.CanConvert(type))
+        {
+            throw new NotSupportedException(
+                $"The converter {converter.GetType()} does not support {type}.");
+        }
+
+        return resolved;
     }
 
     [RequiresUnreferencedCode("Converter resolution may use reflection or runtime generic construction.")]

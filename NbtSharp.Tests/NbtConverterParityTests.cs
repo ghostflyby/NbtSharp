@@ -146,6 +146,40 @@ public sealed class NbtConverterParityTests
         Assert.Equal(6, copy.Value);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ExplicitFactoryMustReturnConverterForMemberType(bool reflection)
+    {
+        var path = CreatePath(reflection);
+        var value = new BadFactoryDto { Id = Guid.NewGuid() };
+
+        var write = Assert.Throws<NotSupportedException>(() => path.Serialize(value));
+        var data = NbtSerializer.Serialize(
+            new NbtRoot("root", new NbtCompound { ["Id"] = new sbyte[16] }));
+        var read = Assert.Throws<NotSupportedException>(() => path.Deserialize<BadFactoryDto>(data));
+
+        Assert.Contains("does not support", write.Message, StringComparison.Ordinal);
+        Assert.Contains("does not support", read.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ExplicitConverterWithoutTagPredictionFailsOnlyOnWrite(bool reflection)
+    {
+        var path = CreatePath(reflection);
+        var value = new NoTagTypeDto { Value = 3 };
+
+        var write = Assert.Throws<NotSupportedException>(() => path.Serialize(value));
+        var data = NbtSerializer.Serialize(
+            new NbtRoot("root", new NbtCompound { ["Value"] = 3 }));
+        var copy = path.Deserialize<NoTagTypeDto>(data);
+
+        Assert.Contains("TryGetTagType", write.Message, StringComparison.Ordinal);
+        Assert.Equal(3, copy.Value);
+    }
+
     [Fact]
     public void ReflectionRejectsInvalidConverterDeclarations()
     {
@@ -156,9 +190,21 @@ public sealed class NbtConverterParityTests
             resolver.GetTypeInfo(typeof(InvalidConverterDto), options));
         var missingInclude = Assert.Throws<NotSupportedException>(() =>
             resolver.GetTypeInfo(typeof(InvalidFieldConverterDto), options));
+        var notConverter = Assert.Throws<NotSupportedException>(() =>
+            resolver.GetTypeInfo(typeof(InvalidNotConverterDto), options));
+        var abstractConverter = Assert.Throws<NotSupportedException>(() =>
+            resolver.GetTypeInfo(typeof(InvalidAbstractConverterDto), options));
+        var missingCtor = Assert.Throws<NotSupportedException>(() =>
+            resolver.GetTypeInfo(typeof(InvalidCtorConverterDto), options));
+        var openGeneric = Assert.Throws<NotSupportedException>(() =>
+            resolver.GetTypeInfo(typeof(InvalidOpenGenericConverterDto), options));
 
         Assert.Contains("converter handles", mismatched.Message, StringComparison.Ordinal);
         Assert.Contains("fields require [NbtInclude]", missingInclude.Message, StringComparison.Ordinal);
+        Assert.Contains("must derive from NbtSharp.NbtConverter", notConverter.Message, StringComparison.Ordinal);
+        Assert.Contains("must not be abstract", abstractConverter.Message, StringComparison.Ordinal);
+        Assert.Contains("public parameterless constructor", missingCtor.Message, StringComparison.Ordinal);
+        Assert.Contains("closed generic type", openGeneric.Message, StringComparison.Ordinal);
         Assert.Equal(0, new InvalidFieldConverterDto().Value);
     }
 
@@ -236,6 +282,30 @@ internal sealed class RuntimeConverterDto
     public Guid RuntimeGuid { get; set; }
 }
 
+internal sealed class BadFactoryDto
+{
+    [NbtUseConverter(typeof(SourceGenBadFactory))]
+    public Guid Id { get; set; }
+}
+
+internal sealed class NoTagTypeDto
+{
+    [NbtUseConverter(typeof(NoTagTypeIntConverter))]
+    public int Value { get; set; }
+}
+
+internal sealed class NoTagTypeIntConverter : NbtConverter<int>
+{
+    public override int Read(ref NbtReader reader, NbtSerializerOptions options) =>
+        reader.GetInt32();
+
+    public override void Write(
+        ref NbtWriter writer,
+        int value,
+        NbtSerializerOptions options) =>
+        writer.WriteInt32(value);
+}
+
 internal sealed class ConverterFieldDto
 {
     [NbtInclude]
@@ -264,6 +334,68 @@ internal sealed class InvalidFieldConverterDto
 {
     [NbtUseConverter]
     public int Value = 0;
+}
+
+internal sealed class NotAConverter
+{
+}
+
+internal abstract class AbstractIntConverter : NbtConverter<int>
+{
+}
+
+internal sealed class NoDefaultCtorIntConverter : NbtConverter<int>
+{
+    public NoDefaultCtorIntConverter(int value)
+    {
+        _ = value;
+    }
+
+    public override int Read(ref NbtReader reader, NbtSerializerOptions options) =>
+        reader.GetInt32();
+
+    public override void Write(
+        ref NbtWriter writer,
+        int value,
+        NbtSerializerOptions options) =>
+        writer.WriteInt32(value);
+}
+
+internal sealed class OpenGenericConverter<T> : NbtConverter<T>
+{
+    public override T Read(ref NbtReader reader, NbtSerializerOptions options) =>
+        default!;
+
+    public override void Write(
+        ref NbtWriter writer,
+        T value,
+        NbtSerializerOptions options)
+    {
+    }
+}
+
+internal sealed class InvalidNotConverterDto
+{
+    [NbtUseConverter(typeof(NotAConverter))]
+    public int Value { get; set; }
+}
+
+internal sealed class InvalidAbstractConverterDto
+{
+    [NbtUseConverter(typeof(AbstractIntConverter))]
+    public int Value { get; set; }
+}
+
+internal sealed class InvalidCtorConverterDto
+{
+    [NbtUseConverter(typeof(NoDefaultCtorIntConverter))]
+    public int Value { get; set; }
+}
+
+internal sealed class InvalidOpenGenericConverterDto
+{
+    [NbtUseConverter(typeof(OpenGenericConverter<>))]
+    public int Value { get; set; }
 }
 
 internal sealed class OffsetIntFactory : NbtConverterFactory
@@ -299,6 +431,8 @@ internal sealed class ParityStringConverter : NbtConverter<string>
 
 [NbtSerializable(typeof(ConverterParityDto))]
 [NbtSerializable(typeof(RuntimeConverterDto))]
+[NbtSerializable(typeof(BadFactoryDto))]
+[NbtSerializable(typeof(NoTagTypeDto))]
 [NbtSerializable(typeof(ConverterFieldDto))]
 [NbtSerializable(typeof(ConverterOverrideDto))]
 internal partial class ConverterParityContext : NbtSerializerContext
