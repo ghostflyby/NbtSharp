@@ -1294,8 +1294,10 @@ public static class NbtSerializer
             return converter;
         }
 
-        object? candidate = factory.CreateConverter(type, options);
-        if (candidate is not NbtConverter resolved || !resolved.CanConvert(type))
+        var resolved = factory.CreateConverter(type, options);
+        // User factories can return null despite the non-nullable contract.
+        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
+        if (resolved is null || !resolved.CanConvert(type))
         {
             throw new NotSupportedException(
                 $"The converter {converter.GetType()} does not support {type}.");
