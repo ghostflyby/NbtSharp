@@ -11,6 +11,20 @@ internal enum TypeEntryKind
     Collection,
     Map,
     Enum,
+    Polymorphic,
+}
+
+internal sealed class DerivedTypeModel
+{
+    public DerivedTypeModel(INamedTypeSymbol type, string discriminator)
+    {
+        Type = type;
+        Discriminator = discriminator;
+    }
+
+    public INamedTypeSymbol Type { get; }
+
+    public string Discriminator { get; }
 }
 
 internal sealed class TypeEntry
@@ -52,6 +66,8 @@ internal sealed class TypeEntry
     public MapShape MapShape { get; set; }
 
     public ITypeSymbol? UnderlyingType { get; set; }
+
+    public ImmutableArray<DerivedTypeModel> DerivedTypes { get; set; } = [];
 }
 
 internal sealed class ObjectModel
@@ -154,6 +170,7 @@ internal sealed class TypeGraph
     private const string IncludeAttribute = "NbtSharp.NbtIncludeAttribute";
     private const string PropertyNameAttribute = "NbtSharp.NbtPropertyNameAttribute";
     private const string UseConverterAttribute = "NbtSharp.NbtUseConverterAttribute";
+    private const string DerivedAttribute = "NbtSharp.NbtDerivedAttribute";
 
     private static readonly SymbolDisplayFormat FullyQualified = SymbolDisplayFormat.FullyQualifiedFormat;
 
@@ -262,6 +279,19 @@ internal sealed class TypeGraph
             };
             Register(enumEntry);
             return enumEntry;
+        }
+
+        if (HasDerivedRegistrations(named))
+        {
+            if (ImplementsEnumerable(named))
+            {
+                return ReportInvalidDerived(
+                    named,
+                    location,
+                    "the base type is a collection shape and cannot be polymorphic");
+            }
+
+            return AddPolymorphicType(named, location);
         }
 
         if (named.IsGenericType)
@@ -422,6 +452,186 @@ internal sealed class TypeGraph
         Register(objectEntry);
         objectEntry.Object = BuildObjectModel(named, location);
         return objectEntry;
+    }
+
+    private TypeEntry? AddPolymorphicType(INamedTypeSymbol type, Location? location)
+    {
+        if (type.IsValueType)
+        {
+            return ReportInvalidDerived(type, location, "the base type must be a class or interface");
+        }
+
+        if (!type.IsAbstract && type.TypeKind != TypeKind.Interface)
+        {
+            return ReportInvalidDerived(
+                type,
+                location,
+                "the base type must be abstract or an interface");
+        }
+
+        if (type.IsSealed)
+        {
+            return ReportInvalidDerived(type, location, "the base type must not be sealed");
+        }
+
+        if (type.IsGenericType)
+        {
+            return ReportInvalidDerived(
+                type,
+                location,
+                "generic polymorphic base types are not supported");
+        }
+
+        var derivedTypes = ImmutableArray.CreateBuilder<DerivedTypeModel>();
+        var discriminators = new HashSet<string>(StringComparer.Ordinal);
+        var registeredTypes = new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default);
+        foreach (var attribute in type.GetAttributes())
+        {
+            if (attribute.AttributeClass?.ToDisplayString() != DerivedAttribute)
+            {
+                continue;
+            }
+
+            if (attribute.ConstructorArguments.Length != 1 ||
+                attribute.ConstructorArguments[0].Value is not INamedTypeSymbol derivedType)
+            {
+                return ReportInvalidDerived(
+                    type,
+                    location,
+                    "the constructor argument must be a type");
+            }
+
+            if (SymbolEqualityComparer.Default.Equals(derivedType, type) ||
+                derivedType.TypeKind is not TypeKind.Class and not TypeKind.Struct ||
+                derivedType.IsAbstract ||
+                derivedType.IsUnboundGenericType ||
+                derivedType.IsGenericType &&
+                derivedType.TypeArguments.Any(static argument =>
+                    argument.TypeKind == TypeKind.TypeParameter))
+            {
+                return ReportInvalidDerived(
+                    type,
+                    location,
+                    $"'{derivedType.ToDisplayString(FullyQualified)}' must be a closed concrete class or struct");
+            }
+
+            if (ImplementsEnumerable(derivedType))
+            {
+                return ReportInvalidDerived(
+                    type,
+                    location,
+                    $"'{derivedType.ToDisplayString(FullyQualified)}' must not be a collection shape");
+            }
+
+            if (HasDerivedRegistrations(derivedType))
+            {
+                return ReportInvalidDerived(
+                    type,
+                    location,
+                    $"'{derivedType.ToDisplayString(FullyQualified)}' is itself polymorphic and cannot be registered as a derived type");
+            }
+
+            if (!IsDerivedFrom(type, derivedType))
+            {
+                return ReportInvalidDerived(
+                    type,
+                    location,
+                    $"'{derivedType.ToDisplayString(FullyQualified)}' is not assignable to the base type");
+            }
+
+            if (!registeredTypes.Add(derivedType))
+            {
+                return ReportInvalidDerived(
+                    type,
+                    location,
+                    $"'{derivedType.ToDisplayString(FullyQualified)}' is registered more than once");
+            }
+
+            string? discriminator = null;
+            foreach (var argument in attribute.NamedArguments)
+            {
+                if (argument.Key == "TypeDiscriminator" &&
+                    argument.Value.Value is string explicitDiscriminator)
+                {
+                    discriminator = explicitDiscriminator;
+                }
+            }
+
+            discriminator ??= derivedType.Name;
+            if (string.IsNullOrEmpty(discriminator))
+            {
+                return ReportInvalidDerived(
+                    type,
+                    location,
+                    $"'{derivedType.ToDisplayString(FullyQualified)}' has an empty discriminator");
+            }
+
+            if (!discriminators.Add(discriminator))
+            {
+                return ReportInvalidDerived(
+                    type,
+                    location,
+                    $"the discriminator '{discriminator}' is registered more than once");
+            }
+
+            derivedTypes.Add(new DerivedTypeModel(derivedType, discriminator));
+        }
+
+        var entry = new TypeEntry(type, TypeEntryKind.Polymorphic)
+        {
+            DerivedTypes = derivedTypes.ToImmutable(),
+        };
+        Register(entry);
+        foreach (var derivedType in entry.DerivedTypes)
+        {
+            AddType(
+                derivedType.Type,
+                location,
+                $"derived type of {type.ToDisplayString(FullyQualified)}");
+        }
+
+        return entry;
+    }
+
+    private TypeEntry? ReportInvalidDerived(
+        INamedTypeSymbol type,
+        Location? location,
+        string reason)
+    {
+        Report(
+            Diagnostics.InvalidDerived,
+            location ?? type.Locations.FirstOrDefault(),
+            type.ToDisplayString(FullyQualified),
+            reason);
+        HasErrors = true;
+        return null;
+    }
+
+    private static bool HasDerivedRegistrations(INamedTypeSymbol type) =>
+        type.GetAttributes().Any(static attribute =>
+            attribute.AttributeClass?.ToDisplayString() == DerivedAttribute);
+
+    private static bool IsDerivedFrom(INamedTypeSymbol baseType, INamedTypeSymbol derivedType)
+    {
+        if (baseType.TypeKind == TypeKind.Interface)
+        {
+            return derivedType.AllInterfaces.Any(candidate =>
+                SymbolEqualityComparer.Default.Equals(
+                    candidate.OriginalDefinition,
+                    baseType.OriginalDefinition));
+        }
+
+        for (var current = derivedType.BaseType; current is not null; current = current.BaseType)
+        {
+            if (SymbolEqualityComparer.Default.Equals(
+                    current.OriginalDefinition,
+                    baseType.OriginalDefinition))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private ObjectModel? BuildObjectModel(INamedTypeSymbol type, Location? location)

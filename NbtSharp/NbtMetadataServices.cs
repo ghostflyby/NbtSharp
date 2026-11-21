@@ -487,6 +487,58 @@ public static class NbtMetadataServices
             Path = "." + name,
         };
 
+    /// <summary>Creates the exception for a polymorphic compound without a type discriminator.</summary>
+    /// <param name="reader">The reader at the end of the polymorphic compound.</param>
+    /// <param name="baseType">The declared base type.</param>
+    /// <returns>The exception.</returns>
+    public static NbtException MissingPolymorphicType(NbtReader reader, Type baseType) =>
+        new($"The polymorphic value for '{baseType}' is missing the '$type' discriminator.")
+        {
+            BytePosition = reader.BytesConsumed,
+        };
+
+    /// <summary>Creates the exception for an unregistered polymorphic discriminator.</summary>
+    /// <param name="reader">The reader at the discriminator.</param>
+    /// <param name="discriminator">The discriminator value.</param>
+    /// <param name="baseType">The declared base type.</param>
+    /// <returns>The exception.</returns>
+    public static NbtException UnknownPolymorphicType(
+        NbtReader reader,
+        string? discriminator,
+        Type baseType) =>
+        new(discriminator is null
+            ? $"The polymorphic value for '{baseType}' has no discriminator."
+            : $"The polymorphic type '{discriminator}' is not registered for '{baseType}'.")
+        {
+            BytePosition = reader.BytesConsumed,
+        };
+
+    /// <summary>Creates the exception for a polymorphic compound without a value member.</summary>
+    /// <param name="reader">The reader at the end of the polymorphic compound.</param>
+    /// <param name="baseType">The declared base type.</param>
+    /// <returns>The exception.</returns>
+    public static NbtException MissingPolymorphicValue(NbtReader reader, Type baseType) =>
+        new($"The polymorphic value for '{baseType}' is missing the '$value' member.")
+        {
+            BytePosition = reader.BytesConsumed,
+        };
+
+    /// <summary>Creates the exception for an unregistered polymorphic runtime type.</summary>
+    /// <param name="writer">The writer at the polymorphic compound.</param>
+    /// <param name="runtimeType">The runtime type, or <see langword="null"/> for a null value.</param>
+    /// <param name="baseType">The declared base type.</param>
+    /// <returns>The exception.</returns>
+    public static NbtException UnknownPolymorphicRuntimeType(
+        NbtWriter writer,
+        Type? runtimeType,
+        Type baseType) =>
+        new(runtimeType is null
+            ? $"A null value cannot be written as polymorphic '{baseType}'."
+            : $"The runtime type '{runtimeType}' is not registered for polymorphic '{baseType}'.")
+        {
+            BytePosition = writer.BytesWritten,
+        };
+
     /// <summary>Creates the exception for a missing required compound member.</summary>
     /// <param name="reader">The reader at the end of the compound.</param>
     /// <param name="name">The missing member name.</param>

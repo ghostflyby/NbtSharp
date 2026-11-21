@@ -7,7 +7,8 @@ using System.Numerics;
 namespace NbtSharp;
 
 /// <summary>
-/// Supplies reflection-based type information for ordinary classes and structs.
+/// Supplies reflection-based type information for ordinary classes and structs, plus polymorphic
+/// envelopes for abstract classes and interfaces with <see cref="NbtDerivedAttribute"/> registrations.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -71,7 +72,9 @@ public sealed class NbtReflectionTypeInfoResolver : INbtTypeInfoResolver
         {
             if (!_cache.TryGetValue(key, out var converter))
             {
-                converter = new NbtReflectionObjectConverter(type, options.PropertyNamingPolicy);
+                converter = HasDerivedRegistrations(type)
+                    ? new NbtPolymorphicReflectionConverter(type)
+                    : new NbtReflectionObjectConverter(type, options.PropertyNamingPolicy);
                 _cache[key] = converter;
             }
 
@@ -81,7 +84,7 @@ public sealed class NbtReflectionTypeInfoResolver : INbtTypeInfoResolver
 
     private static bool IsSupported(Type type)
     {
-        if (type.IsPointer || type.IsByRef || type.IsByRefLike || type.IsInterface || type.IsAbstract)
+        if (type.IsPointer || type.IsByRef || type.IsByRefLike)
         {
             return false;
         }
@@ -107,6 +110,14 @@ public sealed class NbtReflectionTypeInfoResolver : INbtTypeInfoResolver
             return false;
         }
 
+        if (type.IsInterface || type.IsAbstract)
+        {
+            return HasDerivedRegistrations(type);
+        }
+
         return type.IsClass || type.IsValueType;
     }
+
+    private static bool HasDerivedRegistrations(Type type) =>
+        type.GetCustomAttributes(typeof(NbtDerivedAttribute), inherit: false).Length > 0;
 }

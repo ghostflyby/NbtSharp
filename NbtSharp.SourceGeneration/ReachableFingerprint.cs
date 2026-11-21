@@ -13,6 +13,7 @@ internal static class ReachableFingerprint
 {
     private const string FormatVersion = "reachable-fingerprint-v10";
     private const string UseConverterAttribute = "NbtSharp.NbtUseConverterAttribute";
+    private const string DerivedAttribute = "NbtSharp.NbtDerivedAttribute";
     private const string CollectionBuilderAttributeName =
         "System.Runtime.CompilerServices.CollectionBuilderAttribute";
 
@@ -77,6 +78,11 @@ internal static class ReachableFingerprint
         AddAssemblyIdentity(ref hash, type);
         AddDeclarationHashes(ref hash, type);
         AddAttributes(ref hash, type);
+        if (type is INamedTypeSymbol attributedType)
+        {
+            AddDerivedTypes(attributedType, pending);
+        }
+
         AddCollectionBuilderTypes(type, pending);
 
         switch (type)
@@ -343,6 +349,23 @@ internal static class ReachableFingerprint
             if (companion is not null)
             {
                 pending.Push(companion);
+            }
+        }
+    }
+
+    private static void AddDerivedTypes(INamedTypeSymbol type, Stack<ITypeSymbol> pending)
+    {
+        foreach (var attribute in type.GetAttributes())
+        {
+            if (attribute.AttributeClass?.ToDisplayString() != DerivedAttribute)
+            {
+                continue;
+            }
+
+            if (attribute.ConstructorArguments.Length == 1 &&
+                attribute.ConstructorArguments[0].Value is ITypeSymbol derivedType)
+            {
+                pending.Push(derivedType);
             }
         }
     }

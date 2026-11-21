@@ -428,6 +428,19 @@ internal sealed partial class ContextEmitter
 
         foreach (var entry in spec.Entries)
         {
+            if (entry.Polymorphic is not { } polymorphic)
+            {
+                continue;
+            }
+
+            foreach (var derivedType in polymorphic.DerivedTypes)
+            {
+                memberTypeNames.Add(derivedType.TypeName);
+            }
+        }
+
+        foreach (var entry in spec.Entries)
+        {
             if (!memberTypeNames.Contains(entry.TypeName))
             {
                 continue;
@@ -472,6 +485,11 @@ internal sealed partial class ContextEmitter
             {
                 _writer.WriteLine();
                 EmitEnumConverter(entry);
+            }
+            else if (entry.Kind == TypeEntryKind.Polymorphic && entry.Polymorphic is not null)
+            {
+                _writer.WriteLine();
+                EmitPolymorphicConverter(entry, entry.Polymorphic);
             }
         }
 
@@ -569,6 +587,7 @@ internal sealed partial class ContextEmitter
         TypeEntryKind.Map => GetMapFactory(entry),
         TypeEntryKind.Nullable =>
             $"{MetadataServices}.CreateNullableConverter<{entry.UnderlyingTypeName!}>()",
+        TypeEntryKind.Polymorphic => $"new {entry.ConverterName}()",
         _ => throw new InvalidOperationException($"Unknown entry kind {entry.Kind}."),
     };
 
@@ -669,6 +688,229 @@ internal sealed partial class ContextEmitter
         EmitWrite(model, typeName);
         _writer.WriteLine();
         EmitTryGetTagType(typeName);
+
+        _writer.Outdent();
+        _writer.WriteLine("}");
+    }
+
+    private void EmitPolymorphicConverter(TypeSpec entry, PolymorphicSpec model)
+    {
+        var typeName = entry.TypeName;
+        _writer.WriteLine(
+            "[global::System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage(" +
+            "\"Trimming\", \"IL2026\", " +
+            "Justification = \"Polymorphic dispatch uses generated converters.\")]");
+        _writer.WriteLine(
+            "[global::System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage(" +
+            "\"AOT\", \"IL3050\", " +
+            "Justification = \"Polymorphic dispatch uses generated converters.\")]");
+        _writer.WriteLine(
+            $"private sealed class {entry.ConverterName} : " +
+            $"global::NbtSharp.NbtConverter<{typeName}>");
+        _writer.WriteLine("{");
+        _writer.Indent();
+
+        _writer.WriteLine(
+            $"public override {typeName} Read(" +
+            "ref global::NbtSharp.NbtReader reader, " +
+            "global::NbtSharp.NbtSerializerOptions options)");
+        _writer.WriteLine("{");
+        _writer.Indent();
+        _writer.WriteLine(
+            "if (reader.TokenType != global::NbtSharp.NbtTokenType.StartCompound)");
+        _writer.WriteLine("{");
+        _writer.Indent();
+        _writer.WriteLine(
+            "throw global::NbtSharp.NbtMetadataServices.ExpectedTag(" +
+            "reader, global::NbtSharp.NbtTagType.Compound);");
+        _writer.Outdent();
+        _writer.WriteLine("}");
+        _writer.WriteLine();
+        _writer.WriteLine("string? __type = null;");
+        _writer.WriteLine($"{typeName}? __result = default;");
+        _writer.WriteLine("while (reader.Read())");
+        _writer.WriteLine("{");
+        _writer.Indent();
+        _writer.WriteLine(
+            "if (reader.TokenType == global::NbtSharp.NbtTokenType.EndCompound)");
+        _writer.WriteLine("{");
+        _writer.Indent();
+        _writer.WriteLine("break;");
+        _writer.Outdent();
+        _writer.WriteLine("}");
+        _writer.WriteLine();
+        _writer.WriteLine("var __name = reader.Name;");
+        _writer.WriteLine("if (__name is null)");
+        _writer.WriteLine("{");
+        _writer.Indent();
+        _writer.WriteLine(
+            "throw global::NbtSharp.NbtMetadataServices.MissingMemberName(reader);");
+        _writer.Outdent();
+        _writer.WriteLine("}");
+        _writer.WriteLine();
+        _writer.WriteLine("switch (__name)");
+        _writer.WriteLine("{");
+        _writer.Indent();
+        _writer.WriteLine("case \"$type\":");
+        _writer.Indent();
+        _writer.WriteLine(
+            "if (__type is not null && options.RejectDuplicateCompoundNames)");
+        _writer.WriteLine("{");
+        _writer.Indent();
+        _writer.WriteLine(
+            "throw global::NbtSharp.NbtMetadataServices.DuplicateMember(reader, \"$type\");");
+        _writer.Outdent();
+        _writer.WriteLine("}");
+        _writer.WriteLine("__type = reader.GetString();");
+        _writer.WriteLine("break;");
+        _writer.Outdent();
+        _writer.WriteLine("case \"$value\":");
+        _writer.Indent();
+        _writer.WriteLine("if (__type is null)");
+        _writer.WriteLine("{");
+        _writer.Indent();
+        _writer.WriteLine(
+            $"throw global::NbtSharp.NbtMetadataServices.MissingPolymorphicType(reader, typeof({typeName}));");
+        _writer.Outdent();
+        _writer.WriteLine("}");
+        _writer.WriteLine();
+        _writer.WriteLine(
+            "if (__result is not null && options.RejectDuplicateCompoundNames)");
+        _writer.WriteLine("{");
+        _writer.Indent();
+        _writer.WriteLine(
+            "throw global::NbtSharp.NbtMetadataServices.DuplicateMember(reader, \"$value\");");
+        _writer.Outdent();
+        _writer.WriteLine("}");
+        _writer.WriteLine();
+        _writer.WriteLine("switch (__type)");
+        _writer.WriteLine("{");
+        _writer.Indent();
+        foreach (var derivedType in model.DerivedTypes)
+        {
+            var discriminator = SymbolDisplay.FormatLiteral(
+                derivedType.Discriminator,
+                quote: true);
+            var staticConverter = _entriesByTypeName[derivedType.TypeName].StaticConverterName;
+            _writer.WriteLine($"case {discriminator}:");
+            _writer.Indent();
+            _writer.WriteLine(
+                $"__result = global::NbtSharp.NbtMetadataServices.ReadValueWithConverter<" +
+                $"{derivedType.TypeName}>(ref reader, " +
+                $"{ContextTypeName}.{staticConverter}.Value, options, null);");
+            _writer.WriteLine("break;");
+            _writer.Outdent();
+        }
+
+        _writer.WriteLine("default:");
+        _writer.Indent();
+        _writer.WriteLine(
+            $"throw global::NbtSharp.NbtMetadataServices.UnknownPolymorphicType(" +
+            $"reader, __type, typeof({typeName}));");
+        _writer.Outdent();
+        _writer.Outdent();
+        _writer.WriteLine("}");
+        _writer.WriteLine("break;");
+        _writer.Outdent();
+        _writer.WriteLine("default:");
+        _writer.Indent();
+        _writer.WriteLine("reader.Skip();");
+        _writer.WriteLine("break;");
+        _writer.Outdent();
+        _writer.Outdent();
+        _writer.WriteLine("}");
+        _writer.Outdent();
+        _writer.WriteLine("}");
+        _writer.WriteLine();
+        _writer.WriteLine("if (__type is null)");
+        _writer.WriteLine("{");
+        _writer.Indent();
+        _writer.WriteLine(
+            $"throw global::NbtSharp.NbtMetadataServices.MissingPolymorphicType(reader, typeof({typeName}));");
+        _writer.Outdent();
+        _writer.WriteLine("}");
+        _writer.WriteLine();
+        _writer.WriteLine("if (__result is null)");
+        _writer.WriteLine("{");
+        _writer.Indent();
+        _writer.WriteLine(
+            $"throw global::NbtSharp.NbtMetadataServices.MissingPolymorphicValue(reader, typeof({typeName}));");
+        _writer.Outdent();
+        _writer.WriteLine("}");
+        _writer.WriteLine();
+        _writer.WriteLine("return __result;");
+        _writer.Outdent();
+        _writer.WriteLine("}");
+        _writer.WriteLine();
+
+        _writer.WriteLine(
+            $"public override void Write(" +
+            "ref global::NbtSharp.NbtWriter writer, " +
+            $"{typeName} value, " +
+            "global::NbtSharp.NbtSerializerOptions options)");
+        _writer.WriteLine("{");
+        _writer.Indent();
+        _writer.WriteLine("var __runtimeType = value?.GetType();");
+        var typeChecks = string.Join(
+            " && ",
+            model.DerivedTypes.Select(static derivedType =>
+                $"__runtimeType != typeof({derivedType.TypeName})"));
+        _writer.WriteLine($"if ({typeChecks})");
+        _writer.WriteLine("{");
+        _writer.Indent();
+        _writer.WriteLine(
+            $"throw global::NbtSharp.NbtMetadataServices.UnknownPolymorphicRuntimeType(" +
+            $"writer, __runtimeType, typeof({typeName}));");
+        _writer.Outdent();
+        _writer.WriteLine("}");
+        _writer.WriteLine();
+        _writer.WriteLine("writer.WriteStartCompound();");
+        _writer.WriteLine("switch (value)");
+        _writer.WriteLine("{");
+        _writer.Indent();
+        foreach (var derivedType in model.DerivedTypes)
+        {
+            var discriminator = SymbolDisplay.FormatLiteral(
+                derivedType.Discriminator,
+                quote: true);
+            var staticConverter = _entriesByTypeName[derivedType.TypeName].StaticConverterName;
+            _writer.WriteLine(
+                $"case {derivedType.TypeName} __value when " +
+                $"value.GetType() == typeof({derivedType.TypeName}):");
+            _writer.Indent();
+            _writer.WriteLine($"writer.WriteString(\"$type\", {discriminator});");
+            _writer.WriteLine(
+                $"global::NbtSharp.NbtMetadataServices.WriteMemberWithConverter<" +
+                $"{derivedType.TypeName}>(ref writer, \"$value\", __value, " +
+                $"{ContextTypeName}.{staticConverter}.Value, options);");
+            _writer.WriteLine("break;");
+            _writer.Outdent();
+        }
+
+        _writer.WriteLine("default:");
+        _writer.Indent();
+        _writer.WriteLine(
+            $"throw global::NbtSharp.NbtMetadataServices.UnknownPolymorphicRuntimeType(" +
+            $"writer, value?.GetType(), typeof({typeName}));");
+        _writer.Outdent();
+        _writer.Outdent();
+        _writer.WriteLine("}");
+        _writer.WriteLine("writer.WriteEndCompound();");
+        _writer.Outdent();
+        _writer.WriteLine("}");
+        _writer.WriteLine();
+
+        _writer.WriteLine(
+            $"public override bool TryGetTagType(" +
+            $"{typeName} value, " +
+            "global::NbtSharp.NbtSerializerOptions options, " +
+            "out global::NbtSharp.NbtTagType tagType)");
+        _writer.WriteLine("{");
+        _writer.Indent();
+        _writer.WriteLine("tagType = global::NbtSharp.NbtTagType.Compound;");
+        _writer.WriteLine("return true;");
+        _writer.Outdent();
+        _writer.WriteLine("}");
 
         _writer.Outdent();
         _writer.WriteLine("}");

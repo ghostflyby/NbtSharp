@@ -41,6 +41,11 @@ NbtSharp.NbtNamingPolicyKind.KebabCaseUpper = 5 -> NbtSharp.NbtNamingPolicyKind
 NbtSharp.NbtNamingPolicyKind.SnakeCaseLower = 2 -> NbtSharp.NbtNamingPolicyKind
 NbtSharp.NbtNamingPolicyKind.SnakeCaseUpper = 3 -> NbtSharp.NbtNamingPolicyKind
 NbtSharp.NbtNamingPolicyKind.Unspecified = 0 -> NbtSharp.NbtNamingPolicyKind
+NbtSharp.NbtDerivedAttribute
+NbtSharp.NbtDerivedAttribute.DerivedType.get -> System.Type!
+NbtSharp.NbtDerivedAttribute.NbtDerivedAttribute(System.Type! derivedType) -> void
+NbtSharp.NbtDerivedAttribute.TypeDiscriminator.get -> string?
+NbtSharp.NbtDerivedAttribute.TypeDiscriminator.init -> void
 NbtSharp.NbtNullValueHandling
 NbtSharp.NbtNullValueHandling.Omit = 0 -> NbtSharp.NbtNullValueHandling
 NbtSharp.NbtNullValueHandling.Throw = 1 -> NbtSharp.NbtNullValueHandling
@@ -336,8 +341,12 @@ static NbtSharp.NbtMetadataServices.CreateStackConverter<TElement>() -> NbtSharp
 static NbtSharp.NbtMetadataServices.DuplicateMember(NbtSharp.NbtReader reader, string! name) -> NbtSharp.NbtException!
 static NbtSharp.NbtMetadataServices.ExpectedTag(NbtSharp.NbtReader reader, NbtSharp.NbtTagType expected) -> NbtSharp.NbtException!
 static NbtSharp.NbtMetadataServices.MissingMemberName(NbtSharp.NbtReader reader) -> NbtSharp.NbtException!
+static NbtSharp.NbtMetadataServices.MissingPolymorphicType(NbtSharp.NbtReader reader, System.Type! baseType) -> NbtSharp.NbtException!
+static NbtSharp.NbtMetadataServices.MissingPolymorphicValue(NbtSharp.NbtReader reader, System.Type! baseType) -> NbtSharp.NbtException!
 static NbtSharp.NbtMetadataServices.MissingRequiredMember(NbtSharp.NbtReader reader, string! name) -> NbtSharp.NbtException!
 static NbtSharp.NbtMetadataServices.NullRequiredMember(NbtSharp.NbtWriter writer, string! name) -> NbtSharp.NbtException!
+static NbtSharp.NbtMetadataServices.UnknownPolymorphicRuntimeType(NbtSharp.NbtWriter writer, System.Type? runtimeType, System.Type! baseType) -> NbtSharp.NbtException!
+static NbtSharp.NbtMetadataServices.UnknownPolymorphicType(NbtSharp.NbtReader reader, string? discriminator, System.Type! baseType) -> NbtSharp.NbtException!
 static NbtSharp.NbtMetadataServices.PrependPath(NbtSharp.NbtException! exception, string? segment) -> void
 static NbtSharp.NbtMetadataServices.ReadBoolean(ref NbtSharp.NbtReader reader) -> bool
 static NbtSharp.NbtMetadataServices.ReadValue<T>(ref NbtSharp.NbtReader reader, NbtSharp.NbtSerializerOptions! options, string? pathSegment) -> T

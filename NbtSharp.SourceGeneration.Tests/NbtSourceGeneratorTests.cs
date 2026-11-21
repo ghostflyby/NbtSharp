@@ -116,6 +116,68 @@ public sealed class NbtSourceGeneratorTests
     }
 
     [Fact]
+    public void RegeneratesWhenADerivedTypeChanges()
+    {
+        var parseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
+        const string source = """
+            using NbtSharp;
+
+            [NbtDerived(typeof(Cat))]
+            internal interface IAnimal
+            {
+                string Name { get; set; }
+            }
+
+            internal sealed class Cat : IAnimal
+            {
+                public string Name { get; set; } = "";
+
+                public int Lives { get; set; }
+            }
+
+            [NbtSerializable(typeof(IAnimal))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+            """;
+        var tree = CSharpSyntaxTree.ParseText(
+            source,
+            parseOptions,
+            path: "Poly.cs",
+            cancellationToken: TestContext.Current.CancellationToken);
+        var compilation = CSharpCompilation.Create(
+            "GeneratorTests",
+            [tree],
+            References,
+            new CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable));
+        var driver = CreateTrackingDriver(parseOptions);
+        ContextSpecCache.ResetForTests();
+
+        driver = driver.RunGenerators(compilation, TestContext.Current.CancellationToken);
+        Assert.Contains(
+            "\"Lives\"",
+            GetGeneratedSource(driver.GetRunResult()),
+            StringComparison.Ordinal);
+
+        var changedTree = CSharpSyntaxTree.ParseText(
+            source.Replace(
+                "public int Lives { get; set; }",
+                "public int Lives { get; set; }\n\n    public bool Indoor { get; set; }",
+                StringComparison.Ordinal),
+            parseOptions,
+            path: "Poly.cs",
+            cancellationToken: TestContext.Current.CancellationToken);
+        driver = driver.RunGenerators(
+            compilation.ReplaceSyntaxTree(tree, changedTree),
+            TestContext.Current.CancellationToken);
+        var after = GetGeneratedSource(driver.GetRunResult());
+
+        Assert.Contains("\"Indoor\"", after, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void RefreshesDiagnosticLocationsWhenDeclarationsShift()
     {
         var parseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
@@ -1489,6 +1551,215 @@ public sealed class NbtSourceGeneratorTests
             """);
 
         Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG002");
+    }
+
+    [Fact]
+    public void GeneratesPolymorphicDispatch()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtDerived(typeof(Cat))]
+            public interface IAnimal
+            {
+                string Name { get; set; }
+            }
+
+            public sealed class Cat : IAnimal
+            {
+                public string Name { get; set; } = "";
+
+                public int Lives { get; set; }
+            }
+
+            [NbtSerializable(typeof(IAnimal))]
+            public partial class TestContext : NbtSerializerContext
+            {
+            }
+            """);
+
+        AssertNoErrors(result);
+        Assert.Contains("\"$type\"", result.GeneratedSource, StringComparison.Ordinal);
+        Assert.Contains("\"$value\"", result.GeneratedSource, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ReportsInvalidDerivedRegistrations()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtDerived(typeof(Cat), TypeDiscriminator = "pet")]
+            [NbtDerived(typeof(Dog), TypeDiscriminator = "pet")]
+            public interface IAnimal
+            {
+                string Name { get; set; }
+            }
+
+            public sealed class Cat : IAnimal
+            {
+                public string Name { get; set; } = "";
+            }
+
+            public sealed class Dog : IAnimal
+            {
+                public string Name { get; set; } = "";
+            }
+
+            [NbtSerializable(typeof(IAnimal))]
+            public partial class TestContext : NbtSerializerContext
+            {
+            }
+            """);
+
+        Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG018");
+    }
+
+    [Fact]
+    public void ReportsDerivedTypesThatAreNotAssignable()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtDerived(typeof(string))]
+            public interface IAnimal
+            {
+            }
+
+            [NbtSerializable(typeof(IAnimal))]
+            public partial class TestContext : NbtSerializerContext
+            {
+            }
+            """);
+
+        Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG018");
+    }
+
+    [Fact]
+    public void ReportsGenericPolymorphicBases()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtDerived(typeof(Cat))]
+            public interface IAnimal<T>
+            {
+            }
+
+            public sealed class Cat : IAnimal<int>
+            {
+            }
+
+            [NbtSerializable(typeof(IAnimal<int>))]
+            public partial class TestContext : NbtSerializerContext
+            {
+            }
+            """);
+
+        Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG018");
+    }
+
+    [Fact]
+    public void ReportsDuplicateDerivedTypeRegistrations()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtDerived(typeof(Cat), TypeDiscriminator = "a")]
+            [NbtDerived(typeof(Cat), TypeDiscriminator = "b")]
+            public interface IAnimal
+            {
+            }
+
+            public sealed class Cat : IAnimal
+            {
+            }
+
+            [NbtSerializable(typeof(IAnimal))]
+            public partial class TestContext : NbtSerializerContext
+            {
+            }
+            """);
+
+        Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG018");
+    }
+
+    [Fact]
+    public void ReportsConcretePolymorphicBases()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtDerived(typeof(Cat))]
+            public class Animal
+            {
+            }
+
+            public sealed class Cat : Animal
+            {
+            }
+
+            [NbtSerializable(typeof(Animal))]
+            public partial class TestContext : NbtSerializerContext
+            {
+            }
+            """);
+
+        Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG018");
+    }
+
+    [Fact]
+    public void ReportsCollectionShapedPolymorphicTypes()
+    {
+        var result = Run("""
+            using System.Collections.Generic;
+            using NbtSharp;
+
+            [NbtDerived(typeof(TagList))]
+            public interface IAnimal
+            {
+            }
+
+            public sealed class TagList : List<string>, IAnimal
+            {
+            }
+
+            [NbtSerializable(typeof(IAnimal))]
+            public partial class TestContext : NbtSerializerContext
+            {
+            }
+            """);
+
+        Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG018");
+    }
+
+    [Fact]
+    public void ReportsNestedPolymorphism()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtDerived(typeof(Mid))]
+            public interface IAnimal
+            {
+            }
+
+            [NbtDerived(typeof(Cat))]
+            public abstract class Mid : IAnimal
+            {
+            }
+
+            public sealed class Cat : Mid
+            {
+            }
+
+            [NbtSerializable(typeof(IAnimal))]
+            public partial class TestContext : NbtSerializerContext
+            {
+            }
+            """);
+
+        Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG018");
     }
 
     [Fact]

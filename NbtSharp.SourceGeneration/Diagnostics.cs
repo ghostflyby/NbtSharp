@@ -88,6 +88,14 @@ internal static class Diagnostics
         isEnabledByDefault: true,
         description: "Rename the hiding member, or exclude the mapped base member with [NbtIgnore]. NBT maps each type to a single compound, so hidden members cannot be mapped unambiguously.");
 
+    public static readonly DiagnosticDescriptor InvalidDerived = new(
+        "NBTSG018",
+        "Invalid NbtDerived declaration",
+        "The type '{0}' has an invalid [NbtDerived] declaration: {1}",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
     public static readonly DiagnosticDescriptor GeneratedNameConflict = new(
         "NBTSG008",
         "Generated member name conflict",

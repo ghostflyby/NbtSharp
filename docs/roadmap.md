@@ -14,10 +14,10 @@ schedule.
 - P0 #3 is implemented as compile-time AOT/trim analysis in the test projects. Native publish and
   package-content checks were deliberately excluded from scope.
 - P1 #4, #5, #6, #7, and #8 are implemented.
-- P2 #9, #10, #11, and #13 are implemented. Resolver chains, naming policies/context options, and
-  async serialization are covered by stacked PRs.
-- P3 #14 and #16 are implemented. #15 has benchmarks but no CI baseline comparison; #12 is deferred
-  pending a wire-format decision.
+- P2 #9, #10, #11, #12, and #13 are implemented. Resolver chains, naming policies/context options,
+  polymorphic members, and async serialization are covered by stacked PRs.
+- P3 #14, #15, and #16 are implemented. #15 ships benchmarks without an automated regression gate,
+  which is a deliberate scope decision documented below.
 - P2 #11 includes sequence/map shape interfaces, immutable/frozen/concurrent/sorted shapes, and
   `CollectionBuilderAttribute`/companion factory/constructor/`Add` pattern discovery. Sorted maps
   with string keys and sorted sets with string elements use ordinal ordering;
@@ -197,9 +197,11 @@ camelCase, snake_case, and kebab-case presets for reflection through
 `NbtSerializerOptions.PropertyNamingPolicy`. `[NbtSourceGenerationOptions]` configures the naming
 policy and default null handling for a generated context; the emitted `CreateDefaultOptions`
 override exposes both through `Context.Default.Options`, and declaring a conflicting override reports
-`NBTSG008`. Generation mode selection (`Metadata` versus `Serialization`) remains undecided because
-the generator only emits serialization-oriented converters today; it is deferred until a concrete
-consumer requires metadata-only output.
+`NBTSG008`. Generation mode selection (`Metadata` versus `Serialization`) was considered and rejected for now:
+NbtSharp's generated type information always includes converters, and a metadata-only mode would
+have to construct converters at runtime, losing the AOT guarantees that are the main reason to use
+source generation. No `GenerationMode` option will be added unless a concrete metadata-only consumer
+appears.
 
 ### 11. Additional collection shapes
 
@@ -211,19 +213,15 @@ reported explicitly instead of being mapped as objects.
 
 ### 12. Polymorphic members
 
-**Status (2026-11-20): deferred pending a wire-format decision.** Abstract and interface members
-still report `NBTSG003` / `NotSupportedException`. The implementation shape is understood:
-`[NbtDerived(typeof(X))]` registration on the base type, a discriminator member, and generated plus
-reflection dispatch. The unresolved choice is the NBT representation:
-
-- Flattened: `{ "$type": "Cat", ...derived members }` — compact and closest to `System.Text.Json`,
-  but reading needs buffering or DOM materialization and the writer must emit into an already-open
-  compound.
-- Envelope: `{ "$type": "Cat", "$value": { ...derived members } }` — isolated and simpler to
-  stream, but more verbose and unlike `System.Text.Json`.
-
-The discriminator value (short name, namespace-qualified name, or an explicit per-derived name) also
-needs to be fixed before the format becomes a compatibility contract.
+**Status (2026-11-20): implemented.** Abstract classes and interfaces opt in with
+`[NbtDerived(typeof(X))]`. The chosen representation is an envelope,
+`{ "$type": "X", "$value": { ...derived members... } }`, because it streams without buffering and
+keeps the discriminator out of the user member namespace. The discriminator defaults to the
+derived type's short name and can be overridden with `TypeDiscriminator`; the base must be a
+non-generic abstract class or interface and registrations must be closed concrete non-collection
+types assignable to it. Generated contexts emit static typed dispatch and reflection uses the same
+envelope, with `NBTSG018` / `NotSupportedException` for invalid declarations. Generic polymorphic
+base types and nested polymorphism remain unsupported.
 
 ### 13. Asynchronous serialization
 
@@ -241,14 +239,17 @@ and stream overloads leave the stream open.
 roots, lists, and maps), nested CLR collections, inherited mapping attributes and base fields, the
 first-match converter ordering and explicit-member-versus-built-in cells of the precedence matrix,
 deterministic random/mutation/truncation corpora for the reader, and a single generated context with
-120 linked DTOs. Moving the generator timing evidence into CI remains part of #15.
+120 linked DTOs. Generator timing evidence is provided by the benchmark project; automated CI
+thresholds are covered by the #15 scope decision.
 
 ### 15. Benchmarks and regression gates
 
-- A BenchmarkDotNet project covers scalar, nullable-scalar, array, collection-shape, enum, and mixed
-  DTOs, plus cold/warm generator incrementality at 100 and 300 contexts.
-- A before/after comparison gate in CI or a scheduled job is still missing. Threshold-based gates
-  need a stable runner and a chosen noise margin.
+**Status (2026-11-20): benchmarks implemented; automated regression gating deliberately excluded.**
+A BenchmarkDotNet project covers scalar, nullable-scalar, array, collection-shape, enum, and mixed
+DTOs, plus cold/warm generator incrementality at 100 and 300 contexts. A CI or scheduled
+before/after comparison gate is out of scope because GitHub-hosted runners do not provide a stable
+enough performance baseline for meaningful thresholds; benchmark results remain informational and
+can be compared manually when investigating a change.
 
 ### 16. Documentation
 
@@ -258,12 +259,14 @@ complete `NBTSG` diagnostic reference, and performance/allocation notes under `d
 
 ## Suggested sequencing
 
-P0, P1 and P2 #9/#11/#13 are complete. For the remaining work:
-
-1. P2 #10/#12 and the P3 items when their design prerequisites are settled.
+All roadmap items are implemented or have an explicit scope decision. Future work should start from
+a concrete consumer request rather than from this list.
 
 ## Deliberate non-goals for now
 
 - A runtime schema/versioning system.
 - Binary-compatible support for every CLR collection interface.
 - Reflection-based AOT support; source generation remains the AOT path.
+- Generic polymorphic base types and nested polymorphic registrations.
+- A metadata-only source-generation mode (`GenerationMode.Metadata`).
+- Automated benchmark regression thresholds on hosted CI runners.

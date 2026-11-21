@@ -78,6 +78,10 @@ Reflection applies `[NbtPropertyName]` and, when configured,
 - Required members follow the same presence and null rules. A constructor that initializes a mapped
   required member still needs the member present in the compound; `[SetsRequiredMembers]` only
   excuses required members that are excluded from the mapping.
+- Polymorphism requires opt-in `[NbtDerived]` registrations on the base type. Both paths use the
+  same `{ "$type": ..., "$value": ... }` envelope. Generated dispatch ignores `options.Converters`
+  for individual derived types; register a converter for the base type to override it. Reflection
+  dispatch resolves derived types through the options.
 - Compound member order is not a contract. Generated and reflection converters may emit fields and
   properties in different orders, and NBT compounds are unordered. Compare behavior through
   round-trips rather than raw byte equality when a type mixes fields and properties or uses

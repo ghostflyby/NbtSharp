@@ -122,6 +122,17 @@ internal sealed partial class ContextEmitter
                     mapping.WriteStatement);
             }
 
+            if (entry.Kind == TypeEntryKind.Polymorphic)
+            {
+                spec.Polymorphic = new PolymorphicSpec(
+                    entry.DerivedTypes
+                        .Select(static derivedType =>
+                            new PolymorphicDerivedSpec(
+                                Fq(derivedType.Type),
+                                derivedType.Discriminator))
+                        .ToImmutableArray());
+            }
+
             if (entry.Object is not null)
             {
                 spec.Object = BuildObjectSpec(entry.Object);
