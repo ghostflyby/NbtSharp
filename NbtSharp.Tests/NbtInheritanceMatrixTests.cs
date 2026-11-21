@@ -16,108 +16,75 @@ public sealed class NbtInheritanceMatrixTests
         Assert.False(property.IsDefined(typeof(NbtIgnoreAttribute), inherit: true));
     }
 
-    [Fact]
-    public void IgnoredOverridesDoNotLeaveHiddenBaseMembers()
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void IgnoredOverridesDoNotLeaveHiddenBaseMembers(SerializationMode mode)
     {
-        var reflection = new NbtSerializerOptions
-        {
-            TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
-        };
+        var path = CreatePath(mode);
         var leaf = new HiddenLeaf { Value = 5 };
         var baseIgnored = new HiddenLeafFromIgnoredBase { Value = 6 };
 
-        var leafData = NbtSerializer.Serialize(
-            leaf,
-            InheritanceContext.Default.HiddenLeaf,
-            "root");
-        var baseIgnoredData = NbtSerializer.Serialize(
-            baseIgnored,
-            InheritanceContext.Default.HiddenLeafFromIgnoredBase,
-            "root");
-        var reflectedLeafData = NbtSerializer.Serialize(leaf, "root", reflection);
-        var reflectedBaseIgnoredData = NbtSerializer.Serialize(baseIgnored, "root", reflection);
+        var leafData = path.Serialize(leaf);
+        var baseIgnoredData = path.Serialize(baseIgnored);
 
-        Assert.Equal(5, NbtSerializer.Deserialize(leafData, InheritanceContext.Default.HiddenLeaf).Value);
-        Assert.Equal(
-            6,
-            NbtSerializer.Deserialize(
-                baseIgnoredData,
-                InheritanceContext.Default.HiddenLeafFromIgnoredBase).Value);
-        Assert.Equal(5, NbtSerializer.Deserialize<HiddenLeaf>(reflectedLeafData, reflection).Value);
-        Assert.Equal(
-            6,
-            NbtSerializer.Deserialize<HiddenLeafFromIgnoredBase>(
-                reflectedBaseIgnoredData,
-                reflection).Value);
+        Assert.Equal(5, path.Deserialize<HiddenLeaf>(leafData).Value);
+        Assert.Equal(6, path.Deserialize<HiddenLeafFromIgnoredBase>(baseIgnoredData).Value);
     }
 
-    [Fact]
-    public void OverridesInheritConverterAttributes()
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void OverridesInheritConverterAttributes(SerializationMode mode)
     {
+        var path = CreatePath(mode);
         var value = new InheritedConverterDerived { Value = 5 };
 
-        var data = NbtSerializer.Serialize(
-            value,
-            InheritanceContext.Default.InheritedConverterDerived,
-            "root");
+        var data = path.Serialize(value);
         var root = (NbtCompound)NbtSerializer.Deserialize(data).Value.Value!;
-        var copy = NbtSerializer.Deserialize(
-            data,
-            InheritanceContext.Default.InheritedConverterDerived);
+        var copy = path.Deserialize<InheritedConverterDerived>(data);
 
         Assert.Equal(105, (int)root["Value"].Value!);
         Assert.Equal(5, copy.Value);
     }
 
-    [Fact]
-    public void OverriddenMembersInheritBaseAttributes()
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void OverriddenMembersInheritBaseAttributes(SerializationMode mode)
     {
+        var path = CreatePath(mode);
         var value = new InheritedDerived
         {
             Renamed = 3,
             Hidden = 99,
         };
         value.IncludedField = "base-field";
-        var reflection = new NbtSerializerOptions
-        {
-            TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
-        };
 
-        var generatedData = NbtSerializer.Serialize(
-            value,
-            InheritanceContext.Default.InheritedDerived,
-            "root");
-        var reflectedData = NbtSerializer.Serialize(value, "root", reflection);
-        var generatedRoot = (NbtCompound)NbtSerializer.Deserialize(generatedData).Value.Value!;
-        var reflectedRoot = (NbtCompound)NbtSerializer.Deserialize(reflectedData).Value.Value!;
+        var data = path.Serialize(value);
+        var root = (NbtCompound)NbtSerializer.Deserialize(data).Value.Value!;
 
-        Assert.Equal(
-            generatedRoot.Keys.Order(StringComparer.Ordinal),
-            reflectedRoot.Keys.Order(StringComparer.Ordinal));
-        Assert.True(generatedRoot.ContainsKey("renamed_base"));
-        Assert.True(generatedRoot.ContainsKey("IncludedField"));
-        Assert.False(generatedRoot.ContainsKey("Renamed"));
-        Assert.False(generatedRoot.ContainsKey("Hidden"));
-        Assert.True(reflectedRoot.ContainsKey("renamed_base"));
-        Assert.True(reflectedRoot.ContainsKey("IncludedField"));
-        Assert.False(reflectedRoot.ContainsKey("Hidden"));
-        Assert.Equal(3, (int)generatedRoot["renamed_base"].Value!);
-        Assert.Equal("base-field", (string)generatedRoot["IncludedField"].Value!);
-        Assert.Equal(3, (int)reflectedRoot["renamed_base"].Value!);
-        Assert.Equal("base-field", (string)reflectedRoot["IncludedField"].Value!);
+        Assert.True(root.ContainsKey("renamed_base"));
+        Assert.True(root.ContainsKey("IncludedField"));
+        Assert.False(root.ContainsKey("Renamed"));
+        Assert.False(root.ContainsKey("Hidden"));
+        Assert.Equal(3, (int)root["renamed_base"].Value!);
+        Assert.Equal("base-field", (string)root["IncludedField"].Value!);
 
-        var generatedCopy = NbtSerializer.Deserialize(
-            generatedData,
-            InheritanceContext.Default.InheritedDerived);
-        var reflectedCopy = NbtSerializer.Deserialize<InheritedDerived>(reflectedData, reflection);
+        var copy = path.Deserialize<InheritedDerived>(data);
 
-        Assert.Equal(3, generatedCopy.Renamed);
-        Assert.Equal(0, generatedCopy.Hidden);
-        Assert.Equal("base-field", generatedCopy.IncludedField);
-        Assert.Equal(3, reflectedCopy.Renamed);
-        Assert.Equal(0, reflectedCopy.Hidden);
-        Assert.Equal("base-field", reflectedCopy.IncludedField);
+        Assert.Equal(3, copy.Renamed);
+        Assert.Equal(0, copy.Hidden);
+        Assert.Equal("base-field", copy.IncludedField);
     }
+
+    private static SerializationTestPath CreatePath(SerializationMode mode) =>
+        mode == SerializationMode.Reflection
+            ? SerializationTestPath.Reflection(new NbtSerializerOptions
+            {
+                TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
+            })
+            : SerializationTestPath.Generated(InheritanceContext.Default);
 }
 
 internal class InheritedBase

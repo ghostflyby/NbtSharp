@@ -1,8 +1,8 @@
 namespace NbtSharp;
 
 /// <summary>
-/// Marks a property or field as using a converter that is resolved outside the source-generated
-/// type graph.
+/// Marks a property or field as using a converter that is resolved outside the generated type graph
+/// or reflection's object mapping.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -11,9 +11,10 @@ namespace NbtSharp;
 /// or <see cref="decimal"/>.
 /// </para>
 /// <para>
-/// With a converter type, the generated converter creates that converter directly and uses it for the
-/// member. The converter type must be a closed, non-abstract type derived from <see cref="NbtConverter"/>
-/// with a public parameterless constructor.
+/// With a converter type, generated code creates that converter directly and reflection instantiates
+/// it. Either way the explicit converter takes precedence over <see cref="NbtSerializerOptions.Converters"/>
+/// for the member. The converter type must be a closed, non-abstract type derived from
+/// <see cref="NbtConverter"/> with a public parameterless constructor.
 /// </para>
 /// <para>
 /// Fields must also be marked with <see cref="NbtIncludeAttribute"/> to participate in the mapping.

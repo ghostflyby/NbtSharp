@@ -15,19 +15,22 @@ public sealed class NbtConverterPrecedenceMatrixTests
         Assert.Equal(1, NbtSerializer.Deserialize<int>(data, options));
     }
 
-    [Fact]
-    public void ExplicitMemberConverterOverridesTheBuiltInScalarPath()
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void ExplicitMemberConverterOverridesTheBuiltInScalarPath(SerializationMode mode)
     {
         var value = new ExplicitPrecedenceDto { Value = 5 };
+        var path = mode == SerializationMode.Reflection
+            ? SerializationTestPath.Reflection(new NbtSerializerOptions
+            {
+                TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
+            })
+            : SerializationTestPath.Generated(ExplicitPrecedenceContext.Default);
 
-        var data = NbtSerializer.Serialize(
-            value,
-            ExplicitPrecedenceContext.Default.ExplicitPrecedenceDto,
-            "root");
+        var data = path.Serialize(value);
         var root = (NbtCompound)NbtSerializer.Deserialize(data).Value.Value!;
-        var copy = NbtSerializer.Deserialize(
-            data,
-            ExplicitPrecedenceContext.Default.ExplicitPrecedenceDto);
+        var copy = path.Deserialize<ExplicitPrecedenceDto>(data);
 
         Assert.Equal(105, (int)root["Value"].Value!);
         Assert.Equal(5, copy.Value);

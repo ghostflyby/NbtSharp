@@ -4,86 +4,83 @@ namespace NbtSharp.Tests;
 
 public sealed class NbtPolymorphismTests
 {
-    [Fact]
-    public void GeneratedAndReflectionPathsRoundTripPolymorphicMembers()
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void PolymorphicMembersRoundTrip(SerializationMode mode)
     {
+        var path = CreatePath(mode);
         var value = CreateZoo();
-        var reflection = new NbtSerializerOptions
-        {
-            TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
-        };
 
-        var generatedData = NbtSerializer.Serialize(
-            value,
-            PolyContext.Default.PolyZoo,
-            "root");
-        var reflectedData = NbtSerializer.Serialize(value, "root", reflection);
-
-        var generatedRoot = (NbtCompound)NbtSerializer.Deserialize(generatedData).Value.Value!;
-        var star = (NbtCompound)generatedRoot["Star"].Value!;
+        var data = path.Serialize(value);
+        var root = (NbtCompound)NbtSerializer.Deserialize(data).Value.Value!;
+        var star = (NbtCompound)root["Star"].Value!;
         Assert.Equal("PolyCat", (string)star["$type"].Value!);
         Assert.IsType<NbtCompound>(star["$value"].Value);
 
-        var generatedCopy = NbtSerializer.Deserialize(generatedData, PolyContext.Default.PolyZoo);
-        var reflectedCopy = NbtSerializer.Deserialize<PolyZoo>(reflectedData, reflection);
-        var crossGenerated = NbtSerializer.Deserialize<PolyZoo>(generatedData, reflection);
-        var crossReflected = NbtSerializer.Deserialize(reflectedData, PolyContext.Default.PolyZoo);
+        var copy = path.Deserialize<PolyZoo>(data);
+
+        AssertZoo(copy);
+    }
+
+    [Fact]
+    public void BothPathsProduceTheSameBytesAndReadEachOther()
+    {
+        var value = CreateZoo();
+        var generated = CreatePath(SerializationMode.Generated);
+        var reflection = CreatePath(SerializationMode.Reflection);
+
+        var generatedData = generated.Serialize(value);
+        var reflectedData = reflection.Serialize(value);
 
         Assert.Equal(reflectedData, generatedData);
-        AssertZoo(generatedCopy);
-        AssertZoo(reflectedCopy);
-        AssertZoo(crossGenerated);
-        AssertZoo(crossReflected);
+        AssertZoo(generated.Deserialize<PolyZoo>(reflectedData));
+        AssertZoo(reflection.Deserialize<PolyZoo>(generatedData));
     }
 
-    [Fact]
-    public void StructImplementationsRoundTripAsRoots()
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void StructImplementationsRoundTripAsRoots(SerializationMode mode)
     {
+        var path = CreatePath(mode);
         var value = new PolyRock { Name = "rock" };
-        var reflection = new NbtSerializerOptions
-        {
-            TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
-        };
 
-        var generatedData = NbtSerializer.Serialize(
-            value,
-            PolyContext.Default.IPolyAnimal,
-            "root");
-        var reflectedData = NbtSerializer.Serialize<IPolyAnimal>(value, "root", reflection);
+        var data = path.Serialize<IPolyAnimal>(value);
 
-        Assert.IsType<PolyRock>(
-            NbtSerializer.Deserialize(generatedData, PolyContext.Default.IPolyAnimal));
-        Assert.IsType<PolyRock>(
-            NbtSerializer.Deserialize<IPolyAnimal>(reflectedData, reflection));
+        Assert.IsType<PolyRock>(path.Deserialize<IPolyAnimal>(data));
     }
 
-    [Fact]
-    public void ExplicitDiscriminatorIsUsed()
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void ExplicitDiscriminatorIsUsed(SerializationMode mode)
     {
+        var path = CreatePath(mode);
         var value = new PolyZoo
         {
             Star = new PolyDog { Name = "Rex", GoodBoy = true },
         };
 
-        var data = NbtSerializer.Serialize(value, PolyContext.Default.PolyZoo, "root");
+        var data = path.Serialize(value);
         var root = (NbtCompound)NbtSerializer.Deserialize(data).Value.Value!;
         var star = (NbtCompound)root["Star"].Value!;
-        var copy = NbtSerializer.Deserialize(data, PolyContext.Default.PolyZoo);
+        var copy = path.Deserialize<PolyZoo>(data);
 
         Assert.Equal("doggo", (string)star["$type"].Value!);
         Assert.IsType<PolyDog>(copy.Star);
     }
 
-    [Fact]
-    public void PolymorphicRootRoundTrips()
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void PolymorphicRootRoundTrips(SerializationMode mode)
     {
+        var path = CreatePath(mode);
         var value = new PolyCat { Name = "Milo", Lives = 9 };
 
-        var data = NbtSerializer.Serialize(
-            value,
-            PolyContext.Default.IPolyAnimal,
-            "root");
-        var copy = NbtSerializer.Deserialize(data, PolyContext.Default.IPolyAnimal);
+        var data = path.Serialize<IPolyAnimal>(value);
+        var copy = path.Deserialize<IPolyAnimal>(data);
 
         var cat = Assert.IsType<PolyCat>(copy);
         Assert.Equal("Milo", cat.Name);
@@ -91,10 +88,14 @@ public sealed class NbtPolymorphismTests
     }
 
     [Theory]
-    [InlineData(null, true, "missing the '$type' discriminator")]
-    [InlineData("PolyCat", false, "missing the '$value' member")]
-    [InlineData("Bird", true, "The polymorphic type 'Bird' is not registered")]
+    [InlineData(SerializationMode.Generated, null, true, "missing the '$type' discriminator")]
+    [InlineData(SerializationMode.Reflection, null, true, "missing the '$type' discriminator")]
+    [InlineData(SerializationMode.Generated, "PolyCat", false, "missing the '$value' member")]
+    [InlineData(SerializationMode.Reflection, "PolyCat", false, "missing the '$value' member")]
+    [InlineData(SerializationMode.Generated, "Bird", true, "The polymorphic type 'Bird' is not registered")]
+    [InlineData(SerializationMode.Reflection, "Bird", true, "The polymorphic type 'Bird' is not registered")]
     public void InvalidEnvelopesThrowNbtException(
+        SerializationMode mode,
         string? discriminator,
         bool includeValue,
         string expectedMessage)
@@ -111,36 +112,24 @@ public sealed class NbtPolymorphismTests
         }
 
         var data = NbtSerializer.Serialize(new NbtRoot("root", wrapper));
-        var options = new NbtSerializerOptions
-        {
-            TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
-        };
+        var path = CreatePath(mode);
 
-        var generated = Assert.Throws<NbtException>(() =>
-            NbtSerializer.Deserialize(data, PolyContext.Default.IPolyAnimal));
-        var reflected = Assert.Throws<NbtException>(() =>
-            NbtSerializer.Deserialize<IPolyAnimal>(data, options));
+        var exception = Assert.Throws<NbtException>(() => path.Deserialize<IPolyAnimal>(data));
 
-        Assert.Contains(expectedMessage, generated.Message, StringComparison.Ordinal);
-        Assert.Contains(expectedMessage, reflected.Message, StringComparison.Ordinal);
+        Assert.Contains(expectedMessage, exception.Message, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void UnregisteredRuntimeTypeThrowsOnWrite()
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void UnregisteredRuntimeTypeThrowsOnWrite(SerializationMode mode)
     {
+        var path = CreatePath(mode);
         var value = new PolyZoo { Star = new Bird() };
 
-        var generated = Assert.Throws<NbtException>(() =>
-            NbtSerializer.Serialize(value, PolyContext.Default.PolyZoo, "root"));
-        var reflection = new NbtSerializerOptions
-        {
-            TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
-        };
-        var reflected = Assert.Throws<NbtException>(() =>
-            NbtSerializer.Serialize(value, "root", reflection));
+        var exception = Assert.Throws<NbtException>(() => path.Serialize(value));
 
-        Assert.Contains("is not registered", generated.Message, StringComparison.Ordinal);
-        Assert.Contains("is not registered", reflected.Message, StringComparison.Ordinal);
+        Assert.Contains("is not registered", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -167,25 +156,30 @@ public sealed class NbtPolymorphismTests
         Assert.Contains("Generic polymorphic", genericBase.Message, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void BaseConverterOverridesGeneratedDispatch()
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void BaseConverterOverridesPolymorphicDispatch(SerializationMode mode)
     {
-        var options = new NbtSerializerOptions();
-        options.Converters.Add(new PolyAnimalIntConverter());
-        var context = new PolyContext(options);
+        var path = CreatePath(
+            mode,
+            addConverters: static options =>
+                options.Converters.Add(new PolyAnimalIntConverter()));
         var value = CreateZoo();
 
-        var data = NbtSerializer.Serialize(value, context.PolyZoo, "root");
+        var data = path.Serialize(value);
         var root = (NbtCompound)NbtSerializer.Deserialize(data).Value.Value!;
-        var copy = NbtSerializer.Deserialize(data, context.PolyZoo);
+        var copy = path.Deserialize<PolyZoo>(data);
 
         Assert.Equal(NbtTagType.Int, root["Star"].TagType);
         var cat = Assert.IsType<PolyCat>(copy.Star);
         Assert.Equal(9, cat.Lives);
     }
 
-    [Fact]
-    public void DuplicateEnvelopeMembersHonorDuplicateHandling()
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void DuplicateEnvelopeMembersHonorDuplicateHandling(SerializationMode mode)
     {
         var buffer = new ArrayBufferWriter<byte>();
         var writer = new NbtWriter(buffer);
@@ -201,21 +195,35 @@ public sealed class NbtPolymorphismTests
         writer.WriteEndCompound();
         writer.WriteEndCompound();
         var data = buffer.WrittenSpan.ToArray();
-        var generatedOptions = new NbtSerializerOptions { RejectDuplicateCompoundNames = true };
-        var reflectionOptions = new NbtSerializerOptions
+        var path = CreatePath(mode, rejectDuplicateCompoundNames: true);
+
+        var exception = Assert.Throws<NbtException>(() => path.Deserialize<IPolyAnimal>(data));
+
+        Assert.Contains("duplicate member '$value'", exception.Message, StringComparison.Ordinal);
+    }
+
+    private static SerializationTestPath CreatePath(
+        SerializationMode mode,
+        bool rejectDuplicateCompoundNames = false,
+        Action<NbtSerializerOptions>? addConverters = null)
+    {
+        if (mode == SerializationMode.Reflection)
         {
-            RejectDuplicateCompoundNames = true,
-            TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
+            var options = new NbtSerializerOptions
+            {
+                RejectDuplicateCompoundNames = rejectDuplicateCompoundNames,
+                TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
+            };
+            addConverters?.Invoke(options);
+            return SerializationTestPath.Reflection(options);
+        }
+
+        var generatedOptions = new NbtSerializerOptions
+        {
+            RejectDuplicateCompoundNames = rejectDuplicateCompoundNames,
         };
-        var context = new PolyContext(generatedOptions);
-
-        var generated = Assert.Throws<NbtException>(() =>
-            NbtSerializer.Deserialize(data, context.IPolyAnimal));
-        var reflected = Assert.Throws<NbtException>(() =>
-            NbtSerializer.Deserialize<IPolyAnimal>(data, reflectionOptions));
-
-        Assert.Contains("duplicate member '$value'", generated.Message, StringComparison.Ordinal);
-        Assert.Contains("duplicate member '$value'", reflected.Message, StringComparison.Ordinal);
+        addConverters?.Invoke(generatedOptions);
+        return SerializationTestPath.Generated(new PolyContext(generatedOptions));
     }
 
     private static PolyZoo CreateZoo() => new()

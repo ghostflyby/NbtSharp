@@ -5,10 +5,12 @@ namespace NbtSharp.Tests;
 
 public sealed class NbtObjectMappingTests
 {
-    [Fact]
-    public void MapsPropertiesAndNestedObjects()
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void MapsPropertiesAndNestedObjects(SerializationMode mode)
     {
-        var options = ReflectionOptions();
+        var path = CreatePath(mode);
         var player = new Player
         {
             Name = "Steve",
@@ -20,8 +22,8 @@ public sealed class NbtObjectMappingTests
             ],
         };
 
-        var data = NbtSerializer.Serialize(player, "root", options);
-        var actual = NbtSerializer.Deserialize<Player>(data, options);
+        var data = path.Serialize(player);
+        var actual = path.Deserialize<Player>(data);
 
         Assert.Equal("Steve", actual.Name);
         Assert.Equal(20, actual.Health);
@@ -31,115 +33,127 @@ public sealed class NbtObjectMappingTests
         Assert.Equal("sword", actual.Items[1].Id);
     }
 
-    [Fact]
-    public void AppliesNameAndIgnoreAttributes()
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void AppliesNameAndIgnoreAttributes(SerializationMode mode)
     {
-        var options = ReflectionOptions();
+        var path = CreatePath(mode);
         var value = new RenamedDto { Value = 7, Ignored = 9 };
 
-        var root = NbtSerializer.Deserialize(NbtSerializer.Serialize(value, "root", options));
+        var data = path.Serialize(value);
+        var root = NbtSerializer.Deserialize(data);
         var compound = (NbtCompound)root.Value.Value!;
 
         Assert.True(compound.ContainsKey("n"));
         Assert.False(compound.ContainsKey("Value"));
         Assert.False(compound.ContainsKey("Ignored"));
-        Assert.Equal(7, NbtSerializer.Deserialize<RenamedDto>(NbtSerializer.Serialize(value, "root", options), options).Value);
+        Assert.Equal(7, path.Deserialize<RenamedDto>(data).Value);
     }
 
-    [Fact]
-    public void IncludesOptedInFields()
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void IncludesOptedInFields(SerializationMode mode)
     {
-        var options = ReflectionOptions();
+        var path = CreatePath(mode);
         var value = new FieldDto { Value = 42 };
 
-        var actual = NbtSerializer.Deserialize<FieldDto>(
-            NbtSerializer.Serialize(value, "root", options),
-            options);
+        var actual = path.Deserialize<FieldDto>(path.Serialize(value));
 
         Assert.Equal(42, actual.Value);
     }
 
-    [Fact]
-    public void BindsConstructorParametersToMembers()
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void BindsConstructorParametersToMembers(SerializationMode mode)
     {
-        var options = ReflectionOptions();
+        var path = CreatePath(mode);
         var value = new ImmutableDto(7, "seven");
 
-        var actual = NbtSerializer.Deserialize<ImmutableDto>(
-            NbtSerializer.Serialize(value, "root", options),
-            options);
+        var actual = path.Deserialize<ImmutableDto>(path.Serialize(value));
 
         Assert.Equal(7, actual.Value);
         Assert.Equal("seven", actual.Name);
     }
 
-    [Fact]
-    public void BindsPositionalRecords()
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void BindsPositionalRecords(SerializationMode mode)
     {
-        var options = ReflectionOptions();
+        var path = CreatePath(mode);
         var value = new PointRecord(3, 4);
 
-        var actual = NbtSerializer.Deserialize<PointRecord>(
-            NbtSerializer.Serialize(value, "root", options),
-            options);
+        var actual = path.Deserialize<PointRecord>(path.Serialize(value));
 
         Assert.Equal(3, actual.X);
         Assert.Equal(4, actual.Y);
     }
 
-    [Fact]
-    public void BindsRenamedMembersThroughTheirConstructorParameters()
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void BindsRenamedMembersThroughTheirConstructorParameters(SerializationMode mode)
     {
-        var options = ReflectionOptions();
+        var path = CreatePath(mode);
         var value = new RenamedRecord(7);
 
-        var actual = NbtSerializer.Deserialize<RenamedRecord>(
-            NbtSerializer.Serialize(value, "root", options),
-            options);
+        var actual = path.Deserialize<RenamedRecord>(path.Serialize(value));
 
         Assert.Equal(7, actual.Value);
     }
 
-    [Fact]
-    public void SkipsUnknownMembersAndLeavesMissingMembersAtTheirDefaults()
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void SkipsUnknownMembersAndLeavesMissingMembersAtTheirDefaults(SerializationMode mode)
     {
-        var options = ReflectionOptions();
+        var path = CreatePath(mode);
         var root = new NbtRoot("root", new NbtCompound
         {
             ["Health"] = 20,
             ["Extra"] = "ignored",
         });
 
-        var actual = NbtSerializer.Deserialize<SimpleDto>(NbtSerializer.Serialize(root), options);
+        var actual = path.Deserialize<SimpleDto>(NbtSerializer.Serialize(root));
 
         Assert.Equal(20, actual.Health);
         Assert.Equal("", actual.Name);
     }
 
-    [Fact]
-    public void OmittedNullMembersStayNull()
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void OmittedNullMembersStayNull(SerializationMode mode)
     {
-        var options = ReflectionOptions();
+        var path = CreatePath(mode);
         var value = new NullableDto { Required = 1, Optional = null };
 
-        var root = (NbtCompound)NbtSerializer.Deserialize(NbtSerializer.Serialize(value, "root", options)).Value.Value!;
+        var data = path.Serialize(value);
+        var root = (NbtCompound)NbtSerializer.Deserialize(data).Value.Value!;
         Assert.False(root.ContainsKey("Optional"));
 
-        var actual = NbtSerializer.Deserialize<NullableDto>(NbtSerializer.Serialize(value, "root", options), options);
+        var actual = path.Deserialize<NullableDto>(data);
         Assert.Equal(1, actual.Required);
         Assert.Null(actual.Optional);
     }
 
-    [Fact]
-    public void NullMembersCanBeRejected()
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void NullMembersCanBeRejected(SerializationMode mode)
     {
-        var options = ReflectionOptions(nullValueHandling: NbtNullValueHandling.Throw);
+        var path = CreatePath(mode, nullValueHandling: NbtNullValueHandling.Throw);
 
-        Assert.Throws<NbtException>(() => NbtSerializer.Serialize(new NullableDto { Required = 1 }, "root", options));
+        Assert.Throws<NbtException>(() => path.Serialize(new NullableDto { Required = 1 }));
     }
 
-    [Fact]
-    public void DuplicateCompoundNamesKeepTheLastValueOrThrow()
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void DuplicateCompoundNamesKeepTheLastValueOrThrow(SerializationMode mode)
     {
         var buffer = new ArrayBufferWriter<byte>();
         var writer = new NbtWriter(buffer);
@@ -149,11 +163,12 @@ public sealed class NbtObjectMappingTests
         writer.WriteEndCompound();
         writer.Complete();
 
-        var options = ReflectionOptions();
-        Assert.Equal(2, NbtSerializer.Deserialize<SimpleDto>(buffer.WrittenSpan, options).X);
+        var path = CreatePath(mode);
+        Assert.Equal(2, path.Deserialize<SimpleDto>(buffer.WrittenSpan).X);
 
-        var throwingOptions = ReflectionOptions(rejectDuplicateCompoundNames: true);
-        Assert.Throws<NbtException>(() => NbtSerializer.Deserialize<SimpleDto>(buffer.WrittenSpan, throwingOptions));
+        var throwingPath = CreatePath(mode, rejectDuplicateCompoundNames: true);
+        Assert.Throws<NbtException>(() =>
+            throwingPath.Deserialize<SimpleDto>(buffer.WrittenSpan));
     }
 
     [Fact]
@@ -166,7 +181,7 @@ public sealed class NbtObjectMappingTests
     }
 
     [Fact]
-    public void RequiredMembersMustBeMappedOrConstructorInitialized()
+    public void UnmappedRequiredMembersAreRejectedByReflection()
     {
         var options = ReflectionOptions();
         var unmapped = new UnmappedRequiredDto { Ignored = "", Value = 1 };
@@ -174,11 +189,17 @@ public sealed class NbtObjectMappingTests
         Assert.Equal(1, unmapped.Value);
         Assert.Throws<NotSupportedException>(() =>
             NbtSerializer.Serialize(unmapped, "root", options));
+    }
 
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void ConstructorInitializedRequiredMembersRoundTrip(SerializationMode mode)
+    {
+        var path = CreatePath(mode);
         var value = new InitializedRequiredDto { Value = 2 };
-        var copy = NbtSerializer.Deserialize<InitializedRequiredDto>(
-            NbtSerializer.Serialize(value, "root", options),
-            options);
+
+        var copy = path.Deserialize<InitializedRequiredDto>(path.Serialize(value));
 
         Assert.Equal(2, copy.Value);
     }
@@ -205,6 +226,25 @@ public sealed class NbtObjectMappingTests
         Assert.Null(resolver.GetTypeInfo(typeof(NbtEndList), options));
     }
 
+    private static SerializationTestPath CreatePath(
+        SerializationMode mode,
+        bool rejectDuplicateCompoundNames = false,
+        NbtNullValueHandling nullValueHandling = NbtNullValueHandling.Omit)
+    {
+        if (mode == SerializationMode.Reflection)
+        {
+            return SerializationTestPath.Reflection(ReflectionOptions(
+                rejectDuplicateCompoundNames,
+                nullValueHandling));
+        }
+
+        return SerializationTestPath.Generated(new ObjectMappingContext(new NbtSerializerOptions
+        {
+            RejectDuplicateCompoundNames = rejectDuplicateCompoundNames,
+            NullValueHandling = nullValueHandling,
+        }));
+    }
+
     private static NbtSerializerOptions ReflectionOptions(
         bool rejectDuplicateCompoundNames = false,
         NbtNullValueHandling nullValueHandling = NbtNullValueHandling.Omit) => new()
@@ -214,7 +254,7 @@ public sealed class NbtObjectMappingTests
             NullValueHandling = nullValueHandling,
         };
 
-    private sealed class Player
+    internal sealed class Player
     {
         public string Name { get; init; } = "";
 
@@ -223,30 +263,31 @@ public sealed class NbtObjectMappingTests
         public List<Item> Items { get; init; } = [];
     }
 
-    private sealed class Item
+    internal sealed class Item
     {
         public string Id { get; init; } = "";
 
         public int Count { get; init; }
     }
 
-    [SuppressMessage("ReSharper", "UnusedAutoPropertyAccessor.Local")]
-    private sealed class RenamedDto
+    [SuppressMessage("ReSharper", "UnusedAutoPropertyAccessor.Global")]
+    internal sealed class RenamedDto
     {
         [NbtPropertyName("n")]
         public int Value { get; init; }
 
         [NbtIgnore]
+        // ReSharper disable once UnusedAutoPropertyAccessor.Global
         public int Ignored { get; set; }
     }
 
-    private sealed class FieldDto
+    internal sealed class FieldDto
     {
         [NbtInclude]
         public int Value;
     }
 
-    private sealed class ImmutableDto
+    internal sealed class ImmutableDto
     {
         public ImmutableDto(int value, string name)
         {
@@ -259,12 +300,12 @@ public sealed class NbtObjectMappingTests
         public string Name { get; }
     }
 
-    private sealed record PointRecord(int X, int Y);
+    internal sealed record PointRecord(int X, int Y);
 
-    private sealed record RenamedRecord([property: NbtPropertyName("v")] int Value);
+    internal sealed record RenamedRecord([property: NbtPropertyName("v")] int Value);
 
     [SuppressMessage("ReSharper", "UnusedAutoPropertyAccessor.Local")]
-    private sealed class SimpleDto
+    internal sealed class SimpleDto
     {
         public int Health { get; set; }
 
@@ -273,7 +314,7 @@ public sealed class NbtObjectMappingTests
         public string Name { get; set; } = "";
     }
 
-    private sealed class NullableDto
+    internal sealed class NullableDto
     {
         public int Required { get; init; }
 
@@ -297,7 +338,7 @@ public sealed class NbtObjectMappingTests
         public int Value { get; set; }
     }
 
-    private sealed class InitializedRequiredDto
+    internal sealed class InitializedRequiredDto
     {
         [SetsRequiredMembers]
         public InitializedRequiredDto()
@@ -306,7 +347,7 @@ public sealed class NbtObjectMappingTests
         }
 
         [NbtIgnore]
-        // ReSharper disable once UnusedAutoPropertyAccessor.Local
+        // ReSharper disable once UnusedAutoPropertyAccessor.Global
         public required string Ignored { get; init; }
 
         public int Value { get; set; }
@@ -318,5 +359,26 @@ public sealed class NbtObjectMappingTests
         {
             _ = value;
         }
+    }
+}
+
+[NbtSerializable(typeof(NbtObjectMappingTests.Player))]
+[NbtSerializable(typeof(NbtObjectMappingTests.RenamedDto))]
+[NbtSerializable(typeof(NbtObjectMappingTests.FieldDto))]
+[NbtSerializable(typeof(NbtObjectMappingTests.ImmutableDto))]
+[NbtSerializable(typeof(NbtObjectMappingTests.PointRecord))]
+[NbtSerializable(typeof(NbtObjectMappingTests.RenamedRecord))]
+[NbtSerializable(typeof(NbtObjectMappingTests.SimpleDto))]
+[NbtSerializable(typeof(NbtObjectMappingTests.NullableDto))]
+[NbtSerializable(typeof(NbtObjectMappingTests.InitializedRequiredDto))]
+internal partial class ObjectMappingContext : NbtSerializerContext
+{
+    public ObjectMappingContext()
+    {
+    }
+
+    public ObjectMappingContext(NbtSerializerOptions options)
+        : base(options)
+    {
     }
 }

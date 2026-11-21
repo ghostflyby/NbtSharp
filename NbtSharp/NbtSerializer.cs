@@ -1227,6 +1227,87 @@ public static class NbtSerializer
 
     [RequiresUnreferencedCode("Converter resolution may use reflection or runtime generic construction.")]
     [RequiresDynamicCode("Converter resolution may use runtime generic construction.")]
+    internal static void SerializeMemberWithConverterInternal(
+        ref NbtWriter writer,
+        string name,
+        object? value,
+        Type type,
+        NbtConverter converter,
+        NbtSerializerOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(converter);
+        if (value is null)
+        {
+            SerializeMemberInternal(ref writer, name, value, type, options);
+            return;
+        }
+
+        if (writer.IsPayloadExpected)
+        {
+            throw new InvalidOperationException("A value payload is already expected.");
+        }
+
+        NbtConverter resolved = converter;
+        try
+        {
+            resolved = ResolveConverterForType(resolved, type, options);
+
+            if (!resolved.TryGetTagType(value, type, options, out var tagType))
+            {
+                throw new NotSupportedException(
+                    $"The converter for {type} must implement TryGetTagType to write a named member.");
+            }
+
+            writer.WriteMemberHeader(tagType, name);
+        }
+        catch (NbtException ex)
+        {
+            PrependPath(ex, "." + name);
+            throw;
+        }
+
+        try
+        {
+            SerializeValueCore(
+                ref writer,
+                value,
+                type,
+                resolved,
+                options,
+                pathSegment: null,
+                headerWritten: true);
+        }
+        catch (NbtException ex)
+        {
+            PrependPath(ex, "." + name);
+            throw;
+        }
+    }
+
+    internal static NbtConverter ResolveConverterForType(
+        NbtConverter converter,
+        Type type,
+        NbtSerializerOptions options)
+    {
+        if (converter is not NbtConverterFactory factory)
+        {
+            return converter;
+        }
+
+        var resolved = factory.CreateConverter(type, options);
+        // User factories can return null despite the non-nullable contract.
+        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
+        if (resolved is null || !resolved.CanConvert(type))
+        {
+            throw new NotSupportedException(
+                $"The converter {converter.GetType()} does not support {type}.");
+        }
+
+        return resolved;
+    }
+
+    [RequiresUnreferencedCode("Converter resolution may use reflection or runtime generic construction.")]
+    [RequiresDynamicCode("Converter resolution may use runtime generic construction.")]
     internal static void SerializeValueInternal(
         ref NbtWriter writer,
         object? value,

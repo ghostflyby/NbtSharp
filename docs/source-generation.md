@@ -104,16 +104,19 @@ internal sealed class Player
 
 - No argument: the member is resolved at runtime from `options.Converters`, then the resolver, then
   built-ins. This path is not AOT-safe by itself; register an AOT-safe converter.
-- Converter type: generated code instantiates that converter directly. It takes precedence over
-  `options.Converters`. The type must be closed, non-abstract, accessible, derived from
-  `NbtConverter<T>` for the member type (or `NbtConverterFactory`), and have a public parameterless
-  constructor.
+- Converter type: generated code instantiates that converter directly; reflection instantiates it
+  when building the object converter. It takes precedence over `options.Converters`. The type must be
+  closed, non-abstract, derived from `NbtConverter<T>` for the member type (or
+  `NbtConverterFactory`), and have a public parameterless constructor. Generated code additionally
+  requires the converter type to be accessible from the context assembly; reflection instantiates it
+  directly and does not apply that context-assembly check.
 - A converter for `Guid` does not automatically apply to `Guid?`; use runtime resolution or a
   nullable-aware converter.
 - Marked members remain normal DTO members, so required, null, and constructor semantics are
   unchanged. Fields also require `[NbtInclude]`.
 
-Invalid declarations report `NBTSG016`.
+Invalid declarations report `NBTSG016` during generation and throw `NotSupportedException` from the
+reflection resolver.
 
 ## Polymorphic members
 

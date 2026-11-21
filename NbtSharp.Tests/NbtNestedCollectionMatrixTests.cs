@@ -2,8 +2,40 @@ namespace NbtSharp.Tests;
 
 public sealed class NbtNestedCollectionMatrixTests
 {
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void NestedCollectionsRoundTrip(SerializationMode mode)
+    {
+        var path = CreatePath(mode);
+        var value = new NestedCollectionMatrixDto
+        {
+            Lists = [[1, 2], [], [3]],
+            MapOfLists = new Dictionary<string, List<int>>
+            {
+                ["a"] = [4, 5],
+                ["b"] = [],
+            },
+            Arrays = [[6, 7], [8]],
+            MapOfMaps = new Dictionary<string, Dictionary<string, int>>
+            {
+                ["outer"] = new Dictionary<string, int>
+                {
+                    ["inner"] = 9,
+                    ["second"] = 10,
+                },
+            },
+            JaggedArray = [[11], [12, 13]],
+        };
+
+        var data = path.Serialize(value);
+        var copy = path.Deserialize<NestedCollectionMatrixDto>(data);
+
+        AssertNestedValues(copy);
+    }
+
     [Fact]
-    public void NestedCollectionsRoundTripThroughBothPaths()
+    public void BothPathsProduceTheSameBytes()
     {
         var value = new NestedCollectionMatrixDto
         {
@@ -24,29 +56,19 @@ public sealed class NbtNestedCollectionMatrixTests
             },
             JaggedArray = [[11], [12, 13]],
         };
-        var reflection = new NbtSerializerOptions
-        {
-            TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
-        };
 
-        var generatedData = NbtSerializer.Serialize(
-            value,
-            NestedCollectionContext.Default.NestedCollectionMatrixDto,
-            "root");
-        var reflectedData = NbtSerializer.Serialize(value, "root", reflection);
-
-        Assert.Equal(reflectedData, generatedData);
-
-        var generatedCopy = NbtSerializer.Deserialize(
-            generatedData,
-            NestedCollectionContext.Default.NestedCollectionMatrixDto);
-        var reflectedCopy = NbtSerializer.Deserialize<NestedCollectionMatrixDto>(
-            reflectedData,
-            reflection);
-
-        AssertNestedValues(generatedCopy);
-        AssertNestedValues(reflectedCopy);
+        Assert.Equal(
+            CreatePath(SerializationMode.Reflection).Serialize(value),
+            CreatePath(SerializationMode.Generated).Serialize(value));
     }
+
+    private static SerializationTestPath CreatePath(SerializationMode mode) =>
+        mode == SerializationMode.Reflection
+            ? SerializationTestPath.Reflection(new NbtSerializerOptions
+            {
+                TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
+            })
+            : SerializationTestPath.Generated(NestedCollectionContext.Default);
 
     private static void AssertNestedValues(NestedCollectionMatrixDto copy)
     {

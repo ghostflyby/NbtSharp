@@ -9,10 +9,12 @@ namespace NbtSharp.Tests;
 
 public sealed class CollectionShapeSourceGenerationTests
 {
-    [Fact]
-    public void GeneratedConvertersSupportDiscoveredAndConcurrentShapes()
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void SupportsDiscoveredAndConcurrentShapes(SerializationMode mode)
     {
-        var context = CollectionShapeContext.Default;
+        var path = CreatePath(mode);
         var value = new SourceGenCollectionShapes
         {
             ConcurrentMap = new ConcurrentDictionary<string, int>(
@@ -50,8 +52,8 @@ public sealed class CollectionShapeSourceGenerationTests
         value.Blocking.TryAdd(1);
         value.Blocking.TryAdd(2);
 
-        var data = NbtSerializer.Serialize(value, context.SourceGenCollectionShapes, "root");
-        var copy = NbtSerializer.Deserialize(data, context.SourceGenCollectionShapes);
+        var data = path.Serialize(value);
+        var copy = path.Deserialize<SourceGenCollectionShapes>(data);
 
         Assert.Equal(1, copy.ConcurrentMap["a"]);
         Assert.Equal([1, 2], copy.ConcurrentBag.OrderBy(static item => item));
@@ -78,10 +80,12 @@ public sealed class CollectionShapeSourceGenerationTests
         Assert.Equal(9, copy.SpanMap["span"]);
     }
 
-    [Fact]
-    public void GeneratedConvertersSupportMutableCollectionShapes()
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void SupportsMutableCollectionShapes(SerializationMode mode)
     {
-        var context = CollectionShapeContext.Default;
+        var path = CreatePath(mode);
         var value = new SourceGenCollectionShapes
         {
             Queue = new Queue<int>([1, 2, 3]),
@@ -101,8 +105,8 @@ public sealed class CollectionShapeSourceGenerationTests
             ImmutableArray = [],
         };
 
-        var data = NbtSerializer.Serialize(value, context.SourceGenCollectionShapes, "root");
-        var copy = NbtSerializer.Deserialize(data, context.SourceGenCollectionShapes);
+        var data = path.Serialize(value);
+        var copy = path.Deserialize<SourceGenCollectionShapes>(data);
 
         Assert.Equal([1, 2, 3], copy.Queue.ToArray());
         Assert.Equal([3, 2, 1], copy.Stack.ToArray());
@@ -119,10 +123,12 @@ public sealed class CollectionShapeSourceGenerationTests
         Assert.Equal([16, 17], copy.ReadOnlyObservable.ToArray());
     }
 
-    [Fact]
-    public void GeneratedFactoriesPreferReadOnlySpanOverWritableSpan()
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void FactoriesPreferReadOnlySpanOverWritableSpan(SerializationMode mode)
     {
-        var context = CollectionShapeContext.Default;
+        var path = CreatePath(mode);
         GeneratedSpanPreferenceFactory.Reset();
         var value = new SourceGenCollectionShapes
         {
@@ -130,18 +136,20 @@ public sealed class CollectionShapeSourceGenerationTests
             ImmutableArray = [],
         };
 
-        var data = NbtSerializer.Serialize(value, context.SourceGenCollectionShapes, "root");
-        var copy = NbtSerializer.Deserialize(data, context.SourceGenCollectionShapes);
+        var data = path.Serialize(value);
+        var copy = path.Deserialize<SourceGenCollectionShapes>(data);
 
         Assert.Equal([1, 2], copy.SpanPreference.ToArray());
         Assert.Equal(1, GeneratedSpanPreferenceFactory.ReadOnlyCalls);
         Assert.Equal(0, GeneratedSpanPreferenceFactory.WritableCalls);
     }
 
-    [Fact]
-    public void GeneratedConvertersSupportImmutableAndFrozenShapes()
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void SupportsImmutableAndFrozenShapes(SerializationMode mode)
     {
-        var context = CollectionShapeContext.Default;
+        var path = CreatePath(mode);
         var value = new SourceGenCollectionShapes
         {
             ImmutableArray = [16, 17],
@@ -160,8 +168,8 @@ public sealed class CollectionShapeSourceGenerationTests
                 .ToFrozenDictionary(),
         };
 
-        var data = NbtSerializer.Serialize(value, context.SourceGenCollectionShapes, "root");
-        var copy = NbtSerializer.Deserialize(data, context.SourceGenCollectionShapes);
+        var data = path.Serialize(value);
+        var copy = path.Deserialize<SourceGenCollectionShapes>(data);
 
         Assert.Equal([16, 17], copy.ImmutableArray.ToArray());
         Assert.Equal([18, 19], copy.ImmutableList.ToArray());
@@ -178,11 +186,27 @@ public sealed class CollectionShapeSourceGenerationTests
         Assert.Equal(7, copy.FrozenDictionary["g"]);
         Assert.Equal(8, copy.FrozenDictionary["h"]);
     }
+
+    private static SerializationTestPath CreatePath(SerializationMode mode) =>
+        mode == SerializationMode.Reflection
+            ? SerializationTestPath.Reflection(new NbtSerializerOptions
+            {
+                TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
+            })
+            : SerializationTestPath.Generated(CollectionShapeContext.Default);
 }
 
 [NbtSerializable(typeof(SourceGenCollectionShapes))]
 internal partial class CollectionShapeContext : NbtSerializerContext
 {
+    public CollectionShapeContext()
+    {
+    }
+
+    public CollectionShapeContext(NbtSerializerOptions options)
+        : base(options)
+    {
+    }
 }
 
 internal sealed class SourceGenCollectionShapes
