@@ -208,7 +208,9 @@ excluded from the mapping requires the selected constructor to be marked with
 resolver throws `NotSupportedException`. `[SetsRequiredMembers]` only covers excluded members:
 mapped required members are still presence-checked, so a compound that omits one fails even when the
 constructor initializes it. Required members on a value type require the selected constructor to be
-marked with `[SetsRequiredMembers]`; otherwise the generator reports `NBTSG007`.
+marked with `[SetsRequiredMembers]`; because a parameterless constructor is preferred, this means an
+explicit public parameterless constructor with the attribute. Otherwise the generator reports
+`NBTSG007`.
 
 ## Streaming
 
@@ -412,6 +414,14 @@ and must complete it; the `Stream` overload completes only its internal pipe aft
 non-cancellation failure and leaves the stream open. `SerializeDocumentAsync(Stream/PipeWriter,
 NbtRoot, options, ...)` preserves `NbtRoot.Name`; the generic async overloads use `rootName`, like the
 generic synchronous overloads. The writer does not roll back partial output if a converter throws.
+
+## Documentation
+
+- [Source generation and Native AOT](docs/source-generation.md)
+- [Migrating from reflection](docs/migration.md)
+- [Diagnostics](docs/diagnostics.md)
+- [Performance characteristics](docs/performance.md)
+- [Roadmap](docs/roadmap.md)
 
 ## Build and test
 

@@ -1,6 +1,6 @@
 # NbtSharp Roadmap
 
-Status: 2026-11-18  
+Status: 2026-11-20  
 Baseline: PR #16 merged (`e8fb22a`) with source-generated serialization, enum support, strict
 `required` semantics, a lock-free converter cache, typed conversion fast paths, fully incremental
 generation, member converter opt-out, and broad collection/map shape support.
@@ -8,15 +8,19 @@ generation, member converter opt-out, and broad collection/map shape support.
 This document lists possible follow-up work. Priority reflects user impact and risk, not a strict
 schedule.
 
-## Implementation status (2026-11-18)
+## Implementation status (2026-11-20)
 
 - P0 #1 and #2 are implemented.
 - P0 #3 is implemented as compile-time AOT/trim analysis in the test projects. Native publish and
   package-content checks were deliberately excluded from scope.
-- P1 #4 and #6 are implemented.
-- P2 #11 is implemented (PR #16 and the collection wrap-up): sequence/map shape interfaces,
-  immutable/frozen/concurrent/sorted shapes, and `CollectionBuilderAttribute`/companion
-  factory/constructor/`Add` pattern discovery. String sorted sets use ordinal ordering;
+- P1 #4, #5, #6, #7, and #8 are implemented.
+- P2 #9, #10, #11, and #13 are implemented. Resolver chains, naming policies/context options, and
+  async serialization are covered by stacked PRs.
+- P3 #14 and #16 are implemented. #15 has benchmarks but no CI baseline comparison; #12 is deferred
+  pending a wire-format decision.
+- P2 #11 includes sequence/map shape interfaces, immutable/frozen/concurrent/sorted shapes, and
+  `CollectionBuilderAttribute`/companion factory/constructor/`Add` pattern discovery. Sorted maps
+  with string keys and sorted sets with string elements use ordinal ordering;
   `PriorityQueue<TElement,TPriority>` is rejected with a diagnostic. Span-only builders are
   supported by source generation and by the reflection resolver through runtime-created delegates.
 - Built-in scalar support also covers `byte`, `ushort`, `uint`, `ulong`, and `char`.
@@ -25,14 +29,18 @@ schedule.
 
 ### 1. Full transform-level incremental generation
 
-**Current state**
+**Status (2026-11-20): implemented.** The pipeline uses a symbol-free per-context structural model,
+a content-keyed reachability fingerprint, and a `ContextSpecCache`; unrelated edits leave prepared
+and generated steps cached, and tests cover 300 contexts plus a single 120-DTO context.
+
+**Original plan**
 
 - A `PreparedContext` model with a structural fingerprint caches validation, type-graph data, name
   assignment, and diagnostics.
 - Unrelated compilation changes skip source emission and `AddSource`.
 - Tests assert that prepared and generated steps are cached for unrelated changes.
 
-**Gap**
+**Original gap (addressed)**
 
 - Semantic model changes still rebuild the type graph for every context.
 - `Collect()` still merges all contexts into one batch, so one changed context can trigger
@@ -53,7 +61,12 @@ schedule.
 
 ### 2. Custom converters in source-generated DTOs
 
-**Current state**
+**Status (2026-11-19): implemented.** `[NbtUseConverter]` supports runtime resolution and
+`[NbtUseConverter(typeof(...))]` supplies an explicit typed converter or factory. Marked members are
+excluded from graph discovery, follow normal converter precedence, and remain AOT-safe when the
+explicit converter is AOT-safe.
+
+**Original gap**
 
 - Runtime converter lookup is `options.Converters` → type-info resolver → built-in converters.
 - A DTO member with a type unsupported by the generator (`Guid`, `decimal`, `DateTime`, custom
@@ -100,7 +113,11 @@ schedule.
 
 ### 4. Array and collection allocation improvements
 
-**Current state**
+**Status (2026-11-19): implemented.** Arrays with fixed-width element tags are allocated once at the
+declared length, `sbyte[]` is read directly, and lists up to 4096 elements use
+`CollectionsMarshal` span filling.
+
+**Original state**
 
 - Non-special `T[]` values are read into a `List<T>` and then copied with `ToArray()`.
 - `sbyte[]` is read as `byte[]` and copied again.
@@ -139,9 +156,10 @@ null checks; unsigned values and `char` preserve their bit patterns in the same-
 
 ### 7. Required and constructor semantics
 
-**Status (2026-11-18): implemented.** Required value types remain a permanent limitation
-(`NBTSG007`). `[SetsRequiredMembers]` only excuses required members that are excluded from the
-mapping; mapped required members are always presence-checked. Missing constructor-bound members use
+**Status (2026-11-18): implemented.** Required value types need an explicit public parameterless
+constructor marked `[SetsRequiredMembers]` (`NBTSG007` otherwise). `[SetsRequiredMembers]` only
+excuses required members that are excluded from the mapping; mapped required members are always
+presence-checked. Missing constructor-bound members use
 the parameter's declared default value when it has one, otherwise the CLR default. Hidden (`new`)
 members are rejected with `NBTSG017` and `NotSupportedException` from the reflection resolver.
 Cross-assembly `init`/required members and friend-assembly (`internal`) setters are covered by
@@ -193,10 +211,19 @@ reported explicitly instead of being mapped as objects.
 
 ### 12. Polymorphic members
 
-- Current behavior rejects abstract/interface members.
-- Possible design: a discriminator member plus derived-type registration such as
-  `[NbtDerived(typeof(X))]`.
-- This requires a deliberate NBT representation choice because NBT has no native polymorphism.
+**Status (2026-11-20): deferred pending a wire-format decision.** Abstract and interface members
+still report `NBTSG003` / `NotSupportedException`. The implementation shape is understood:
+`[NbtDerived(typeof(X))]` registration on the base type, a discriminator member, and generated plus
+reflection dispatch. The unresolved choice is the NBT representation:
+
+- Flattened: `{ "$type": "Cat", ...derived members }` — compact and closest to `System.Text.Json`,
+  but reading needs buffering or DOM materialization and the writer must emit into an already-open
+  compound.
+- Envelope: `{ "$type": "Cat", "$value": { ...derived members } }` — isolated and simpler to
+  stream, but more verbose and unlike `System.Text.Json`.
+
+The discriminator value (short name, namespace-qualified name, or an explicit per-derived name) also
+needs to be fixed before the format becomes a compatibility contract.
 
 ### 13. Asynchronous serialization
 
@@ -218,18 +245,16 @@ deterministic random/mutation/truncation corpora for the reader, and a single ge
 
 ### 15. Benchmarks and regression gates
 
-- Add a BenchmarkDotNet project to the repository.
-- Keep stable benchmarks for mixed scalar/string DTOs, numeric DTOs, list-heavy DTOs, enums, and
-  large contexts.
-- Run comparisons against a baseline in CI or a scheduled job.
+- A BenchmarkDotNet project covers scalar, nullable-scalar, array, collection-shape, enum, and mixed
+  DTOs, plus cold/warm generator incrementality at 100 and 300 contexts.
+- A before/after comparison gate in CI or a scheduled job is still missing. Threshold-based gates
+  need a stable runner and a chosen noise margin.
 
 ### 16. Documentation
 
-- Source-generation and Native AOT guide.
-- Reflection-to-source-generation migration guide.
-- Required/null/constructor semantics and `[SetsRequiredMembers]` behavior.
-- Complete `NBTSG` diagnostic reference.
-- Performance characteristics and allocation notes.
+**Status (2026-11-20): implemented.** Documentation now includes a source-generation and Native AOT
+guide, a reflection-to-source-generation migration guide, required/null/constructor semantics, a
+complete `NBTSG` diagnostic reference, and performance/allocation notes under `docs/`.
 
 ## Suggested sequencing
 
