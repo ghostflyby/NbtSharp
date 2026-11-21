@@ -174,10 +174,14 @@ scope.
 
 ### 10. Naming policy and generation options
 
-- Add an STJ-style `NbtNamingPolicy` (camelCase, snake_case, etc.).
-- Add a context-level source-generation options attribute for naming, null handling, and generation
-  mode.
-- Consider `GenerationMode.Metadata` versus `GenerationMode.Serialization`.
+**Status (2026-11-20): naming and null handling implemented.** `NbtNamingPolicy` provides
+camelCase, snake_case, and kebab-case presets for reflection through
+`NbtSerializerOptions.PropertyNamingPolicy`. `[NbtSourceGenerationOptions]` configures the naming
+policy and default null handling for a generated context; the emitted `CreateDefaultOptions`
+override exposes both through `Context.Default.Options`, and declaring a conflicting override reports
+`NBTSG008`. Generation mode selection (`Metadata` versus `Serialization`) remains undecided because
+the generator only emits serialization-oriented converters today; it is deferred until a concrete
+consumer requires metadata-only output.
 
 ### 11. Additional collection shapes
 

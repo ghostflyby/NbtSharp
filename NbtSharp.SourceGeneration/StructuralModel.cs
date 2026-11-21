@@ -52,6 +52,8 @@ internal sealed class ContextSpec
         bool isRecord,
         bool hasSource,
         ImmutableArray<TypeSpec> entries,
+        string? propertyNamingPolicyExpression,
+        string? nullValueHandlingExpression,
         ImmutableArray<DiagnosticSpec> diagnostics)
     {
         HintName = hintName;
@@ -61,6 +63,8 @@ internal sealed class ContextSpec
         IsRecord = isRecord;
         HasSource = hasSource;
         Entries = entries;
+        PropertyNamingPolicyExpression = propertyNamingPolicyExpression;
+        NullValueHandlingExpression = nullValueHandlingExpression;
         Diagnostics = diagnostics;
         Fingerprint = ContextSpecFingerprint.Compute(this);
     }
@@ -78,6 +82,10 @@ internal sealed class ContextSpec
     public bool HasSource { get; }
 
     public ImmutableArray<TypeSpec> Entries { get; }
+
+    public string? PropertyNamingPolicyExpression { get; }
+
+    public string? NullValueHandlingExpression { get; }
 
     public ImmutableArray<DiagnosticSpec> Diagnostics { get; }
 
@@ -536,13 +544,15 @@ internal static class ContextSpecFingerprint
     public static string Compute(ContextSpec spec)
     {
         var hash = StableHash.Create();
-        hash.Add("context-spec-v3");
+        hash.Add("context-spec-v4");
         hash.Add(spec.HintName);
         hash.Add(spec.ContainingNamespace);
         hash.Add(spec.ContextName);
         hash.Add(spec.Accessibility);
         hash.Add(spec.IsRecord);
         hash.Add(spec.HasSource);
+        hash.Add(spec.PropertyNamingPolicyExpression);
+        hash.Add(spec.NullValueHandlingExpression);
         hash.Add(spec.Entries.Length);
 
         foreach (var entry in spec.Entries)

@@ -12,8 +12,10 @@ namespace NbtSharp;
 /// <remarks>
 /// <para>
 /// Properties are mapped by name; public fields are included only when marked with
-/// <see cref="NbtIncludeAttribute"/>. <see cref="NbtIgnoreAttribute"/> excludes a member and
-/// <see cref="NbtPropertyNameAttribute"/> renames it.
+/// <see cref="NbtIncludeAttribute"/>. <see cref="NbtIgnoreAttribute"/> excludes a member,
+/// <see cref="NbtPropertyNameAttribute"/> renames it, and
+/// <see cref="NbtSerializerOptions.PropertyNamingPolicy"/> renames members without an explicit
+/// name.
 /// </para>
 /// <para>
 /// This resolver uses reflection and runtime generic construction. It is not safe for Native AOT
@@ -50,7 +52,7 @@ public sealed class NbtReflectionTypeInfoResolver : INbtTypeInfoResolver
         typeof(BigInteger),
     ];
 
-    private readonly Dictionary<Type, NbtConverter> _cache = [];
+    private readonly Dictionary<(Type Type, NbtNamingPolicy? NamingPolicy), NbtConverter> _cache = [];
     private readonly Lock _cacheLock = new();
 
     /// <inheritdoc/>
@@ -64,12 +66,13 @@ public sealed class NbtReflectionTypeInfoResolver : INbtTypeInfoResolver
             return null;
         }
 
+        var key = (type, options.PropertyNamingPolicy);
         lock (_cacheLock)
         {
-            if (!_cache.TryGetValue(type, out var converter))
+            if (!_cache.TryGetValue(key, out var converter))
             {
-                converter = new NbtReflectionObjectConverter(type);
-                _cache[type] = converter;
+                converter = new NbtReflectionObjectConverter(type, options.PropertyNamingPolicy);
+                _cache[key] = converter;
             }
 
             return new NbtReflectionTypeInfo(type, converter, options);

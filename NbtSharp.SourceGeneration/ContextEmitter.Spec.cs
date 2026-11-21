@@ -40,6 +40,8 @@ internal sealed partial class ContextEmitter
                 }
             }
 
+            var (namingPolicyExpression, nullValueHandlingExpression) =
+                GetContextOptions(contextType);
             return new ContextSpec(
                 hintName,
                 hasNamespace ? contextType.ContainingNamespace.ToDisplayString() : "",
@@ -48,7 +50,46 @@ internal sealed partial class ContextEmitter
                 contextType.IsRecord,
                 hasSource: graph is not null,
                 entries.ToImmutable(),
+                namingPolicyExpression,
+                nullValueHandlingExpression,
                 diagnostics);
+        }
+
+        private static (string? NamingPolicy, string? NullValueHandling) GetContextOptions(
+            INamedTypeSymbol contextType)
+        {
+            var attribute = ContextEmitter.GetGenerationOptionsAttribute(contextType);
+            if (attribute is null)
+            {
+                return (null, null);
+            }
+
+            string? namingPolicy = null;
+            var nullValueHandling = "global::NbtSharp.NbtNullValueHandling.Omit";
+            foreach (var argument in attribute.NamedArguments)
+            {
+                switch (argument.Key)
+                {
+                    case "NamingPolicy" when argument.Value.Value is int kind:
+                        namingPolicy = kind switch
+                        {
+                            1 => "global::NbtSharp.NbtNamingPolicy.CamelCase",
+                            2 => "global::NbtSharp.NbtNamingPolicy.SnakeCaseLower",
+                            3 => "global::NbtSharp.NbtNamingPolicy.SnakeCaseUpper",
+                            4 => "global::NbtSharp.NbtNamingPolicy.KebabCaseLower",
+                            5 => "global::NbtSharp.NbtNamingPolicy.KebabCaseUpper",
+                            _ => null,
+                        };
+                        break;
+                    case "NullValueHandling" when argument.Value.Value is int value:
+                        nullValueHandling = value == 1
+                            ? "global::NbtSharp.NbtNullValueHandling.Throw"
+                            : "global::NbtSharp.NbtNullValueHandling.Omit";
+                        break;
+                }
+            }
+
+            return (namingPolicy, nullValueHandling);
         }
 
         private static TypeSpec BuildTypeSpec(TypeEntry entry)

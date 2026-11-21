@@ -40,6 +40,7 @@ public sealed class NbtSerializerOptions
         var copy = new NbtSerializerOptions
         {
             TypeInfoResolver = resolver,
+            PropertyNamingPolicy = PropertyNamingPolicy,
             RootFormat = RootFormat,
             NullValueHandling = NullValueHandling,
             RejectDuplicateCompoundNames = RejectDuplicateCompoundNames,
@@ -61,6 +62,13 @@ public sealed class NbtSerializerOptions
     /// is consulted after <see cref="Converters"/> and before the built-in converters.
     /// </summary>
     public INbtTypeInfoResolver? TypeInfoResolver { get; init; }
+
+    /// <summary>
+    /// Gets or initializes the naming policy used by reflection mapping for members without
+    /// <see cref="NbtPropertyNameAttribute"/>. Source-generated contexts apply their configured
+    /// policy at generation time; setting this property does not rename already-generated members.
+    /// </summary>
+    public NbtNamingPolicy? PropertyNamingPolicy { get; init; }
 
     /// <summary>Gets or initializes whether the root tag carries a name. The default is named.</summary>
     public NbtRootFormat RootFormat
