@@ -238,7 +238,7 @@ public sealed class NbtExtensionDataTests
 
         var matrix = (NbtList)actual.Extra!["Matrix"].Value!;
         Assert.Equal(NbtTagType.List, matrix.ElementType);
-        var row = (NbtList)((List<NbtList>)matrix.Value)[0];
+        var row = ((List<NbtList>)matrix.Value)[0];
         var cell = (NbtCompound)((List<NbtCompound>)row.Value)[0];
         Assert.Equal(1, (int)cell["Cell"].Value!);
         var numbers = (List<int>)((NbtList)actual.Extra["Numbers"].Value!).Value;
@@ -246,7 +246,7 @@ public sealed class NbtExtensionDataTests
 
         var copy = path.Deserialize<ExtensionDto>(path.Serialize(actual));
         var copyMatrix = (NbtList)copy.Extra!["Matrix"].Value!;
-        var copyRow = (NbtList)((List<NbtList>)copyMatrix.Value)[0];
+        var copyRow = ((List<NbtList>)copyMatrix.Value)[0];
         var copyCell = (NbtCompound)((List<NbtCompound>)copyRow.Value)[0];
         Assert.Equal(1, (int)copyCell["Cell"].Value!);
     }
@@ -315,47 +315,61 @@ public sealed class NbtExtensionDataTests
     [Fact]
     public void ReflectionRejectsTwoExtensionMembers()
     {
-        var options = ReflectionOptions();
-
-        Assert.Throws<NotSupportedException>(() => options.GetConverter(typeof(TwoExtensionDto)));
+        AssertExtensionContractRejected(new TwoExtensionDto { First = new(), Second = new() });
     }
 
-    [Theory]
-    [InlineData(typeof(NbtValueExtensionDto))]
-    [InlineData(typeof(IntExtensionDto))]
-    [InlineData(typeof(InterfaceExtensionDto))]
-    [InlineData(typeof(DictionaryOfIntExtensionDto))]
-    public void ReflectionRejectsIllegalExtensionMemberTypes(Type dtoType)
+    [Fact]
+    public void ReflectionRejectsNbtValueExtensionMember()
     {
-        var options = ReflectionOptions();
+        AssertExtensionContractRejected(new NbtValueExtensionDto { Extra = "" });
+    }
 
-        Assert.Throws<NotSupportedException>(() => options.GetConverter(dtoType));
+    [Fact]
+    public void ReflectionRejectsScalarExtensionMember()
+    {
+        AssertExtensionContractRejected(new IntExtensionDto { Extra = 1 });
+    }
+
+    [Fact]
+    public void ReflectionRejectsInterfaceExtensionMember()
+    {
+        AssertExtensionContractRejected(
+            new InterfaceExtensionDto { Extra = new Dictionary<string, NbtValue>() });
+    }
+
+    [Fact]
+    public void ReflectionRejectsMismatchedDictionaryExtensionMember()
+    {
+        AssertExtensionContractRejected(new DictionaryOfIntExtensionDto { Extra = [] });
     }
 
     [Fact]
     public void ReflectionRejectsCombinedAttributes()
     {
-        var options = ReflectionOptions();
-
-        Assert.Throws<NotSupportedException>(() => options.GetConverter(typeof(PropertyNameExtensionDto)));
-        Assert.Throws<NotSupportedException>(() => options.GetConverter(typeof(UseConverterExtensionDto)));
+        AssertExtensionContractRejected(new PropertyNameExtensionDto { Extra = new() });
+        AssertExtensionContractRejected(new UseConverterExtensionDto { Extra = new() });
     }
 
     [Fact]
     public void ReflectionRejectsMembersWithoutSetterAndRequiredMembers()
     {
-        var options = ReflectionOptions();
+        var noSetter = new NoSetterExtensionDto();
+        noSetter.Extra["Known"] = 1;
+        Assert.Equal(1, (int)noSetter.Extra["Known"].Value!);
+        var required = new RequiredExtensionDto { Extra = new() { ["Known"] = 1 } };
+        Assert.Equal(1, (int)required.Extra!["Known"].Value!);
 
-        Assert.Throws<NotSupportedException>(() => options.GetConverter(typeof(NoSetterExtensionDto)));
-        Assert.Throws<NotSupportedException>(() => options.GetConverter(typeof(RequiredExtensionDto)));
+        AssertExtensionContractRejected(noSetter);
+        AssertExtensionContractRejected(required);
     }
 
     [Fact]
     public void ReflectionRejectsFieldsWithoutInclude()
     {
-        var options = ReflectionOptions();
+        var value = new FieldWithoutIncludeDto { Extra = new() };
+        Assert.NotNull(value.Extra);
 
-        Assert.Throws<NotSupportedException>(() => options.GetConverter(typeof(FieldWithoutIncludeDto)));
+        AssertExtensionContractRejected(value);
     }
 
     [Fact]
@@ -427,14 +441,14 @@ public sealed class NbtExtensionDataTests
         var actual = NbtSerializer.Deserialize<ExtensionDto>(data, options);
 
         var matrix = (NbtList)actual.Extra!["Matrix"].Value!;
-        var row = (NbtList)((List<NbtList>)matrix.Value)[0];
+        var row = ((List<NbtList>)matrix.Value)[0];
         var cell = (NbtCompound)((List<NbtCompound>)row.Value)[0];
         Assert.Equal(1, (int)cell["Cell"].Value!);
 
         var rewritten = NbtSerializer.Serialize(actual, "root", options);
         var root = (NbtCompound)NbtSerializer.Deserialize(rewritten).Value.Value!;
         var rewrittenMatrix = Assert.IsType<NbtList>(root["Matrix"].Value!);
-        var rewrittenRow = (NbtList)((List<NbtList>)rewrittenMatrix.Value)[0];
+        var rewrittenRow = ((List<NbtList>)rewrittenMatrix.Value)[0];
         var rewrittenCell = (NbtCompound)((List<NbtCompound>)rewrittenRow.Value)[0];
         Assert.Equal(1, (int)rewrittenCell["Cell"].Value!);
     }
@@ -494,6 +508,13 @@ public sealed class NbtExtensionDataTests
     {
         TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
     };
+
+    private static void AssertExtensionContractRejected(object dto)
+    {
+        var options = ReflectionOptions();
+
+        Assert.Throws<NotSupportedException>(() => options.GetConverter(dto.GetType()));
+    }
 
     internal sealed class ExtensionDto
     {
@@ -627,11 +648,10 @@ public sealed class NbtExtensionDataTests
     }
 
     [SuppressMessage("ReSharper", "UnusedAutoPropertyAccessor.Local")]
-    [SuppressMessage("ReSharper", "NotAccessedField.Compiler")]
     private sealed class FieldWithoutIncludeDto
     {
         [NbtExtensionData]
-        public NbtCompound? Extra = null!;
+        public NbtCompound? Extra;
     }
 
     internal sealed class DomMemberDto
@@ -667,7 +687,7 @@ public sealed class NbtExtensionDataTests
         public override void Write(ref NbtWriter writer, string value, NbtSerializerOptions _)
         {
             var chars = value.ToCharArray();
-            System.Array.Reverse(chars);
+            Array.Reverse(chars);
             writer.WriteString(new string(chars));
         }
 
@@ -681,7 +701,7 @@ public sealed class NbtExtensionDataTests
     private sealed class ReversingValueConverter : NbtConverter<NbtValue>
     {
         public override NbtValue Read(ref NbtReader reader, NbtSerializerOptions options) =>
-            new string(((string)reader.GetString()).Reverse().ToArray());
+            new string(reader.GetString().Reverse().ToArray());
 
         public override void Write(ref NbtWriter writer, NbtValue value, NbtSerializerOptions options) =>
             writer.WriteString(new string(((string)value.Value!).Reverse().ToArray()));
@@ -761,7 +781,4 @@ internal partial class ExtensionDataContext : NbtSerializerContext
 [NbtSerializable(typeof(NbtExtensionDataTests.CamelConflictDto))]
 internal partial class CamelExtensionContext : NbtSerializerContext
 {
-    public CamelExtensionContext()
-    {
-    }
 }

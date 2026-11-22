@@ -1,709 +1,828 @@
-using System.Diagnostics.CodeAnalysis;
-
 namespace NbtSharp.Tests;
 
+/// <summary>
+/// Contract-modifier behavior, checked through both serialization paths. The generated branch uses
+/// twin types whose compile-time attributes express the same final contract the reflection branch
+/// produces with a modifier callback; both branches assert the same wire facts.
+/// </summary>
 public sealed class NbtContractModifierTests
 {
-    [Fact]
-    public void RenamedMemberRoundTripsUnderTheNewName()
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void RenamedMemberRoundTripsUnderTheNewName(SerializationMode mode)
     {
-        var options = ModifierOptions(c => c.GetMember("Name")!.NbtName = "label");
+        if (mode == SerializationMode.Generated)
+        {
+            AssertRenamed(
+                GeneratedPath(),
+                new TwinRenameDto { Name = "steve" },
+                static value => value.Name,
+                static value => value.Health);
+            return;
+        }
 
-        var data = NbtSerializer.Serialize(new RenameDto { Name = "steve" }, "root", options);
+        AssertRenamed(
+            ReflectionPath(static contract => contract.GetMember("Name")!.NbtName = "label"),
+            new RenameDto { Name = "steve" },
+            static value => value.Name,
+            static value => value.Health);
+    }
 
-        var compound = AsCompound(data);
-        Assert.True(compound.ContainsKey("label"));
-        Assert.False(compound.ContainsKey("Name"));
-        Assert.Equal("steve", NbtSerializer.Deserialize<RenameDto>(data, options).Name);
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void TheOldNameIsNoLongerRecognizedOnRead(SerializationMode mode)
+    {
+        if (mode == SerializationMode.Generated)
+        {
+            AssertLegacyNameIsIgnored(
+                GeneratedPath(),
+                new TwinRenameDto { Name = "steve", Health = 3 },
+                static value => value.Name,
+                static value => value.Health);
+            return;
+        }
+
+        AssertLegacyNameIsIgnored(
+            ReflectionPath(static contract => contract.GetMember("Name")!.NbtName = "label"),
+            new RenameDto { Name = "steve", Health = 3 },
+            static value => value.Name,
+            static value => value.Health);
+    }
+
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void ModifierSeesNamesAfterAttributesAndNamingPolicy(SerializationMode mode)
+    {
+        if (mode == SerializationMode.Generated)
+        {
+            AssertPolicyNames(
+                SerializationTestPath.Generated(ContractModifierCamelTwinContext.Default),
+                new TwinPolicyViewDto { UserName = "u", Value = 1 },
+                static value => value.UserName,
+                static value => value.Value);
+            return;
+        }
+
+        string? policySeen = null;
+        string? attributeSeen = null;
+        var path = ReflectionPath(
+            contract =>
+            {
+                policySeen = contract.GetMember("UserName")!.NbtName;
+                attributeSeen = contract.GetMember("Value")!.NbtName;
+            },
+            NbtNamingPolicy.CamelCase);
+
+        AssertPolicyNames(
+            path,
+            new PolicyViewDto { UserName = "u", Value = 1 },
+            static value => value.UserName,
+            static value => value.Value);
+
+        Assert.Equal("userName", policySeen);
+        Assert.Equal("wire", attributeSeen);
+    }
+
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void IgnoredMemberIsOmittedOnWriteAndSkippedOnRead(SerializationMode mode)
+    {
+        if (mode == SerializationMode.Generated)
+        {
+            AssertIgnoredHealth(
+                GeneratedPath(),
+                new TwinIgnoredHealthDto { Name = "kept", Health = 20 },
+                static value => value.Name,
+                static value => value.Health);
+            return;
+        }
+
+        AssertIgnoredHealth(
+            ReflectionPath(static contract => contract.GetMember("Health")!.Ignore = true),
+            new RenameDto { Name = "kept", Health = 20 },
+            static value => value.Name,
+            static value => value.Health);
+    }
+
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void EmptyNbtNameIsAllowed(SerializationMode mode)
+    {
+        if (mode == SerializationMode.Generated)
+        {
+            AssertEmptyName(
+                GeneratedPath(),
+                new TwinEmptyNameDto { Name = "anon" },
+                static value => value.Name,
+                static value => value.Health);
+            return;
+        }
+
+        AssertEmptyName(
+            ReflectionPath(static contract => contract.GetMember("Name")!.NbtName = ""),
+            new RenameDto { Name = "anon" },
+            static value => value.Name,
+            static value => value.Health);
+    }
+
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void InjectedConverterOverridesTheAttributeConverter(SerializationMode mode)
+    {
+        if (mode == SerializationMode.Generated)
+        {
+            AssertOffsetConverter(
+                GeneratedPath(),
+                new TwinInjectedConverterDto { Value = 5 },
+                static value => value.Value,
+                expectedWire: 205);
+            return;
+        }
+
+        var attributeData = NbtSerializer.Serialize(
+            new AttributeConverterDto { Value = 5 },
+            "root",
+            ReflectionOptions());
+        Assert.Equal(15, (int)AsCompound(attributeData)["Value"].Value!);
+
+        AssertOffsetConverter(
+            ReflectionPath(static contract =>
+                contract.GetMember("Value")!.Converter = new ModifierOffsetIntConverter(200)),
+            new AttributeConverterDto { Value = 5 },
+            static value => value.Value,
+            expectedWire: 205);
+    }
+
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void InjectedFactoryConverterRoundTrips(SerializationMode mode)
+    {
+        if (mode == SerializationMode.Generated)
+        {
+            AssertOffsetConverter(
+                GeneratedPath(),
+                new TwinFactoryOffsetDto { Value = 5 },
+                static value => value.Value,
+                expectedWire: 15);
+            return;
+        }
+
+        AssertOffsetConverter(
+            ReflectionPath(static contract => contract.GetMember("Value")!.Converter = new ModifierIntFactory()),
+            new PlainIntDto { Value = 5 },
+            static value => value.Value,
+            expectedWire: 15);
+    }
+
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void NullConverterFallsBackToOptionsResolution(SerializationMode mode)
+    {
+        if (mode == SerializationMode.Generated)
+        {
+            AssertPlainInt(
+                GeneratedPath(),
+                new PlainIntDto { Value = 5 },
+                static value => value.Value);
+            return;
+        }
+
+        var options = ModifierOptions(static contract =>
+        {
+            if (contract.Type == typeof(NullConverterTargetDto))
+            {
+                contract.GetMember("Value")!.Converter = new ModifierOffsetIntConverter(100);
+            }
+        });
+
+        var shifted = NbtSerializer.Serialize(new NullConverterTargetDto { Value = 5 }, "root", options);
+        Assert.Equal(105, (int)AsCompound(shifted)["Value"].Value!);
+        Assert.Equal(5, NbtSerializer.Deserialize<NullConverterTargetDto>(shifted, options).Value);
+
+        AssertPlainInt(
+            SerializationTestPath.Reflection(options),
+            new PlainIntDto { Value = 5 },
+            static value => value.Value);
+    }
+
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void OrderChangesTheWrittenMemberSequence(SerializationMode mode)
+    {
+        if (mode == SerializationMode.Generated)
+        {
+            AssertReorderedMembers(
+                GeneratedPath(),
+                new TwinOrderSequenceDto { First = 1, Second = 2, Third = 3 },
+                static value => value.First,
+                static value => value.Second,
+                static value => value.Third);
+            return;
+        }
+
+        AssertReorderedMembers(
+            ReflectionPath(static contract =>
+            {
+                contract.GetMember("Third")!.Order = -1;
+                contract.GetMember("Second")!.Order = 10;
+            }),
+            new OrderDto { First = 1, Second = 2, Third = 3 },
+            static value => value.First,
+            static value => value.Second,
+            static value => value.Third);
+    }
+
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void EqualOrderKeepsDeclarationOrder(SerializationMode mode)
+    {
+        if (mode == SerializationMode.Generated)
+        {
+            AssertDeclarationOrder(
+                GeneratedPath(),
+                new TwinDeclarationOrderDto { First = 1, Second = 2, Third = 3 },
+                static value => value.First,
+                static value => value.Second,
+                static value => value.Third);
+            return;
+        }
+
+        AssertDeclarationOrder(
+            ReflectionPath(static contract =>
+            {
+                contract.GetMember("First")!.Order = 5;
+                contract.GetMember("Second")!.Order = 5;
+            }),
+            new OrderDto { First = 1, Second = 2, Third = 3 },
+            static value => value.First,
+            static value => value.Second,
+            static value => value.Third);
+    }
+
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void OrderDoesNotAffectReading(SerializationMode mode)
+    {
+        if (mode == SerializationMode.Generated)
+        {
+            AssertOrderedRoundTrip(
+                GeneratedPath(),
+                new TwinOrderSequenceDto { First = 1, Second = 2, Third = 3 },
+                static value => value.First,
+                static value => value.Second,
+                static value => value.Third);
+            return;
+        }
+
+        AssertOrderedRoundTrip(
+            ReflectionPath(static contract => contract.GetMember("Third")!.Order = -1),
+            new OrderDto { First = 1, Second = 2, Third = 3 },
+            static value => value.First,
+            static value => value.Second,
+            static value => value.Third);
+    }
+
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void PolymorphicEnvelopeSkipsModifiersForTheBaseContract(SerializationMode mode)
+    {
+        if (mode == SerializationMode.Generated)
+        {
+            AssertPlainPolymorphicEnvelope<TwinPolyBase, TwinPlainPolyDerived>(
+                GeneratedPath(),
+                new TwinPlainPolyDerived { Name = "d", Value = 4 },
+                static value => value.Name,
+                static value => value.Value);
+            return;
+        }
+
+        var baseRuns = 0;
+        var path = ReflectionPath(contract =>
+        {
+            if (contract.Type != typeof(ModifierPolyBase))
+            {
+                return;
+            }
+
+            baseRuns++;
+            contract.GetMember("Name")!.NbtName = "renamed";
+        });
+
+        AssertPlainPolymorphicEnvelope<ModifierPolyBase, ModifierPlainPolyDerived>(
+            path,
+            new ModifierPlainPolyDerived { Name = "d", Value = 4 },
+            static value => value.Name,
+            static value => value.Value);
+
+        Assert.Equal(0, baseRuns);
+    }
+
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void DerivedPolymorphicTypeRunsModifiers(SerializationMode mode)
+    {
+        if (mode == SerializationMode.Generated)
+        {
+            AssertRenamedPolymorphicPayload<TwinPolyBase, TwinPolyDerived>(
+                GeneratedPath(),
+                new TwinPolyDerived { Name = "d", Value = 4 },
+                static value => value.Name,
+                static value => value.Value);
+            return;
+        }
+
+        var derivedRuns = 0;
+        var path = ReflectionPath(contract =>
+        {
+            if (contract.Type != typeof(ModifierPolyDerived))
+            {
+                return;
+            }
+
+            derivedRuns++;
+            contract.GetMember("Value")!.NbtName = "v";
+        });
+
+        AssertRenamedPolymorphicPayload<ModifierPolyBase, ModifierPolyDerived>(
+            path,
+            new ModifierPolyDerived { Name = "d", Value = 4 },
+            static value => value.Name,
+            static value => value.Value);
+
+        Assert.Equal(1, derivedRuns);
+    }
+
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void CallbackIgnoreExemptsAHiddenBaseChain(SerializationMode mode)
+    {
+        if (mode == SerializationMode.Generated)
+        {
+            var twin = new TwinHiddenLeaf { Value = 2L };
+            ((TwinHiddenBase)twin).Value = 1;
+            AssertHiddenChain(
+                GeneratedPath(),
+                twin,
+                static value => ((TwinHiddenBase)value).Value,
+                static value => value.Value);
+            return;
+        }
+
+        var leaf = new ChainHiddenLeaf { Value = 2L };
+        ((ChainHiddenBase)leaf).Value = 1;
+        Assert.Throws<NotSupportedException>(() =>
+            NbtSerializer.Serialize(leaf, "root", ReflectionOptions()));
+
+        AssertHiddenChain(
+            ReflectionPath(static contract =>
+                contract.Members.First(member => member.Type == typeof(int)).Ignore = true),
+            leaf,
+            static value => ((ChainHiddenBase)value).Value,
+            static value => value.Value);
+    }
+
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void MixedFieldsAndPropertiesKeepTheTokenOrderWithoutModifiers(SerializationMode mode)
+    {
+        var path = mode == SerializationMode.Generated
+            ? GeneratedPath()
+            : SerializationTestPath.Reflection(ReflectionOptions());
+
+        AssertMixedMemberOrder(path);
+    }
+
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void ModifierRenameResolvesAnAttributeNameCollision(SerializationMode mode)
+    {
+        if (mode == SerializationMode.Generated)
+        {
+            AssertResolvedCollision(
+                GeneratedPath(),
+                new TwinResolvedCollisionDto { A = 1, B = 2 },
+                static value => value.A,
+                static value => value.B);
+            return;
+        }
+
+        Assert.Throws<NotSupportedException>(() =>
+            NbtSerializer.Serialize(new AttributeCollisionDto { A = 1, B = 2 }, "root", ReflectionOptions()));
+
+        AssertResolvedCollision(
+            ReflectionPath(static contract => contract.GetMember("B")!.NbtName = "b"),
+            new AttributeCollisionDto { A = 1, B = 2 },
+            static value => value.A,
+            static value => value.B);
     }
 
     [Fact]
-    public void TheOldNameIsNoLongerRecognizedOnRead()
+    public void RenameModifierAndTwinProduceIdenticalBytes()
     {
-        var options = ModifierOptions(c => c.GetMember("Name")!.NbtName = "label");
+        var reflection = ReflectionPath(static contract => contract.GetMember("Name")!.NbtName = "label");
+        var generated = GeneratedPath();
+
+        var reflectedData = reflection.Serialize(new RenameDto { Name = "steve" });
+        var generatedData = generated.Serialize(new TwinRenameDto { Name = "steve" });
+
+        Assert.Equal(reflectedData, generatedData);
+
+        var fromGenerated = reflection.Deserialize<RenameDto>(generatedData);
+        Assert.Equal("steve", fromGenerated.Name);
+
+        var fromReflected = generated.Deserialize<TwinRenameDto>(reflectedData);
+        Assert.Equal("steve", fromReflected.Name);
+    }
+
+    [Fact]
+    public void IgnoreModifierAndTwinProduceIdenticalBytes()
+    {
+        var reflection = ReflectionPath(static contract => contract.GetMember("Health")!.Ignore = true);
+        var generated = GeneratedPath();
+
+        var reflectedData = reflection.Serialize(new RenameDto { Name = "kept", Health = 20 });
+        var generatedData = generated.Serialize(new TwinIgnoredHealthDto { Name = "kept", Health = 20 });
+
+        Assert.Equal(reflectedData, generatedData);
+
+        var fromGenerated = reflection.Deserialize<RenameDto>(generatedData);
+        Assert.Equal("kept", fromGenerated.Name);
+        Assert.Equal(0, fromGenerated.Health);
+
+        var fromReflected = generated.Deserialize<TwinIgnoredHealthDto>(reflectedData);
+        Assert.Equal("kept", fromReflected.Name);
+        Assert.Equal(0, fromReflected.Health);
+    }
+
+    [Fact]
+    public void ConverterModifierAndTwinProduceIdenticalBytes()
+    {
+        var reflection = ReflectionPath(static contract =>
+            contract.GetMember("Value")!.Converter = new ModifierOffsetIntConverter(200));
+        var generated = GeneratedPath();
+
+        var reflectedData = reflection.Serialize(new AttributeConverterDto { Value = 5 });
+        var generatedData = generated.Serialize(new TwinInjectedConverterDto { Value = 5 });
+
+        Assert.Equal(reflectedData, generatedData);
+
+        var fromGenerated = reflection.Deserialize<AttributeConverterDto>(generatedData);
+        Assert.Equal(5, fromGenerated.Value);
+
+        var fromReflected = generated.Deserialize<TwinInjectedConverterDto>(reflectedData);
+        Assert.Equal(5, fromReflected.Value);
+    }
+
+    [Fact]
+    public void OrderModifierAndTwinProduceIdenticalBytes()
+    {
+        var reflection = ReflectionPath(static contract =>
+        {
+            contract.GetMember("Third")!.Order = -1;
+            contract.GetMember("Second")!.Order = 10;
+        });
+        var generated = GeneratedPath();
+
+        var reflectedData = reflection.Serialize(new OrderDto { First = 1, Second = 2, Third = 3 });
+        var generatedData = generated.Serialize(new TwinOrderSequenceDto { First = 1, Second = 2, Third = 3 });
+
+        Assert.Equal(reflectedData, generatedData);
+
+        var fromGenerated = reflection.Deserialize<OrderDto>(generatedData);
+        Assert.Equal(1, fromGenerated.First);
+        Assert.Equal(2, fromGenerated.Second);
+        Assert.Equal(3, fromGenerated.Third);
+
+        var fromReflected = generated.Deserialize<TwinOrderSequenceDto>(reflectedData);
+        Assert.Equal(1, fromReflected.First);
+        Assert.Equal(2, fromReflected.Second);
+        Assert.Equal(3, fromReflected.Third);
+    }
+
+    [Fact]
+    public void NamingPolicyAndTwinProduceIdenticalBytes()
+    {
+        var reflection = SerializationTestPath.Reflection(new NbtSerializerOptions
+        {
+            TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
+            PropertyNamingPolicy = NbtNamingPolicy.CamelCase,
+        });
+        var generated = SerializationTestPath.Generated(ContractModifierCamelTwinContext.Default);
+
+        var reflectedData = reflection.Serialize(new PolicyViewDto { UserName = "u", Value = 1 });
+        var generatedData = generated.Serialize(new TwinPolicyViewDto { UserName = "u", Value = 1 });
+
+        Assert.Equal(reflectedData, generatedData);
+
+        var fromGenerated = reflection.Deserialize<PolicyViewDto>(generatedData);
+        Assert.Equal("u", fromGenerated.UserName);
+        Assert.Equal(1, fromGenerated.Value);
+
+        var fromReflected = generated.Deserialize<TwinPolicyViewDto>(reflectedData);
+        Assert.Equal("u", fromReflected.UserName);
+        Assert.Equal(1, fromReflected.Value);
+    }
+
+    private static SerializationTestPath GeneratedPath() =>
+        SerializationTestPath.Generated(ContractModifierTwinContext.Default);
+
+    private static SerializationTestPath ReflectionPath(
+        Action<NbtContractInfo> modifier,
+        NbtNamingPolicy? policy = null) =>
+        SerializationTestPath.Reflection(ModifierOptions(modifier, policy));
+
+    private static NbtSerializerOptions ModifierOptions(
+        Action<NbtContractInfo> modifier,
+        NbtNamingPolicy? policy = null) => new()
+        {
+            TypeInfoResolver = new NbtReflectionTypeInfoResolver(modifier),
+            PropertyNamingPolicy = policy,
+        };
+
+    private static NbtSerializerOptions ReflectionOptions() => new()
+    {
+        TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
+    };
+
+    private static void AssertRenamed<T>(
+        SerializationTestPath path,
+        T value,
+        Func<T, string> readName,
+        Func<T, int> readHealth)
+    {
+        var data = path.Serialize(value);
+        var compound = AsCompound(data);
+        Assert.True(compound.ContainsKey("label"));
+        Assert.False(compound.ContainsKey("Name"));
+
+        var copy = path.Deserialize<T>(data);
+        Assert.Equal("steve", readName(copy));
+        Assert.Equal(0, readHealth(copy));
+    }
+
+    private static void AssertLegacyNameIsIgnored<T>(
+        SerializationTestPath path,
+        T value,
+        Func<T, string> readName,
+        Func<T, int> readHealth)
+    {
         var legacy = NbtSerializer.Serialize(new NbtRoot("root", new NbtCompound
         {
             ["Name"] = "legacy",
             ["Health"] = 7,
         }));
 
-        var actual = NbtSerializer.Deserialize<RenameDto>(legacy, options);
+        var copy = path.Deserialize<T>(legacy);
 
-        Assert.Equal("", actual.Name);
-        Assert.Equal(7, actual.Health);
+        Assert.Equal("", readName(copy));
+        Assert.Equal(7, readHealth(copy));
+
+        var roundTrip = path.Deserialize<T>(path.Serialize(value));
+        Assert.Equal("steve", readName(roundTrip));
+        Assert.Equal(3, readHealth(roundTrip));
     }
 
-    [Fact]
-    public void ModifierSeesNamesAfterAttributesAndNamingPolicy()
+    private static void AssertPolicyNames<T>(
+        SerializationTestPath path,
+        T value,
+        Func<T, string> readUserName,
+        Func<T, int> readValue)
     {
-        string? policySeen = null;
-        string? attributeSeen = null;
-        var options = ModifierOptions(
-            c =>
-            {
-                policySeen = c.GetMember("UserName")!.NbtName;
-                attributeSeen = c.GetMember("Value")!.NbtName;
-            },
-            NbtNamingPolicy.CamelCase);
+        var data = path.Serialize(value);
+        var compound = AsCompound(data);
+        Assert.True(compound.ContainsKey("userName"));
+        Assert.True(compound.ContainsKey("wire"));
+        Assert.False(compound.ContainsKey("UserName"));
+        Assert.False(compound.ContainsKey("Value"));
 
-        NbtSerializer.Serialize(new PolicyViewDto { UserName = "u", Value = 1 }, "root", options);
-
-        Assert.Equal("userName", policySeen);
-        Assert.Equal("wire", attributeSeen);
+        var copy = path.Deserialize<T>(data);
+        Assert.Equal("u", readUserName(copy));
+        Assert.Equal(1, readValue(copy));
     }
 
-    [Fact]
-    public void ModifierRunsOncePerTypeAndNamingPolicy()
+    private static void AssertIgnoredHealth<T>(
+        SerializationTestPath path,
+        T value,
+        Func<T, string> readName,
+        Func<T, int> readHealth)
     {
-        var runs = 0;
-        var resolver = new NbtReflectionTypeInfoResolver(_ => runs++);
-        var plain = new NbtSerializerOptions { TypeInfoResolver = resolver };
-        var camel = new NbtSerializerOptions
-        {
-            TypeInfoResolver = resolver,
-            PropertyNamingPolicy = NbtNamingPolicy.CamelCase,
-        };
-
-        NbtSerializer.Serialize(new CountDto(), "root", plain);
-        NbtSerializer.Serialize(new CountDto(), "root", plain);
-        Assert.Equal(1, runs);
-
-        NbtSerializer.Serialize(new CountDto(), "root", camel);
-        Assert.Equal(2, runs);
-
-        var plainAgain = new NbtSerializerOptions { TypeInfoResolver = resolver };
-        NbtSerializer.Serialize(new CountDto(), "root", plainAgain);
-        Assert.Equal(2, runs);
-    }
-
-    [Fact]
-    public void ContractExposesMemberMetadata()
-    {
-        NbtContractInfo? contract = null;
-        var options = ModifierOptions(c => contract = c);
-        NbtSerializer.Serialize(new RenameDto(), "root", options);
-
-        Assert.NotNull(contract);
-        Assert.Equal(typeof(RenameDto), contract!.Type);
-        Assert.Equal(2, contract.Members.Count);
-        Assert.NotNull(contract.GetMember("Name"));
-        Assert.Null(contract.GetMember("name"));
-        Assert.Equal(typeof(string), contract.GetMember("Name")!.Type);
-        Assert.True(contract.GetMember("Name")!.CanWrite);
-        Assert.Throws<NotSupportedException>(() =>
-            ((IList<NbtMemberInfo>)contract.Members)[0] = contract.Members[0]);
-    }
-
-    [Fact]
-    public void IgnoredMemberIsOmittedOnWriteAndSkippedOnRead()
-    {
-        var options = ModifierOptions(c => c.GetMember("Health")!.Ignore = true);
-
-        var data = NbtSerializer.Serialize(new RenameDto { Name = "kept", Health = 20 }, "root", options);
-
+        var data = path.Serialize(value);
         var compound = AsCompound(data);
         Assert.False(compound.ContainsKey("Health"));
         Assert.True(compound.ContainsKey("Name"));
+
+        var roundTrip = path.Deserialize<T>(data);
+        Assert.Equal("kept", readName(roundTrip));
+        Assert.Equal(0, readHealth(roundTrip));
 
         var incoming = NbtSerializer.Serialize(new NbtRoot("root", new NbtCompound
         {
             ["Name"] = "kept",
             ["Health"] = 99,
         }));
-        Assert.Equal(0, NbtSerializer.Deserialize<RenameDto>(incoming, options).Health);
+
+        var copy = path.Deserialize<T>(incoming);
+        Assert.Equal("kept", readName(copy));
+        Assert.Equal(0, readHealth(copy));
     }
 
-    [Fact]
-    public void IgnoredRequiredMemberThrowsNotSupportedException()
+    private static void AssertEmptyName<T>(
+        SerializationTestPath path,
+        T value,
+        Func<T, string> readName,
+        Func<T, int> readHealth)
     {
-        var options = ModifierOptions(c => c.GetMember("Name")!.Ignore = true);
-
-        var exception = Assert.Throws<NotSupportedException>(() =>
-            NbtSerializer.Serialize(new IgnoredRequiredDto { Name = "x", Value = 1 }, "root", options));
-
-        Assert.Equal(
-            $"The required member 'Name' on {typeof(IgnoredRequiredDto)} is not serialized and the " +
-            "selected constructor is not marked with SetsRequiredMembers.",
-            exception.Message);
-    }
-
-    [Fact]
-    public void IgnoringAConstructorBoundMemberWithoutOtherConstructorsThrows()
-    {
-        var options = ModifierOptions(c => c.GetMember("A")!.Ignore = true);
-
-        var exception = Assert.Throws<NotSupportedException>(() =>
-            NbtSerializer.Serialize(new BoundOnlyDto(1, 2), "root", options));
-
-        Assert.Equal(
-            $"The type {typeof(BoundOnlyDto)} needs a public parameterless constructor or a public " +
-            "constructor whose parameters match its NBT members.",
-            exception.Message);
-    }
-
-    [Fact]
-    public void IgnoringAConstructorBoundMemberFallsBackToTheParameterlessConstructor()
-    {
-        var options = ModifierOptions(c => c.GetMember("A")!.Ignore = true);
-
-        var copy = NbtSerializer.Deserialize<BoundWithParameterlessDto>(
-            NbtSerializer.Serialize(new BoundWithParameterlessDto(5, 7), "root", options),
-            options);
-
-        Assert.Equal(0, copy.A);
-        Assert.Equal(7, copy.B);
-    }
-
-    [Fact]
-    public void ModifierCreatedDuplicateNameThrows()
-    {
-        var options = ModifierOptions(c => c.GetMember("Health")!.NbtName = "Name");
-
-        var exception = Assert.Throws<NotSupportedException>(() =>
-            NbtSerializer.Serialize(new RenameDto(), "root", options));
-
-        Assert.Equal(
-            $"The type {typeof(RenameDto)} maps more than one member to the NBT name 'Name'.",
-            exception.Message);
-    }
-
-    [Fact]
-    public void ModifierRenameResolvesAnAttributeNameCollision()
-    {
-        var plain = new NbtSerializerOptions
-        {
-            TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
-        };
-        Assert.Throws<NotSupportedException>(() =>
-            NbtSerializer.Serialize(new AttributeCollisionDto(), "root", plain));
-
-        var options = ModifierOptions(c => c.GetMember("B")!.NbtName = "b");
-        var copy = NbtSerializer.Deserialize<AttributeCollisionDto>(
-            NbtSerializer.Serialize(new AttributeCollisionDto { A = 1, B = 2 }, "root", options),
-            options);
-
-        Assert.Equal(1, copy.A);
-        Assert.Equal(2, copy.B);
-    }
-
-    [Fact]
-    public void NullNbtNameThrowsArgumentNull()
-    {
-        var options = ModifierOptions(c => c.GetMember("Name")!.NbtName = null!);
-
-        Assert.Throws<ArgumentNullException>(() =>
-            NbtSerializer.Serialize(new RenameDto(), "root", options));
-    }
-
-    [Fact]
-    public void EmptyNbtNameIsAllowed()
-    {
-        var options = ModifierOptions(c => c.GetMember("Name")!.NbtName = "");
-
-        var data = NbtSerializer.Serialize(new RenameDto { Name = "anon" }, "root", options);
-
+        var data = path.Serialize(value);
         var compound = AsCompound(data);
         Assert.True(compound.ContainsKey(""));
-        Assert.Equal("anon", NbtSerializer.Deserialize<RenameDto>(data, options).Name);
+
+        var copy = path.Deserialize<T>(data);
+        Assert.Equal("anon", readName(copy));
+        Assert.Equal(0, readHealth(copy));
     }
 
-    [Fact]
-    public void InjectedConverterOverridesTheAttributeConverter()
+    private static void AssertOffsetConverter<T>(
+        SerializationTestPath path,
+        T value,
+        Func<T, int> readValue,
+        int expectedWire)
     {
-        var plain = new NbtSerializerOptions
-        {
-            TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
-        };
-        var options = ModifierOptions(c => c.GetMember("Value")!.Converter = new ModifierOffsetIntConverter(200));
+        var data = path.Serialize(value);
+        Assert.Equal(expectedWire, (int)AsCompound(data)["Value"].Value!);
 
-        var attributeData = NbtSerializer.Serialize(
-            new AttributeConverterDto { Value = 5 }, "root", plain);
-        var overriddenData = NbtSerializer.Serialize(
-            new AttributeConverterDto { Value = 5 }, "root", options);
-
-        Assert.Equal(15, (int)AsCompound(attributeData)["Value"].Value!);
-        Assert.Equal(205, (int)AsCompound(overriddenData)["Value"].Value!);
-        Assert.Equal(5, NbtSerializer.Deserialize<AttributeConverterDto>(overriddenData, options).Value);
+        var copy = path.Deserialize<T>(data);
+        Assert.Equal(5, readValue(copy));
     }
 
-    [Fact]
-    public void InjectedFactoryConverterRoundTrips()
+    private static void AssertPlainInt<T>(
+        SerializationTestPath path,
+        T value,
+        Func<T, int> readValue)
     {
-        var options = ModifierOptions(c => c.GetMember("Value")!.Converter = new ModifierIntFactory());
+        var data = path.Serialize(value);
+        Assert.Equal(5, (int)AsCompound(data)["Value"].Value!);
 
-        var copy = NbtSerializer.Deserialize<PlainIntDto>(
-            NbtSerializer.Serialize(new PlainIntDto { Value = 5 }, "root", options),
-            options);
-
-        Assert.Equal(5, copy.Value);
-        Assert.Equal(15, (int)AsCompound(
-            NbtSerializer.Serialize(new PlainIntDto { Value = 5 }, "root", options))["Value"].Value!);
+        var copy = path.Deserialize<T>(data);
+        Assert.Equal(5, readValue(copy));
     }
 
-    [Fact]
-    public void InjectedConverterWithMismatchedCanConvertThrows()
+    private static void AssertReorderedMembers<T>(
+        SerializationTestPath path,
+        T value,
+        Func<T, int> readFirst,
+        Func<T, int> readSecond,
+        Func<T, int> readThird)
     {
-        var options = ModifierOptions(c => c.GetMember("Value")!.Converter = new ModifierStringConverter());
-
-        var exception = Assert.Throws<NotSupportedException>(() =>
-            NbtSerializer.Serialize(new PlainIntDto { Value = 5 }, "root", options));
-
-        Assert.Equal(
-            $"The converter {typeof(ModifierStringConverter)} assigned to member 'Value' does not " +
-            $"support the member type '{typeof(int)}'.",
-            exception.Message);
-    }
-
-    [Fact]
-    public void NullConverterFallsBackToOptionsResolution()
-    {
-        var options = ModifierOptions(c =>
-        {
-            var member = c.GetMember("Value")!;
-            if (c.Type == typeof(PlainIntDto))
-            {
-                member.Converter = new ModifierOffsetIntConverter(100);
-            }
-        });
-
-        var shifted = NbtSerializer.Serialize(new PlainIntDto { Value = 5 }, "root", options);
-        Assert.Equal(105, (int)AsCompound(shifted)["Value"].Value!);
-
-        var plain = new NbtSerializerOptions
-        {
-            TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
-        };
-        var direct = NbtSerializer.Serialize(new PlainIntDto { Value = 5 }, "root", plain);
-        Assert.Equal(5, (int)AsCompound(direct)["Value"].Value!);
-    }
-
-    [Fact]
-    public void WithAddedModifierRunsCallbacksInOrderAndStacks()
-    {
-        var calls = new List<string>();
-        var first = new NbtReflectionTypeInfoResolver(c =>
-        {
-            calls.Add("first");
-            c.GetMember("Name")!.NbtName = "from-first";
-        });
-        var second = first.WithAddedModifier(c =>
-        {
-            calls.Add("second:" + c.GetMember("Name")!.NbtName);
-            c.GetMember("Name")!.NbtName = "from-second";
-        });
-
-        var options = new NbtSerializerOptions { TypeInfoResolver = second };
-        var data = NbtSerializer.Serialize(new RenameDto { Name = "x" }, "root", options);
-
-        Assert.Equal(["first", "second:from-first"], calls);
-        Assert.True(AsCompound(data).ContainsKey("from-second"));
-    }
-
-    [Fact]
-    public void WithAddedModifierLeavesTheOriginalResolverCacheIntact()
-    {
-        var first = new NbtReflectionTypeInfoResolver(c => c.GetMember("Name")!.NbtName = "original-name");
-        var options = new NbtSerializerOptions { TypeInfoResolver = first };
-        var before = NbtSerializer.Serialize(new RenameDto { Name = "x" }, "root", options);
-
-        var derived = first.WithAddedModifier(c => c.GetMember("Name")!.NbtName = "derived-name");
-        var derivedOptions = new NbtSerializerOptions { TypeInfoResolver = derived };
-        var derivedData = NbtSerializer.Serialize(new RenameDto { Name = "x" }, "root", derivedOptions);
-
-        var after = NbtSerializer.Serialize(new RenameDto { Name = "x" }, "root", options);
-
-        Assert.True(AsCompound(derivedData).ContainsKey("derived-name"));
-        Assert.True(AsCompound(after).ContainsKey("original-name"));
-        Assert.Equal(before, after);
-    }
-
-    [Fact]
-    public void FrozenContractRejectsStashedMutationsAndKeepsSerializing()
-    {
-        NbtMemberInfo? stash = null;
-        var options = ModifierOptions(c => stash = c.GetMember("Name"));
-        var value = new RenameDto { Name = "x", Health = 1 };
-        var first = NbtSerializer.Serialize(value, "root", options);
-
-        Assert.NotNull(stash);
-        Assert.Throws<InvalidOperationException>(() => stash!.NbtName = "other");
-        Assert.Throws<InvalidOperationException>(() => stash!.Ignore = true);
-        Assert.Throws<InvalidOperationException>(() => stash!.Converter = new ModifierOffsetIntConverter());
-        Assert.Throws<InvalidOperationException>(() => stash!.Order = 9);
-
-        Assert.Equal(first, NbtSerializer.Serialize(value, "root", options));
-    }
-
-    [Fact]
-    public void ReentrantResolutionOfTheSameTypeThrows()
-    {
-        var options = new NbtSerializerOptions();
-        var resolver = new NbtReflectionTypeInfoResolver(c =>
-        {
-            if (c.Type == typeof(SelfRefDto))
-            {
-                NbtSerializer.Serialize(new SelfRefDto(), "nested", options);
-            }
-        });
-        options = options.WithTypeInfoResolver(resolver);
-
-        var exception = Assert.Throws<InvalidOperationException>(() =>
-            NbtSerializer.Serialize(new SelfRefDto(), "root", options));
-
-        Assert.Contains("re-entered", exception.Message, StringComparison.Ordinal);
-        Assert.Contains(typeof(SelfRefDto).ToString(), exception.Message, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void NestedResolutionOfASiblingTypeSucceedsExactlyOnce()
-    {
-        var siblingRuns = 0;
-        var options = new NbtSerializerOptions();
-        var resolver = new NbtReflectionTypeInfoResolver(c =>
-        {
-            if (c.Type == typeof(SiblingADto))
-            {
-                NbtSerializer.Serialize(new SiblingBDto { Value = 3 }, "sibling", options);
-            }
-            else if (c.Type == typeof(SiblingBDto))
-            {
-                siblingRuns++;
-            }
-        });
-        options = options.WithTypeInfoResolver(resolver);
-
-        var data = NbtSerializer.Serialize(new SiblingADto { Name = "a" }, "root", options);
-
-        Assert.Equal(1, siblingRuns);
-        Assert.Equal("a", NbtSerializer.Deserialize<SiblingADto>(data, options).Name);
-
-        var siblingData = NbtSerializer.Serialize(new SiblingBDto { Value = 4 }, "root", options);
-        Assert.Equal(4, NbtSerializer.Deserialize<SiblingBDto>(siblingData, options).Value);
-        Assert.Equal(1, siblingRuns);
-    }
-
-    [Fact]
-    public void CyclicNestedResolutionThrows()
-    {
-        var options = new NbtSerializerOptions();
-        var resolver = new NbtReflectionTypeInfoResolver(c =>
-        {
-            if (c.Type == typeof(CycleADto))
-            {
-                NbtSerializer.Serialize(new CycleBDto(), "b", options);
-            }
-            else if (c.Type == typeof(CycleBDto))
-            {
-                NbtSerializer.Serialize(new CycleADto(), "a", options);
-            }
-        });
-        options = options.WithTypeInfoResolver(resolver);
-
-        Assert.Throws<InvalidOperationException>(() =>
-            NbtSerializer.Serialize(new CycleADto(), "root", options));
-    }
-
-    [Fact]
-    public void NestedResolutionOfCachedAndResolverlessTypesSucceeds()
-    {
-        var options = new NbtSerializerOptions();
-        var resolver = new NbtReflectionTypeInfoResolver(c =>
-        {
-            if (c.Type != typeof(UsesPreResolvedDto))
-            {
-                return;
-            }
-
-            NbtSerializer.Serialize(new CachedSiblingDto { Value = 2 }, "cached", options);
-            NbtSerializer.Serialize(42, "plain");
-        });
-        options = options.WithTypeInfoResolver(resolver);
-        NbtSerializer.Serialize(new CachedSiblingDto { Value = 1 }, "warm", options);
-
-        var data = NbtSerializer.Serialize(new UsesPreResolvedDto { Name = "ok" }, "root", options);
-
-        Assert.Equal("ok", NbtSerializer.Deserialize<UsesPreResolvedDto>(data, options).Name);
-    }
-
-    [Fact]
-    public void OrderChangesTheWrittenMemberSequence()
-    {
-        var options = ModifierOptions(c =>
-        {
-            c.GetMember("Third")!.Order = -1;
-            c.GetMember("Second")!.Order = 10;
-        });
-
-        var data = NbtSerializer.Serialize(
-            new OrderDto { First = 1, Second = 2, Third = 3 },
-            "root",
-            options);
-
+        var data = path.Serialize(value);
         Assert.True(IndexOfNameBytes(data, "Third"u8) < IndexOfNameBytes(data, "First"u8));
         Assert.True(IndexOfNameBytes(data, "First"u8) < IndexOfNameBytes(data, "Second"u8));
+
+        var copy = path.Deserialize<T>(data);
+        Assert.Equal(1, readFirst(copy));
+        Assert.Equal(2, readSecond(copy));
+        Assert.Equal(3, readThird(copy));
     }
 
-    [Fact]
-    public void EqualOrderKeepsDeclarationOrder()
+    private static void AssertDeclarationOrder<T>(
+        SerializationTestPath path,
+        T value,
+        Func<T, int> readFirst,
+        Func<T, int> readSecond,
+        Func<T, int> readThird)
     {
-        var options = ModifierOptions(c =>
-        {
-            c.GetMember("First")!.Order = 5;
-            c.GetMember("Second")!.Order = 5;
-        });
-
-        var data = NbtSerializer.Serialize(
-            new OrderDto { First = 1, Second = 2, Third = 3 },
-            "root",
-            options);
-
+        var data = path.Serialize(value);
         Assert.True(IndexOfNameBytes(data, "First"u8) < IndexOfNameBytes(data, "Second"u8));
+
+        var copy = path.Deserialize<T>(data);
+        Assert.Equal(1, readFirst(copy));
+        Assert.Equal(2, readSecond(copy));
+        Assert.Equal(3, readThird(copy));
     }
 
-    [Fact]
-    public void OrderDoesNotAffectReading()
+    private static void AssertOrderedRoundTrip<T>(
+        SerializationTestPath path,
+        T value,
+        Func<T, int> readFirst,
+        Func<T, int> readSecond,
+        Func<T, int> readThird)
     {
-        var options = ModifierOptions(c => c.GetMember("Third")!.Order = -1);
+        var data = path.Serialize(value);
+        Assert.True(IndexOfNameBytes(data, "Third"u8) < IndexOfNameBytes(data, "First"u8));
 
-        var data = NbtSerializer.Serialize(
-            new OrderDto { First = 1, Second = 2, Third = 3 },
-            "root",
-            options);
-        var copy = NbtSerializer.Deserialize<OrderDto>(data, options);
-
-        Assert.Equal(1, copy.First);
-        Assert.Equal(2, copy.Second);
-        Assert.Equal(3, copy.Third);
+        var copy = path.Deserialize<T>(data);
+        Assert.Equal(1, readFirst(copy));
+        Assert.Equal(2, readSecond(copy));
+        Assert.Equal(3, readThird(copy));
     }
 
-    [Fact]
-    public void PolymorphicEnvelopeSkipsModifiersForTheBaseContract()
+    private static void AssertPlainPolymorphicEnvelope<TBase, TDerived>(
+        SerializationTestPath path,
+        TBase value,
+        Func<TDerived, string> readName,
+        Func<TDerived, int> readValue)
+        where TDerived : TBase
     {
-        var baseRuns = 0;
-        var options = ModifierOptions(c =>
-        {
-            if (c.Type == typeof(ModifierPolyBase))
-            {
-                baseRuns++;
-            }
-        });
-
-        ModifierPolyBase value = new ModifierPolyDerived { Value = 4 };
-        var data = NbtSerializer.Serialize(value, "root", options);
-        NbtSerializer.Deserialize<ModifierPolyBase>(data, options);
-
-        Assert.Equal(0, baseRuns);
-    }
-
-    [Fact]
-    public void DerivedPolymorphicTypeRunsModifiers()
-    {
-        var derivedRuns = 0;
-        var options = ModifierOptions(c =>
-        {
-            if (c.Type != typeof(ModifierPolyDerived))
-            {
-                return;
-            }
-
-            derivedRuns++;
-            c.GetMember("Value")!.NbtName = "v";
-        });
-
-        ModifierPolyBase value = new ModifierPolyDerived { Value = 4 };
-        var data = NbtSerializer.Serialize(value, "root", options);
-
+        var data = path.Serialize(value);
         var envelope = AsCompound(data);
+        Assert.Equal(typeof(TDerived).Name, (string)envelope["$type"].Value!);
+        Assert.False(envelope.ContainsKey("Name"));
+
         var payload = (NbtCompound)envelope["$value"].Value!;
+        Assert.True(payload.ContainsKey("Name"));
+        Assert.True(payload.ContainsKey("Value"));
+        Assert.False(payload.ContainsKey("v"));
+
+        var copy = Assert.IsType<TDerived>(path.Deserialize<TBase>(data));
+        Assert.Equal("d", readName(copy));
+        Assert.Equal(4, readValue(copy));
+    }
+
+    private static void AssertRenamedPolymorphicPayload<TBase, TDerived>(
+        SerializationTestPath path,
+        TBase value,
+        Func<TDerived, string> readName,
+        Func<TDerived, int> readValue)
+        where TDerived : TBase
+    {
+        var data = path.Serialize(value);
+        var envelope = AsCompound(data);
+        Assert.Equal(typeof(TDerived).Name, (string)envelope["$type"].Value!);
+
+        var payload = (NbtCompound)envelope["$value"].Value!;
+        Assert.True(payload.ContainsKey("Name"));
         Assert.True(payload.ContainsKey("v"));
+        Assert.False(payload.ContainsKey("Value"));
 
-        var copy = (ModifierPolyDerived)NbtSerializer.Deserialize<ModifierPolyBase>(data, options)!;
-        Assert.Equal(4, copy.Value);
-        Assert.Equal(1, derivedRuns);
+        var copy = Assert.IsType<TDerived>(path.Deserialize<TBase>(data));
+        Assert.Equal("d", readName(copy));
+        Assert.Equal(4, readValue(copy));
     }
 
-    [Fact]
-    public async Task ConcurrentFirstTouchRunsTheModifierOnce()
+    private static void AssertHiddenChain<T>(
+        SerializationTestPath path,
+        T value,
+        Func<T, int> readBaseValue,
+        Func<T, long> readLeafValue)
     {
-        var runs = 0;
-        var resolver = new NbtReflectionTypeInfoResolver(_ => Interlocked.Increment(ref runs));
-        var options = new NbtSerializerOptions { TypeInfoResolver = resolver };
-        const int threads = 4;
-        var barrier = new Barrier(threads);
-        var results = new byte[threads][];
-
-        var tasks = Enumerable.Range(0, threads)
-            .Select(i => Task.Run(
-                () =>
-                {
-                    barrier.SignalAndWait();
-                    results[i] = NbtSerializer.Serialize(new CountDto { Value = 7 }, "root", options);
-                },
-                TestContext.Current.CancellationToken))
-            .ToArray();
-        await Task.WhenAll(tasks);
-
-        Assert.Equal(1, Volatile.Read(ref runs));
-        Assert.All(results, result => Assert.Equal(results[0], result));
-    }
-
-    [Fact]
-    public void HiddenMembersStillThrowWithoutModifiers()
-    {
-        var options = ReflectionOptions();
-
-        var exception = Assert.Throws<NotSupportedException>(() =>
-            NbtSerializer.Serialize(new HiddenMemberDerived(), "root", options));
-
-        Assert.Equal(
-            $"The member 'Value' on {typeof(HiddenMemberDerived)} hides a base member with the same " +
-            "name. Rename the derived member or exclude one of the members with [NbtIgnore].",
-            exception.Message);
-    }
-
-    [Fact]
-    public void CallbackIgnoreExemptsAHiddenBaseChain()
-    {
-        var plain = ReflectionOptions();
-        var value = new ChainHiddenLeaf { Value = 2L };
-        ((ChainHiddenBase)value).Value = 1;
-        Assert.Throws<NotSupportedException>(() => NbtSerializer.Serialize(value, "root", plain));
-
-        var options = ModifierOptions(c =>
-            c.Members.First(member => member.Type == typeof(int)).Ignore = true);
-
-        var data = NbtSerializer.Serialize(value, "root", options);
+        var data = path.Serialize(value);
         var compound = AsCompound(data);
-
         Assert.Equal(2L, (long)compound["Value"].Value!);
-        var copy = NbtSerializer.Deserialize<ChainHiddenLeaf>(data, options);
-        Assert.Equal(0, ((ChainHiddenBase)copy).Value);
-        Assert.Equal(2L, copy.Value);
+
+        var copy = path.Deserialize<T>(data);
+        Assert.Equal(0, readBaseValue(copy));
+        Assert.Equal(2L, readLeafValue(copy));
     }
 
-    [Fact]
-    public void DuplicateAttributeNamesStillThrowWithoutModifiers()
+    private static void AssertMixedMemberOrder(SerializationTestPath path)
     {
-        var options = ReflectionOptions();
+        var value = new MixedMemberOrderDto
+        {
+            PropOne = 1,
+            FieldTwo = 4,
+            PropThree = 3,
+        };
 
-        var exception = Assert.Throws<NotSupportedException>(() =>
-            NbtSerializer.Serialize(new AttributeCollisionDto(), "root", options));
-
-        Assert.Equal(
-            $"The type {typeof(AttributeCollisionDto)} maps more than one member to the NBT name 'x'.",
-            exception.Message);
-    }
-
-    [Fact]
-    public void MissingConstructorsStillThrowWithoutModifiers()
-    {
-        var options = ReflectionOptions();
-
-        var exception = Assert.Throws<NotSupportedException>(() =>
-            NbtSerializer.Serialize(new NoUsableCtorDto(1), "root", options));
-
-        Assert.Equal(
-            $"The type {typeof(NoUsableCtorDto)} needs a public parameterless constructor or a public " +
-            "constructor whose parameters match its NBT members.",
-            exception.Message);
-    }
-
-    [Fact]
-    public void UnmappedRequiredMembersStillThrowWithoutModifiers()
-    {
-        var options = ReflectionOptions();
-
-        var exception = Assert.Throws<NotSupportedException>(() =>
-            NbtSerializer.Serialize(new SnapshotUnmappedRequiredDto { Ignored = "", Value = 1 }, "root", options));
-
-        Assert.Equal(
-            $"The required member 'Ignored' on {typeof(SnapshotUnmappedRequiredDto)} is not serialized " +
-            "and the selected constructor is not marked with SetsRequiredMembers.",
-            exception.Message);
-    }
-
-    [Fact]
-    public void FieldUseConverterWithoutIncludeStillThrowsWithoutModifiers()
-    {
-        var options = ReflectionOptions();
-
-        var exception = Assert.Throws<NotSupportedException>(() =>
-            NbtSerializer.Serialize(new FieldUseConverterWithoutIncludeDto(), "root", options));
-
-        Assert.Equal(
-            "The [NbtUseConverter] declaration on member 'Value' is invalid: fields require " +
-            "[NbtInclude] in addition to [NbtUseConverter].",
-            exception.Message);
-    }
-
-    [Fact]
-    public void FieldExtensionDataWithoutIncludeStillThrowsWithoutModifiers()
-    {
-        var options = ReflectionOptions();
-
-        var exception = Assert.Throws<NotSupportedException>(() =>
-            NbtSerializer.Serialize(new ExtensionFieldWithoutIncludeDto(), "root", options));
-
-        Assert.Equal(
-            "The [NbtExtensionData] declaration on member 'Extra' is invalid: fields require " +
-            "[NbtInclude] in addition to [NbtExtensionData].",
-            exception.Message);
-    }
-
-    [Theory]
-    [InlineData(typeof(AbstractConverterDto), "the converter type must not be abstract")]
-    [InlineData(typeof(NoDefaultCtorConverterDto), "the converter type must have a public parameterless constructor")]
-    [InlineData(typeof(WrongTypeConverterDto), "the converter handles 'System.String' but the member type is 'System.Int32'")]
-    public void InvalidAttributeConverterDeclarationsStillThrowWithoutModifiers(Type dtoType, string reason)
-    {
-        var options = ReflectionOptions();
-
-        var exception = Assert.Throws<NotSupportedException>(() => options.GetConverter(dtoType));
-
-        Assert.Equal(
-            $"The [NbtUseConverter] declaration on member 'Value' is invalid: {reason}.",
-            exception.Message);
-    }
-
-    [Fact]
-    public void IgnoredMembersSkipConverterValidationWithoutModifiers()
-    {
-        var options = ReflectionOptions();
-
-        var data = NbtSerializer.Serialize(new IgnoredInvalidConverterDto { Kept = 8 }, "root", options);
-
-        var compound = AsCompound(data);
-        Assert.True(compound.ContainsKey("Kept"));
-        Assert.False(compound.ContainsKey("Property"));
-        Assert.False(compound.ContainsKey("Field"));
-    }
-
-    [Fact]
-    public void MixedFieldsAndPropertiesKeepTheTokenOrderWithoutModifiers()
-    {
-        var options = ReflectionOptions();
-
-        var data = NbtSerializer.Serialize(new MixedMemberOrderDto(), "root", options);
-
+        var data = path.Serialize(value);
         Assert.True(IndexOfNameBytes(data, "FieldTwo"u8) < IndexOfNameBytes(data, "PropOne"u8));
         Assert.True(IndexOfNameBytes(data, "PropOne"u8) < IndexOfNameBytes(data, "PropThree"u8));
+
+        var copy = path.Deserialize<MixedMemberOrderDto>(data);
+        Assert.Equal(1, copy.PropOne);
+        Assert.Equal(4, copy.FieldTwo);
+        Assert.Equal(3, copy.PropThree);
     }
 
-    private static NbtSerializerOptions ModifierOptions(
-        Action<NbtContractInfo> modifier,
-        NbtNamingPolicy? policy = null)
+    private static void AssertResolvedCollision<T>(
+        SerializationTestPath path,
+        T value,
+        Func<T, int> readA,
+        Func<T, int> readB)
     {
-        return new NbtSerializerOptions
-        {
-            TypeInfoResolver = new NbtReflectionTypeInfoResolver(modifier),
-            PropertyNamingPolicy = policy,
-        };
-    }
+        var data = path.Serialize(value);
+        var compound = AsCompound(data);
+        Assert.True(compound.ContainsKey("x"));
+        Assert.True(compound.ContainsKey("b"));
 
-    private static NbtSerializerOptions ReflectionOptions() => new()
-    {
-        TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
-    };
+        var copy = path.Deserialize<T>(data);
+        Assert.Equal(1, readA(copy));
+        Assert.Equal(2, readB(copy));
+    }
 
     private static NbtCompound AsCompound(byte[] data) =>
         (NbtCompound)NbtSerializer.Deserialize(data).Value.Value!;
@@ -726,103 +845,6 @@ public sealed class NbtContractModifierTests
         public int Value { get; set; }
     }
 
-    private sealed class CountDto
-    {
-        public int Value { get; set; }
-    }
-
-    private sealed class IgnoredRequiredDto
-    {
-        public required string Name { get; set; }
-
-        public int Value { get; set; }
-    }
-
-    private sealed class BoundOnlyDto
-    {
-        public BoundOnlyDto(int a, int b)
-        {
-            A = a;
-            B = b;
-        }
-
-        public int A { get; }
-
-        public int B { get; }
-    }
-
-    private sealed class BoundWithParameterlessDto
-    {
-        public BoundWithParameterlessDto()
-        {
-        }
-
-        public BoundWithParameterlessDto(int a, int b)
-        {
-            A = a;
-            B = b;
-        }
-
-        public int A { get; set; }
-
-        public int B { get; set; }
-    }
-
-    private sealed class AttributeCollisionDto
-    {
-        [NbtPropertyName("x")]
-        public int A { get; set; }
-
-        [NbtPropertyName("x")]
-        public int B { get; set; }
-    }
-
-    private sealed class AttributeConverterDto
-    {
-        [NbtUseConverter(typeof(ModifierOffsetIntConverter))]
-        public int Value { get; set; }
-    }
-
-    private sealed class PlainIntDto
-    {
-        public int Value { get; set; }
-    }
-
-    private sealed class SelfRefDto
-    {
-        public string Name { get; set; } = "";
-    }
-
-    private sealed class SiblingADto
-    {
-        public string Name { get; set; } = "";
-    }
-
-    private sealed class SiblingBDto
-    {
-        public int Value { get; set; }
-    }
-
-    private sealed class CycleADto
-    {
-        public string Name { get; set; } = "";
-    }
-
-    private sealed class CycleBDto
-    {
-        public int Value { get; set; }
-    }
-
-    private sealed class CachedSiblingDto
-    {
-        public int Value { get; set; }
-    }
-
-    private sealed class UsesPreResolvedDto
-    {
-        public string Name { get; set; } = "";
-    }
-
     private sealed class OrderDto
     {
         public int First { get; set; }
@@ -832,22 +854,37 @@ public sealed class NbtContractModifierTests
         public int Third { get; set; }
     }
 
+    private sealed class AttributeConverterDto
+    {
+        [NbtUseConverter(typeof(ModifierOffsetIntConverter))]
+        public int Value { get; set; }
+    }
+
+    internal sealed class PlainIntDto
+    {
+        public int Value { get; set; }
+    }
+
+    private sealed class NullConverterTargetDto
+    {
+        public int Value { get; set; }
+    }
+
     [NbtDerived(typeof(ModifierPolyDerived))]
-    private abstract class ModifierPolyBase;
+    [NbtDerived(typeof(ModifierPlainPolyDerived))]
+    private abstract class ModifierPolyBase
+    {
+        public string Name { get; set; } = "";
+    }
 
     private sealed class ModifierPolyDerived : ModifierPolyBase
     {
         public int Value { get; set; }
     }
 
-    private abstract class HiddenMemberBase
+    private sealed class ModifierPlainPolyDerived : ModifierPolyBase
     {
-        public virtual int Value { get; set; }
-    }
-
-    private sealed class HiddenMemberDerived : HiddenMemberBase
-    {
-        public new int Value { get; set; }
+        public int Value { get; set; }
     }
 
     private class ChainHiddenBase
@@ -860,70 +897,16 @@ public sealed class NbtContractModifierTests
         public new long Value { get; set; }
     }
 
-    private sealed class NoUsableCtorDto
+    private sealed class AttributeCollisionDto
     {
-        public NoUsableCtorDto(int unrelated)
-        {
-            _ = unrelated;
-        }
+        [NbtPropertyName("x")]
+        public int A { get; set; }
+
+        [NbtPropertyName("x")]
+        public int B { get; set; }
     }
 
-    private sealed class SnapshotUnmappedRequiredDto
-    {
-        [NbtIgnore]
-        public required string Ignored { get; set; }
-
-        public int Value { get; set; }
-    }
-
-    [SuppressMessage("ReSharper", "NotAccessedField.Compiler")]
-    private sealed class FieldUseConverterWithoutIncludeDto
-    {
-        [NbtUseConverter(typeof(ModifierOffsetIntConverter))]
-        public int Value = 1;
-    }
-
-    private sealed class ExtensionFieldWithoutIncludeDto
-    {
-        [NbtExtensionData]
-        public NbtCompound Extra = new();
-    }
-
-    private sealed class AbstractConverterDto
-    {
-        [NbtUseConverter(typeof(ModifierAbstractIntConverter))]
-        public int Value { get; set; }
-    }
-
-    private sealed class NoDefaultCtorConverterDto
-    {
-        [NbtUseConverter(typeof(ModifierNoDefaultCtorConverter))]
-        public int Value { get; set; }
-    }
-
-    private sealed class WrongTypeConverterDto
-    {
-        [NbtUseConverter(typeof(ModifierStringConverter))]
-        public int Value { get; set; }
-    }
-
-    [SuppressMessage("ReSharper", "NotAccessedField.Compiler")]
-    private sealed class IgnoredInvalidConverterDto
-    {
-        [NbtIgnore]
-        [NbtUseConverter(typeof(ModifierAbstractIntConverter))]
-        public int Property { get; set; }
-
-        [NbtIgnore]
-        [NbtInclude]
-        [NbtUseConverter(typeof(ModifierAbstractIntConverter))]
-        public int Field = 2;
-
-        public int Kept { get; set; }
-    }
-
-    [SuppressMessage("ReSharper", "NotAccessedField.Compiler")]
-    private sealed class MixedMemberOrderDto
+    internal sealed class MixedMemberOrderDto
     {
         public int PropOne { get; set; }
 
@@ -932,6 +915,128 @@ public sealed class NbtContractModifierTests
 
         public int PropThree { get; set; }
     }
+
+    internal sealed class TwinRenameDto
+    {
+        [NbtPropertyName("label")]
+        public string Name { get; set; } = "";
+
+        public int Health { get; set; }
+    }
+
+    internal sealed class TwinPolicyViewDto
+    {
+        public string UserName { get; set; } = "";
+
+        [NbtPropertyName("wire")]
+        public int Value { get; set; }
+    }
+
+    internal sealed class TwinIgnoredHealthDto
+    {
+        public string Name { get; set; } = "";
+
+        [NbtIgnore]
+        public int Health { get; set; }
+    }
+
+    internal sealed class TwinEmptyNameDto
+    {
+        [NbtPropertyName("")]
+        public string Name { get; set; } = "";
+
+        public int Health { get; set; }
+    }
+
+    internal sealed class TwinInjectedConverterDto
+    {
+        [NbtUseConverter(typeof(ModifierOffset200IntConverter))]
+        public int Value { get; set; }
+    }
+
+    internal sealed class TwinFactoryOffsetDto
+    {
+        [NbtUseConverter(typeof(ModifierOffsetIntConverter))]
+        public int Value { get; set; }
+    }
+
+    internal sealed class TwinOrderSequenceDto
+    {
+        public int Third { get; set; }
+
+        public int First { get; set; }
+
+        public int Second { get; set; }
+    }
+
+    internal sealed class TwinDeclarationOrderDto
+    {
+        public int Third { get; set; }
+
+        public int First { get; set; }
+
+        public int Second { get; set; }
+    }
+
+    [NbtDerived(typeof(TwinPolyDerived))]
+    [NbtDerived(typeof(TwinPlainPolyDerived))]
+    internal abstract class TwinPolyBase
+    {
+        public string Name { get; set; } = "";
+    }
+
+    internal sealed class TwinPolyDerived : TwinPolyBase
+    {
+        [NbtPropertyName("v")]
+        public int Value { get; set; }
+    }
+
+    internal sealed class TwinPlainPolyDerived : TwinPolyBase
+    {
+        public int Value { get; set; }
+    }
+
+    internal class TwinHiddenBase
+    {
+        [NbtIgnore]
+        public virtual int Value { get; set; }
+    }
+
+    internal sealed class TwinHiddenLeaf : TwinHiddenBase
+    {
+        public new long Value { get; set; }
+    }
+
+    internal sealed class TwinResolvedCollisionDto
+    {
+        [NbtPropertyName("x")]
+        public int A { get; set; }
+
+        [NbtPropertyName("b")]
+        public int B { get; set; }
+    }
+}
+
+[NbtSerializable(typeof(NbtContractModifierTests.TwinRenameDto))]
+[NbtSerializable(typeof(NbtContractModifierTests.TwinIgnoredHealthDto))]
+[NbtSerializable(typeof(NbtContractModifierTests.TwinEmptyNameDto))]
+[NbtSerializable(typeof(NbtContractModifierTests.TwinInjectedConverterDto))]
+[NbtSerializable(typeof(NbtContractModifierTests.TwinFactoryOffsetDto))]
+[NbtSerializable(typeof(NbtContractModifierTests.TwinOrderSequenceDto))]
+[NbtSerializable(typeof(NbtContractModifierTests.TwinDeclarationOrderDto))]
+[NbtSerializable(typeof(NbtContractModifierTests.TwinResolvedCollisionDto))]
+[NbtSerializable(typeof(NbtContractModifierTests.TwinPolyBase))]
+[NbtSerializable(typeof(NbtContractModifierTests.TwinHiddenLeaf))]
+[NbtSerializable(typeof(NbtContractModifierTests.PlainIntDto))]
+[NbtSerializable(typeof(NbtContractModifierTests.MixedMemberOrderDto))]
+internal partial class ContractModifierTwinContext : NbtSerializerContext
+{
+}
+
+[NbtSerializable(typeof(NbtContractModifierTests.TwinPolicyViewDto))]
+[NbtSourceGenerationOptions(NamingPolicy = NbtNamingPolicyKind.CamelCase)]
+internal partial class ContractModifierCamelTwinContext : NbtSerializerContext
+{
 }
 
 internal sealed class ModifierOffsetIntConverter : NbtConverter<int>
@@ -961,12 +1066,13 @@ internal sealed class ModifierOffsetIntConverter : NbtConverter<int>
     }
 }
 
-internal abstract class ModifierAbstractIntConverter : NbtConverter<int>
+internal sealed class ModifierOffset200IntConverter : NbtConverter<int>
 {
-    public override int Read(ref NbtReader reader, NbtSerializerOptions options) => reader.GetInt32();
+    public override int Read(ref NbtReader reader, NbtSerializerOptions options) =>
+        reader.GetInt32() - 200;
 
     public override void Write(ref NbtWriter writer, int value, NbtSerializerOptions options) =>
-        writer.WriteInt32(value);
+        writer.WriteInt32(value + 200);
 
     public override bool TryGetTagType(
         int value,
@@ -974,46 +1080,6 @@ internal abstract class ModifierAbstractIntConverter : NbtConverter<int>
         out NbtTagType tagType)
     {
         tagType = NbtTagType.Int;
-        return true;
-    }
-}
-
-internal sealed class ModifierNoDefaultCtorConverter : NbtConverter<int>
-{
-    public ModifierNoDefaultCtorConverter(int unused)
-    {
-        _ = unused;
-    }
-
-    public override int Read(ref NbtReader reader, NbtSerializerOptions options) => reader.GetInt32();
-
-    public override void Write(ref NbtWriter writer, int value, NbtSerializerOptions options) =>
-        writer.WriteInt32(value);
-
-    public override bool TryGetTagType(
-        int value,
-        NbtSerializerOptions options,
-        out NbtTagType tagType)
-    {
-        tagType = NbtTagType.Int;
-        return true;
-    }
-}
-
-internal sealed class ModifierStringConverter : NbtConverter<string>
-{
-    public override string Read(ref NbtReader reader, NbtSerializerOptions options) =>
-        reader.GetString();
-
-    public override void Write(ref NbtWriter writer, string value, NbtSerializerOptions options) =>
-        writer.WriteString(value);
-
-    public override bool TryGetTagType(
-        string value,
-        NbtSerializerOptions options,
-        out NbtTagType tagType)
-    {
-        tagType = NbtTagType.String;
         return true;
     }
 }

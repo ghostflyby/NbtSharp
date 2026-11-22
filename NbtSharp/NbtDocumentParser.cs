@@ -102,8 +102,8 @@ internal static class NbtDocumentParser
     /// </summary>
     /// <param name="data">The complete NBT document; trailing bytes after the root are ignored.</param>
     /// <param name="options">The reader options, or the defaults.</param>
-    /// <returns>The rented slot array and the number of slots it holds.</returns>
-    public static (NbtDocumentSlot[] Slots, int SlotCount) Parse(ReadOnlySpan<byte> data, NbtReaderOptions options)
+    /// <returns>The rented slot array.</returns>
+    public static NbtDocumentSlot[] Parse(ReadOnlySpan<byte> data, NbtReaderOptions options)
     {
         ValidateOptions(options);
         var parser = new Parser(
@@ -146,7 +146,7 @@ internal static class NbtDocumentParser
             _depth = 0;
         }
 
-        public (NbtDocumentSlot[] Slots, int SlotCount) ParseDocument()
+        public NbtDocumentSlot[] ParseDocument()
         {
             try
             {
@@ -184,7 +184,7 @@ internal static class NbtDocumentParser
                     BeginValue(tagType, tagPosition, ReadName());
                 }
 
-                return (_slots, _slotCount);
+                return _slots;
             }
             catch
             {

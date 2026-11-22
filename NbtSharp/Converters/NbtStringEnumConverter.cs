@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 
@@ -30,6 +31,11 @@ public sealed class NbtStringEnumConverter<TEnum> : NbtConverter<TEnum>
 {
     private static readonly EnumWidth Width = GetWidth(typeof(TEnum).GetEnumUnderlyingType());
     private static readonly FrozenDictionary<string, TEnum> NameToValue = CreateNameToValue();
+
+    [SuppressMessage(
+        "ReSharper",
+        "StaticMemberInGenericType",
+        Justification = "Per-enum name tables are intentionally static so each closed TEnum builds them once.")]
     private static readonly FrozenDictionary<ulong, string> ValueToName = CreateValueToName();
     private static readonly bool IsFlags = typeof(TEnum).IsDefined(typeof(FlagsAttribute), inherit: false);
 
@@ -146,7 +152,7 @@ public sealed class NbtStringEnumConverter<TEnum> : NbtConverter<TEnum>
         EnumWidth.Int16 => value <= unchecked((ulong)short.MaxValue) ||
             value >= unchecked((ulong)short.MinValue),
         EnumWidth.UInt16 => value <= ushort.MaxValue,
-        EnumWidth.Int32 => value <= unchecked((ulong)int.MaxValue) ||
+        EnumWidth.Int32 => value <= int.MaxValue ||
             value >= unchecked((ulong)int.MinValue),
         EnumWidth.UInt32 => value <= uint.MaxValue,
         _ => true,

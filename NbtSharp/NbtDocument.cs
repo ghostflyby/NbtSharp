@@ -30,7 +30,6 @@ public sealed class NbtDocument : IDisposable
     private ReadOnlyMemory<byte> _data;
     private byte[]? _leasedBuffer;
     private NbtDocumentSlot[]? _slots;
-    private int _slotCount;
     private int _rootSlot;
     private int _state;
     private string? _rootName;
@@ -38,13 +37,11 @@ public sealed class NbtDocument : IDisposable
     private NbtDocument(
         ReadOnlyMemory<byte> data,
         byte[]? leasedBuffer,
-        NbtDocumentSlot[] slots,
-        int slotCount)
+        NbtDocumentSlot[] slots)
     {
         _data = data;
         _leasedBuffer = leasedBuffer;
         _slots = slots;
-        _slotCount = slotCount;
         _rootSlot = 0;
         _state = StateAlive;
     }
@@ -71,18 +68,13 @@ public sealed class NbtDocument : IDisposable
     /// </remarks>
     public static NbtDocument Parse(ReadOnlyMemory<byte> data, NbtReaderOptions options = default)
     {
-        if (data.Length > int.MaxValue)
-        {
-            throw CreateMaxDocumentLengthException();
-        }
-
         NbtDocumentParser.ValidateOptions(options);
         NbtDocumentSlot[]? slots = null;
         try
         {
-            var (slotArray, slotCount) = NbtDocumentParser.Parse(data.Span, options);
+            var slotArray = NbtDocumentParser.Parse(data.Span, options);
             slots = slotArray;
-            var document = new NbtDocument(data, leasedBuffer: null, slots, slotCount);
+            var document = new NbtDocument(data, leasedBuffer: null, slots);
             slots = null;
             return document;
         }
@@ -131,9 +123,9 @@ public sealed class NbtDocument : IDisposable
             NbtDocumentSlot[]? slots = null;
             try
             {
-                var (slotArray, slotCount) = NbtDocumentParser.Parse(memory.Span, options);
+                var slotArray = NbtDocumentParser.Parse(memory.Span, options);
                 slots = slotArray;
-                var document = new NbtDocument(memory, buffer, slots, slotCount);
+                var document = new NbtDocument(memory, buffer, slots);
                 slots = null;
                 transferred = true;
                 return document;
@@ -200,7 +192,7 @@ public sealed class NbtDocument : IDisposable
         }
 
         var initialSize = capped && declaredRemaining > 0
-            ? (int)Math.Min(declaredRemaining, Math.Min(cap, (long)int.MaxValue))
+            ? (int)Math.Min(declaredRemaining, Math.Min(cap, int.MaxValue))
             : DefaultStreamBufferSize;
 
         var buffer = ArrayPool<byte>.Shared.Rent(initialSize);
@@ -230,9 +222,9 @@ public sealed class NbtDocument : IDisposable
                 try
                 {
                     var memory = buffer.AsMemory(0, (int)filled);
-                    var (slotArray, slotCount) = NbtDocumentParser.Parse(memory.Span, options);
+                    var slotArray = NbtDocumentParser.Parse(memory.Span, options);
                     slots = slotArray;
-                    var document = new NbtDocument(memory, buffer, slots, slotCount);
+                    var document = new NbtDocument(memory, buffer, slots);
                     slots = null;
                     transferred = true;
                     return document;
@@ -253,7 +245,7 @@ public sealed class NbtDocument : IDisposable
                     // Retry with a larger buffer, keeping the bytes already read.
                     var nextSize = (int)Math.Min(
                         (long)target * 2,
-                        capped ? Math.Min(cap, (long)int.MaxValue) : (long)int.MaxValue);
+                        capped ? Math.Min(cap, int.MaxValue) : int.MaxValue);
                     if (nextSize <= target)
                     {
                         throw CreateMaxDocumentLengthException();
