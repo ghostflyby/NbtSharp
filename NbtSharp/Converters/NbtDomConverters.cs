@@ -7,6 +7,10 @@ namespace NbtSharp.Converters;
 [UnconditionalSuppressMessage("Aot", "IL3050", Justification = "Reached only through annotated serializer entry points.")]
 internal static class NbtDomConverters
 {
+    // Mirrors NbtCollectionReader's limit: avoid committing memory for a declared length that the
+    // payload may not actually contain.
+    private const int PreallocationLimit = 4096;
+
     public static readonly NbtConverter<NbtValue> Value = new NbtValueConverter();
 
     public static readonly NbtConverter<NbtList> List = new NbtListConverter();
@@ -36,9 +40,9 @@ internal static class NbtDomConverters
                 case NbtTagType.String:
                     return reader.GetString();
                 case NbtTagType.List:
-                    return NbtSerializer.DeserializeValue<NbtList>(ref reader, options);
+                    return NbtDomConverters.List.Read(ref reader, options);
                 case NbtTagType.Compound:
-                    return NbtSerializer.DeserializeValue<NbtCompound>(ref reader, options);
+                    return Compound.Read(ref reader, options);
                 case NbtTagType.IntArray:
                     return reader.GetInt32Array();
                 case NbtTagType.LongArray:
@@ -81,10 +85,10 @@ internal static class NbtDomConverters
                     writer.WriteString(item.AsSpan());
                     break;
                 case NbtList item:
-                    NbtSerializer.SerializeValue(ref writer, item, options);
+                    NbtDomConverters.List.Write(ref writer, item, options);
                     break;
                 case NbtCompound item:
-                    NbtSerializer.SerializeValue(ref writer, item, options);
+                    Compound.Write(ref writer, item, options);
                     break;
                 case int[] item:
                     writer.WriteInt32Array(item);
@@ -147,11 +151,7 @@ internal static class NbtDomConverters
 
                 try
                 {
-                    compound[name] = (NbtValue)NbtSerializer.DeserializeValueInternal(
-                        ref reader,
-                        typeof(NbtValue),
-                        options,
-                        pathSegment: null)!;
+                    compound[name] = Value.Read(ref reader, options);
                 }
                 catch (NbtException ex)
                 {
@@ -174,12 +174,7 @@ internal static class NbtDomConverters
             writer.WriteStartCompound();
             foreach (var pair in value)
             {
-                NbtSerializer.SerializeMemberInternal(
-                    ref writer,
-                    pair.Key,
-                    pair.Value,
-                    typeof(NbtValue),
-                    options);
+                NbtMetadataServices.WriteDomMember(ref writer, pair.Key, pair.Value, options);
             }
 
             writer.WriteEndCompound();
@@ -218,8 +213,8 @@ internal static class NbtDomConverters
                 NbtTagType.Double => new NbtList(NbtCollectionReader.ReadList<double>(ref reader, options)),
                 NbtTagType.ByteArray => new NbtList(NbtCollectionReader.ReadList<sbyte[]>(ref reader, options)),
                 NbtTagType.String => new NbtList(NbtCollectionReader.ReadList<string>(ref reader, options)),
-                NbtTagType.List => new NbtList(NbtCollectionReader.ReadList<NbtList>(ref reader, options)),
-                NbtTagType.Compound => new NbtList(NbtCollectionReader.ReadList<NbtCompound>(ref reader, options)),
+                NbtTagType.List => new NbtList(ReadDomListElements(ref reader, options)),
+                NbtTagType.Compound => new NbtList(ReadDomCompoundElements(ref reader, options)),
                 NbtTagType.IntArray => new NbtList(NbtCollectionReader.ReadList<int[]>(ref reader, options)),
                 NbtTagType.LongArray => new NbtList(NbtCollectionReader.ReadList<long[]>(ref reader, options)),
                 _ => throw new NbtException($"Unknown NBT list element type {reader.ListElementType}.")
@@ -300,22 +295,28 @@ internal static class NbtDomConverters
             return default;
         }
 
-        private static void WriteElements<TElement>(
-            ref NbtWriter writer,
-            List<TElement> elements,
-            NbtSerializerOptions options)
+        // Nested list and compound elements recurse through the built-in DOM converters so that
+        // converters registered for NbtList/NbtCompound never intercept nested DOM values. Scalar
+        // element cases keep going through NbtCollectionReader. Count validation and EndList
+        // handling mirror NbtCollectionReader's element loops.
+        private static List<NbtList> ReadDomListElements(ref NbtReader reader, NbtSerializerOptions options)
         {
-            for (var i = 0; i < elements.Count; i++)
+            var count = reader.ListLength;
+            var elements = new List<NbtList>(Math.Min(count, PreallocationLimit));
+            for (var i = 0; i < count; i++)
             {
+                if (!reader.Read())
+                {
+                    throw new NbtException("The list ended before all declared elements were read.")
+                    {
+                        IsTruncated = true,
+                        BytePosition = reader.BytesConsumed,
+                    };
+                }
+
                 try
                 {
-                    NbtSerializer.SerializeValueInternal(
-                        ref writer,
-                        elements[i],
-                        typeof(TElement),
-                        options,
-                        pathSegment: null,
-                        headerWritten: false);
+                    elements.Add(NbtDomConverters.List.Read(ref reader, options));
                 }
                 catch (NbtException ex)
                 {
@@ -323,6 +324,154 @@ internal static class NbtDomConverters
                     throw;
                 }
             }
+
+            ReadDomListEnd(ref reader);
+            return elements;
+        }
+
+        private static List<NbtCompound> ReadDomCompoundElements(ref NbtReader reader, NbtSerializerOptions options)
+        {
+            var count = reader.ListLength;
+            var elements = new List<NbtCompound>(Math.Min(count, PreallocationLimit));
+            for (var i = 0; i < count; i++)
+            {
+                if (!reader.Read())
+                {
+                    throw new NbtException("The list ended before all declared elements were read.")
+                    {
+                        IsTruncated = true,
+                        BytePosition = reader.BytesConsumed,
+                    };
+                }
+
+                try
+                {
+                    elements.Add(Compound.Read(ref reader, options));
+                }
+                catch (NbtException ex)
+                {
+                    NbtSerializer.PrependPath(ex, $"[{i}]");
+                    throw;
+                }
+            }
+
+            ReadDomListEnd(ref reader);
+            return elements;
+        }
+
+        private static void ReadDomListEnd(ref NbtReader reader)
+        {
+            if (!reader.Read() || reader.TokenType != NbtTokenType.EndList)
+            {
+                throw new NbtException("The list was not terminated.")
+                {
+                    IsTruncated = true,
+                    BytePosition = reader.BytesConsumed,
+                };
+            }
+        }
+
+        private static void WriteElements<TElement>(
+            ref NbtWriter writer,
+            List<TElement> elements,
+            NbtSerializerOptions options)
+        {
+            var converter = DomElementConverter<TElement>.Converter;
+            for (var i = 0; i < elements.Count; i++)
+            {
+                var element = elements[i];
+                try
+                {
+                    if (element is null)
+                    {
+                        throw new NbtException("A list element cannot be null.")
+                        {
+                            BytePosition = writer.BytesWritten,
+                        };
+                    }
+
+                    converter.Write(ref writer, element, options);
+                }
+                catch (NbtException ex)
+                {
+                    NbtSerializer.PrependPath(ex, $"[{i}]");
+                    throw;
+                }
+            }
+        }
+    }
+
+    // Resolves the built-in converter for one legal DOM list element type once per instantiation,
+    // so element writes never consult NbtSerializerOptions and registered converters cannot
+    // intercept nested DOM values.
+    private static class DomElementConverter<TElement>
+    {
+        public static readonly NbtConverter<TElement> Converter = (NbtConverter<TElement>)Create();
+
+        private static object Create()
+        {
+            var type = typeof(TElement);
+            if (type == typeof(sbyte))
+            {
+                return NbtPrimitiveConverters.SByte;
+            }
+
+            if (type == typeof(short))
+            {
+                return NbtPrimitiveConverters.Int16;
+            }
+
+            if (type == typeof(int))
+            {
+                return NbtPrimitiveConverters.Int32;
+            }
+
+            if (type == typeof(long))
+            {
+                return NbtPrimitiveConverters.Int64;
+            }
+
+            if (type == typeof(float))
+            {
+                return NbtPrimitiveConverters.Single;
+            }
+
+            if (type == typeof(double))
+            {
+                return NbtPrimitiveConverters.Double;
+            }
+
+            if (type == typeof(string))
+            {
+                return NbtPrimitiveConverters.String;
+            }
+
+            if (type == typeof(sbyte[]))
+            {
+                return NbtArrayConverters.SByteArray;
+            }
+
+            if (type == typeof(int[]))
+            {
+                return NbtArrayConverters.Int32Array;
+            }
+
+            if (type == typeof(long[]))
+            {
+                return NbtArrayConverters.Int64Array;
+            }
+
+            if (type == typeof(NbtList))
+            {
+                return List;
+            }
+
+            if (type == typeof(NbtCompound))
+            {
+                return Compound;
+            }
+
+            throw new InvalidOperationException($"Unknown NBT list element type {type}.");
         }
     }
 }

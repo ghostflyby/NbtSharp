@@ -98,6 +98,19 @@ members are rejected because NBT has one member namespace per compound. Mapping 
 on a virtual base property are inherited by overrides, matching their `AttributeUsage.Inherited`
 contract; public `[NbtInclude]` fields declared on a base type are included too.
 
+Unknown members can be preserved with `[NbtExtensionData]` on a single
+`NbtCompound`- or `Dictionary<string, NbtValue>`-typed member (both mapping paths): unknown members
+are captured into it on read and appended after the mapped members on write, so files written by
+newer tools round-trip fields an older reader does not map. The member needs a setter, cannot be
+`required`, cannot be combined with `[NbtPropertyName]`/`[NbtUseConverter]`, does not participate
+in constructor binding, and fields also need `[NbtInclude]`. Duplicate unknown names follow
+`RejectDuplicateCompoundNames`; writing an extension key that collides with any mapped member name
+(including members omitted by null handling) throws `NbtException`. Captured values always use the
+built-in DOM converters, even when converters for `NbtValue`/`NbtList`/`NbtCompound` are registered
+in `options.Converters`: such converters still apply when a DOM type is the declared member or root
+type, but no longer intercept values nested inside built-in DOM conversion (the `JsonElement`
+behavior).
+
 Reflection mapping can apply a preset naming policy to members without `[NbtPropertyName]` by
 setting `NbtSerializerOptions.PropertyNamingPolicy`, for example
 `PropertyNamingPolicy = NbtNamingPolicy.SnakeCaseLower`. The presets are `CamelCase`,

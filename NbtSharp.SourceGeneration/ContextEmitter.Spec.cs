@@ -163,7 +163,8 @@ internal sealed partial class ContextEmitter
                 model.UseConstructorAccessor,
                 members.Any(static member =>
                     member.ConverterMode == ConverterMode.Runtime ||
-                    member is { ConverterMode: ConverterMode.Explicit, ExplicitConverterIsFactory: true }));
+                    member is { ConverterMode: ConverterMode.Explicit, ExplicitConverterIsFactory: true }),
+                model.ExtensionMember is null ? null : BuildMemberSpec(model.ExtensionMember, model));
         }
 
         private static ConstructorSpec? BuildConstructorSpec(ObjectModel model)

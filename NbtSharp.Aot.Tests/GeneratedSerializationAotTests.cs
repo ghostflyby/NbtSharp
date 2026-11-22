@@ -313,6 +313,30 @@ public sealed class GeneratedSerializationAotTests
     }
 
     [Fact]
+    public void RoundTripsExtensionData()
+    {
+        var document = new NbtCompound
+        {
+            ["Name"] = "Steve",
+            ["Health"] = 20,
+            ["UnknownTag"] = "extra",
+        };
+        var data = NbtSerializer.Serialize(new NbtRoot("root", document));
+
+        var copy = NbtSerializer.Deserialize(data, AotContext.Default.AotExtensionData);
+        Assert.Equal("Steve", copy.Name);
+        Assert.Equal(20, copy.Health);
+        var extra = Assert.IsType<NbtCompound>(copy.Extra);
+        Assert.Equal("extra", extra["UnknownTag"].Value);
+
+        var rewritten = NbtSerializer.Serialize(copy, AotContext.Default.AotExtensionData, "root");
+        var root = (NbtCompound)NbtSerializer.Deserialize(rewritten).Value.Value!;
+        Assert.Equal("Steve", root["Name"].Value);
+        Assert.Equal(20, root["Health"].Value);
+        Assert.Equal("extra", root["UnknownTag"].Value);
+    }
+
+    [Fact]
     public void RoundTripsPolymorphicMembers()
     {
         var value = new AotPetOwner
@@ -375,6 +399,7 @@ internal sealed class AotPetOwner
 [NbtSerializable(typeof(AotRecord))]
 [NbtSerializable(typeof(AotConverters))]
 [NbtSerializable(typeof(AotPetOwner))]
+[NbtSerializable(typeof(AotExtensionData))]
 internal partial class AotContext : NbtSerializerContext
 {
     public AotContext()
@@ -441,6 +466,16 @@ internal sealed class AotStringEnums
     public AotMob Undefined { get; init; }
 
     public AotStringFlags Flags { get; init; }
+}
+
+internal sealed class AotExtensionData
+{
+    public string Name { get; init; } = "";
+
+    public int Health { get; init; }
+
+    [NbtExtensionData]
+    public NbtCompound? Extra { get; set; }
 }
 
 internal sealed class AotWrapper<T>

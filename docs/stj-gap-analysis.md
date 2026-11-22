@@ -78,6 +78,16 @@ and the extension member) must be defined; and capturing values verbatim means e
 materialization or a raw-capture capability (see G-DOM-1) — with today's DOM the extension member
 pays full materialization.
 
+**Status (2026-11-22): implemented on feat/stj-gap-p1.** `[NbtExtensionData]` claims a single
+`NbtCompound`- or `Dictionary<string, NbtValue>`-typed member per type; unknown members are
+captured through the new built-in DOM helpers (`NbtMetadataServices.ReadDomValue`/`WriteDomMember`)
+and appended after mapped members on write, with name conflicts (including names omitted by null
+handling) rejected. Capturing is deliberately decoupled from `options.Converters`: the built-in DOM
+converters now form a closed family (`JsonElement` semantics), so converters registered for
+`NbtValue`/`NbtList`/`NbtCompound` still apply when such a type is the declared member or root type
+but no longer intercept values nested inside built-in DOM conversion. Raw pass-through remains
+open for G-DOM-1's `GetRawBytes` hook.
+
 **G-MEMBER-2 — default-value elision on write.** Priority: P1–P2.
 
 STJ: `JsonIgnoreCondition.WhenWritingDefault`. For NBT this is a file-size feature (Minecraft-style

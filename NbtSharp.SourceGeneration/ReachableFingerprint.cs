@@ -186,6 +186,9 @@ internal static class ReachableFingerprint
             hash.Add(member.Name);
             hash.Add((int)member.DeclaredAccessibility);
             hash.Add(member.IsStatic);
+            // [NbtExtensionData] members need no dedicated walk: the attribute is hashed here,
+            // the member shape is covered by the declaration text hashed in AddType, and the
+            // generator MVID gates emission-format changes.
             AddAttributes(ref hash, member);
 
             switch (member)

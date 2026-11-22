@@ -2398,6 +2398,287 @@ public sealed class NbtSourceGeneratorTests
     }
 
     [Fact]
+    public void ReportsExtensionDataWithUnsupportedMemberType()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Player
+            {
+                public string Name { get; set; } = "";
+
+                [NbtExtensionData]
+                public int Extra { get; set; }
+            }
+            """);
+
+        AssertExtensionDataError(result, "Extra", "the member type must be");
+    }
+
+    [Fact]
+    public void ReportsExtensionDataWithNbtValueMemberType()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Player
+            {
+                [NbtExtensionData]
+                public NbtValue? Extra { get; set; }
+            }
+            """);
+
+        AssertExtensionDataError(result, "Extra", "the member type must be");
+    }
+
+    [Fact]
+    public void ReportsExtensionDataWithWrongDictionaryValueType()
+    {
+        var result = Run("""
+            using System.Collections.Generic;
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Player
+            {
+                [NbtExtensionData]
+                public Dictionary<string, int>? Extra { get; set; }
+            }
+            """);
+
+        AssertExtensionDataError(result, "Extra", "the member type must be");
+    }
+
+    [Fact]
+    public void ReportsExtensionDataWithInterfaceMemberType()
+    {
+        var result = Run("""
+            using System.Collections.Generic;
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Player
+            {
+                [NbtExtensionData]
+                public IDictionary<string, NbtValue>? Extra { get; set; }
+            }
+            """);
+
+        AssertExtensionDataError(result, "Extra", "the member type must be");
+    }
+
+    [Fact]
+    public void ReportsExtensionDataCombinedWithPropertyName()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Player
+            {
+                [NbtExtensionData]
+                [NbtPropertyName("extra")]
+                public NbtCompound? Extra { get; set; }
+            }
+            """);
+
+        AssertExtensionDataError(result, "Extra", "cannot be combined with");
+    }
+
+    [Fact]
+    public void ReportsExtensionDataCombinedWithUseConverter()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Player
+            {
+                [NbtExtensionData]
+                [NbtUseConverter]
+                public NbtCompound? Extra { get; set; }
+            }
+            """);
+
+        AssertExtensionDataError(result, "Extra", "cannot be combined with");
+    }
+
+    [Fact]
+    public void ReportsExtensionDataWithoutSetter()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Player
+            {
+                [NbtExtensionData]
+                public NbtCompound Extra { get; } = new();
+            }
+            """);
+
+        AssertExtensionDataError(result, "Extra", "must have a setter");
+    }
+
+    [Fact]
+    public void ReportsRequiredExtensionData()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Player
+            {
+                [NbtExtensionData]
+                public required NbtCompound? Extra { get; set; }
+            }
+            """);
+
+        AssertExtensionDataError(result, "Extra", "required members are not supported");
+    }
+
+    [Fact]
+    public void ReportsExtensionDataFieldWithoutInclude()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Player
+            {
+                [NbtExtensionData]
+                public NbtCompound? Extra;
+            }
+            """);
+
+        AssertExtensionDataError(result, "Extra", "fields require [NbtInclude]");
+    }
+
+    [Fact]
+    public void ReportsTheSecondExtensionMember()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Player
+            {
+                [NbtExtensionData]
+                public NbtCompound? First { get; set; }
+
+                [NbtExtensionData]
+                public NbtCompound? Second { get; set; }
+            }
+            """);
+
+        var diagnostic = Assert.Single(
+            result.GeneratorDiagnostics,
+            static candidate => candidate.Id == "NBTSG010");
+        Assert.Contains("Second", diagnostic.GetMessage(), StringComparison.Ordinal);
+        // The second member is declared on line 13 (zero-based) of the source.
+        Assert.Equal(13, diagnostic.Location.GetLineSpan().StartLinePosition.Line);
+    }
+
+    [Fact]
+    public void ValidExtensionDataEmitsDomCaptureCode()
+    {
+        var result = Run("""
+            using System.Collections.Generic;
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Player
+            {
+                public string Name { get; set; } = "";
+
+                [NbtExtensionData]
+                public Dictionary<string, NbtValue>? Extra { get; set; }
+            }
+            """);
+
+        AssertNoErrors(result);
+        Assert.DoesNotContain(
+            result.GeneratorDiagnostics,
+            static diagnostic => diagnostic.Id == "NBTSG010");
+        Assert.Contains(
+            "global::NbtSharp.NbtMetadataServices.ReadDomValue(",
+            result.GeneratedSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "global::NbtSharp.NbtMetadataServices.WriteDomMember(",
+            result.GeneratedSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "global::NbtSharp.NbtMetadataServices.ExtensionMemberConflict(",
+            result.GeneratedSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "new global::System.Collections.Generic.Dictionary<string, global::NbtSharp.NbtValue>()",
+            result.GeneratedSource,
+            StringComparison.Ordinal);
+    }
+
+    private static void AssertExtensionDataError(GeneratorRunResult result, string memberName, string reason)
+    {
+        var diagnostic = Assert.Single(
+            result.GeneratorDiagnostics,
+            static candidate => candidate.Id == "NBTSG010");
+        Assert.Contains(memberName, diagnostic.GetMessage(), StringComparison.Ordinal);
+        Assert.Contains(reason, diagnostic.GetMessage(), StringComparison.Ordinal);
+        // The symbol-free pipeline rebuilds locations from path and span, and the test trees are
+        // parsed without a path, so neither SourceTree nor the file path is populated; the member
+        // span is (Location.None has an empty span).
+        Assert.NotEqual(Location.None, diagnostic.Location);
+        Assert.True(diagnostic.Location.SourceSpan.Length > 0);
+    }
+
+    [Fact]
     public void StringEnumUsesTheRuntimeConverterFactory()
     {
         var result = Run("""

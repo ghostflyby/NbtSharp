@@ -388,3 +388,8 @@ NbtSharp.NbtStringEnumConverter<TEnum>.NbtStringEnumConverter() -> void
 override NbtSharp.NbtStringEnumConverter<TEnum>.Read(ref NbtSharp.NbtReader reader, NbtSharp.NbtSerializerOptions! options) -> TEnum
 override NbtSharp.NbtStringEnumConverter<TEnum>.TryGetTagType(TEnum value, NbtSharp.NbtSerializerOptions! options, out NbtSharp.NbtTagType tagType) -> bool
 override NbtSharp.NbtStringEnumConverter<TEnum>.Write(ref NbtSharp.NbtWriter writer, TEnum value, NbtSharp.NbtSerializerOptions! options) -> void
+NbtSharp.NbtExtensionDataAttribute
+NbtSharp.NbtExtensionDataAttribute.NbtExtensionDataAttribute() -> void
+static NbtSharp.NbtMetadataServices.ExtensionMemberConflict(NbtSharp.NbtWriter writer, string! name) -> NbtSharp.NbtException!
+static NbtSharp.NbtMetadataServices.ReadDomValue(ref NbtSharp.NbtReader reader, NbtSharp.NbtSerializerOptions! options, string? pathSegment) -> NbtSharp.NbtValue
+static NbtSharp.NbtMetadataServices.WriteDomMember(ref NbtSharp.NbtWriter writer, string! name, NbtSharp.NbtValue value, NbtSharp.NbtSerializerOptions! options) -> void

@@ -14,6 +14,7 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
 {
     private readonly Type _type;
     private readonly NbtReflectionMember[] _members;
+    private readonly NbtReflectionMember? _extensionMember;
     private readonly Dictionary<string, int> _indexByName;
     private readonly ConstructorInfo? _constructor;
     private readonly int[] _constructorMemberIndexes;
@@ -32,7 +33,7 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
                 "Rename the derived member or exclude one of the members with [NbtIgnore].");
         }
 
-        _members = DiscoverMembers(type, namingPolicy);
+        _members = DiscoverMembers(type, namingPolicy, out _extensionMember);
         _indexByName = new Dictionary<string, int>(StringComparer.Ordinal);
         for (var i = 0; i < _members.Length; i++)
         {
@@ -84,6 +85,7 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
 
         var values = new object?[_members.Length];
         var present = new bool[_members.Length];
+        Dictionary<string, NbtValue>? extension = null;
         while (reader.Read())
         {
             if (reader.TokenType == NbtTokenType.EndCompound)
@@ -102,7 +104,13 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
                     }
                 }
 
-                return CreateInstance(values, present);
+                var instance = CreateInstance(values, present);
+                if (extension is not null)
+                {
+                    _extensionMember!.SetValue(instance, extension);
+                }
+
+                return instance;
             }
 
             var name = reader.Name;
@@ -116,7 +124,21 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
 
             if (!_indexByName.TryGetValue(name, out var index))
             {
-                reader.Skip();
+                if (_extensionMember is null)
+                {
+                    reader.Skip();
+                    continue;
+                }
+
+                if (extension is not null &&
+                    extension.ContainsKey(name) &&
+                    options.RejectDuplicateCompoundNames)
+                {
+                    throw NbtMetadataServices.DuplicateMember(reader, name);
+                }
+
+                extension ??= (Dictionary<string, NbtValue>)Activator.CreateInstance(_extensionMember.Type)!;
+                extension[name] = NbtMetadataServices.ReadDomValue(ref reader, options, "." + name);
                 continue;
             }
 
@@ -210,6 +232,23 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
                     memberValue,
                     member.Type,
                     options);
+            }
+        }
+
+        if (_extensionMember is not null)
+        {
+            var extension = (Dictionary<string, NbtValue>?)_extensionMember.GetValue(value);
+            if (extension is not null)
+            {
+                foreach (var pair in extension)
+                {
+                    if (_indexByName.ContainsKey(pair.Key))
+                    {
+                        throw NbtMetadataServices.ExtensionMemberConflict(writer, pair.Key);
+                    }
+
+                    NbtMetadataServices.WriteDomMember(ref writer, pair.Key, pair.Value, options);
+                }
             }
         }
 
@@ -443,9 +482,11 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
 
     private static NbtReflectionMember[] DiscoverMembers(
         Type type,
-        NbtNamingPolicy? namingPolicy)
+        NbtNamingPolicy? namingPolicy,
+        out NbtReflectionMember? extensionMember)
     {
         var members = new List<(int Token, NbtReflectionMember Member)>();
+        extensionMember = null;
 
         foreach (var property in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
         {
@@ -457,6 +498,12 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
 
             if (property.GetCustomAttribute<NbtIgnoreAttribute>(inherit: true) is not null)
             {
+                continue;
+            }
+
+            if (property.GetCustomAttribute<NbtExtensionDataAttribute>(inherit: true) is not null)
+            {
+                extensionMember = ClaimExtensionMember(extensionMember, property);
                 continue;
             }
 
@@ -481,6 +528,19 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
 
             if (field.GetCustomAttribute<NbtIgnoreAttribute>(inherit: true) is not null)
             {
+                continue;
+            }
+
+            if (field.GetCustomAttribute<NbtExtensionDataAttribute>(inherit: true) is not null)
+            {
+                if (field.GetCustomAttribute<NbtIncludeAttribute>(inherit: true) is null)
+                {
+                    throw new NotSupportedException(
+                        $"The [NbtExtensionData] declaration on member '{field.Name}' is invalid: " +
+                        "fields require [NbtInclude] in addition to [NbtExtensionData].");
+                }
+
+                extensionMember = ClaimExtensionMember(extensionMember, field);
                 continue;
             }
 
@@ -509,6 +569,89 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
         }
 
         return members.OrderBy(static member => member.Token).Select(static member => member.Member).ToArray();
+    }
+
+    private static NbtReflectionMember ClaimExtensionMember(
+        NbtReflectionMember? existing,
+        PropertyInfo property)
+    {
+        ValidateExtensionMember(
+            existing,
+            property.Name,
+            property.PropertyType,
+            canWrite: property.CanWrite,
+            isRequired: property.IsDefined(
+                typeof(System.Runtime.CompilerServices.RequiredMemberAttribute),
+                inherit: false),
+            hasPropertyName: property.GetCustomAttribute<NbtPropertyNameAttribute>(inherit: true) is not null,
+            hasUseConverter: property.GetCustomAttribute<NbtUseConverterAttribute>(inherit: true) is not null);
+        return new NbtReflectionMember(property.Name, property);
+    }
+
+    private static NbtReflectionMember ClaimExtensionMember(
+        NbtReflectionMember? existing,
+        FieldInfo field)
+    {
+        ValidateExtensionMember(
+            existing,
+            field.Name,
+            field.FieldType,
+            canWrite: !field.IsInitOnly && !field.IsLiteral,
+            isRequired: field.IsDefined(
+                typeof(System.Runtime.CompilerServices.RequiredMemberAttribute),
+                inherit: false),
+            hasPropertyName: field.GetCustomAttribute<NbtPropertyNameAttribute>(inherit: true) is not null,
+            hasUseConverter: field.GetCustomAttribute<NbtUseConverterAttribute>(inherit: true) is not null);
+        return new NbtReflectionMember(field.Name, field);
+    }
+
+    private static void ValidateExtensionMember(
+        NbtReflectionMember? existing,
+        string memberName,
+        Type memberType,
+        bool canWrite,
+        bool isRequired,
+        bool hasPropertyName,
+        bool hasUseConverter)
+    {
+        if (existing is not null)
+        {
+            throw new NotSupportedException(
+                $"The [NbtExtensionData] declaration on member '{memberName}' is invalid: " +
+                "the type maps more than one extension member.");
+        }
+
+        if (memberType != typeof(NbtCompound) &&
+            !(memberType.IsGenericType &&
+              memberType.GetGenericTypeDefinition() == typeof(Dictionary<,>) &&
+              memberType.GetGenericArguments()[0] == typeof(string) &&
+              memberType.GetGenericArguments()[1] == typeof(NbtValue)))
+        {
+            throw new NotSupportedException(
+                $"The [NbtExtensionData] declaration on member '{memberName}' is invalid: " +
+                "the member type must be NbtSharp.NbtCompound or Dictionary<string, NbtSharp.NbtValue>.");
+        }
+
+        if (hasPropertyName || hasUseConverter)
+        {
+            throw new NotSupportedException(
+                $"The [NbtExtensionData] declaration on member '{memberName}' is invalid: " +
+                "it cannot be combined with [NbtPropertyName] or [NbtUseConverter].");
+        }
+
+        if (!canWrite)
+        {
+            throw new NotSupportedException(
+                $"The [NbtExtensionData] declaration on member '{memberName}' is invalid: " +
+                "the member must have a setter.");
+        }
+
+        if (isRequired)
+        {
+            throw new NotSupportedException(
+                $"The [NbtExtensionData] declaration on member '{memberName}' is invalid: " +
+                "required members are not supported.");
+        }
     }
 
     private static NbtConverter? ResolveMemberConverter(

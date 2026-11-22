@@ -226,7 +226,8 @@ internal sealed class ObjectSpec
         ImmutableArray<MemberSpec> members,
         ConstructorSpec? constructor,
         bool useConstructorAccessor,
-        bool requiresRuntimeResolution)
+        bool requiresRuntimeResolution,
+        MemberSpec? extensionMember = null)
     {
         TypeName = typeName;
         Name = name;
@@ -239,6 +240,7 @@ internal sealed class ObjectSpec
         Constructor = constructor;
         UseConstructorAccessor = useConstructorAccessor;
         RequiresRuntimeResolution = requiresRuntimeResolution;
+        ExtensionMember = extensionMember;
     }
 
     public string TypeName { get; }
@@ -262,6 +264,12 @@ internal sealed class ObjectSpec
     public bool UseConstructorAccessor { get; }
 
     public bool RequiresRuntimeResolution { get; }
+
+    /// <summary>
+    /// The [NbtExtensionData] member shape, or <see langword="null"/> when the type declares none.
+    /// Excluded from <see cref="Members"/>; its Index is Members.Length.
+    /// </summary>
+    public MemberSpec? ExtensionMember { get; }
 }
 
 /// <summary>
@@ -577,7 +585,7 @@ internal static class ContextSpecFingerprint
     public static string Compute(ContextSpec spec)
     {
         var hash = StableHash.Create();
-        hash.Add("context-spec-v4");
+        hash.Add("context-spec-v5");
         hash.Add(spec.HintName);
         hash.Add(spec.ContainingNamespace);
         hash.Add(spec.ContextName);
@@ -726,30 +734,45 @@ internal static class ContextSpecFingerprint
         hash.Add(model.Members.Length);
         foreach (var member in model.Members)
         {
-            hash.Add(member.Index);
-            hash.Add(member.ClrName);
-            hash.Add(member.EscapedClrName);
-            hash.Add(member.NbtName);
-            hash.Add(member.TypeName);
-            hash.Add(member.IsField);
-            hash.Add(member.CanWrite);
-            hash.Add(member.IsInitOnly);
-            hash.Add(member.NeedsSetterAccessor);
-            hash.Add(member.CanBeNull);
-            hash.Add((int)member.ScalarKind);
-            hash.Add(member.ConstructorParameterIndex);
-            hash.Add(member.IsRequired);
-            hash.Add(member.SetterIsGeneric);
-            hash.Add(member.SetterReceiverTypeName);
-            hash.Add(member.SetterReceiverIsValueType);
-            hash.Add(member.SetterReceiverTypeParameterList);
-            AddStrings(ref hash, member.SetterReceiverConstraintLines);
-            hash.Add(member.SetterTypeArguments);
-            hash.Add(member.SetterValueTypeName);
-            hash.Add((int)member.ConverterMode);
-            hash.Add(member.ExplicitConverterTypeName);
-            hash.Add(member.ExplicitConverterIsFactory);
+            AddMember(ref hash, member);
         }
+
+        if (model.ExtensionMember is { } extension)
+        {
+            hash.Add("extension");
+            AddMember(ref hash, extension);
+        }
+        else
+        {
+            hash.Add(-1);
+        }
+    }
+
+    private static void AddMember(ref StableHash hash, MemberSpec member)
+    {
+        hash.Add(member.Index);
+        hash.Add(member.ClrName);
+        hash.Add(member.EscapedClrName);
+        hash.Add(member.NbtName);
+        hash.Add(member.TypeName);
+        hash.Add(member.IsField);
+        hash.Add(member.CanWrite);
+        hash.Add(member.IsInitOnly);
+        hash.Add(member.NeedsSetterAccessor);
+        hash.Add(member.CanBeNull);
+        hash.Add((int)member.ScalarKind);
+        hash.Add(member.ConstructorParameterIndex);
+        hash.Add(member.IsRequired);
+        hash.Add(member.SetterIsGeneric);
+        hash.Add(member.SetterReceiverTypeName);
+        hash.Add(member.SetterReceiverIsValueType);
+        hash.Add(member.SetterReceiverTypeParameterList);
+        AddStrings(ref hash, member.SetterReceiverConstraintLines);
+        hash.Add(member.SetterTypeArguments);
+        hash.Add(member.SetterValueTypeName);
+        hash.Add((int)member.ConverterMode);
+        hash.Add(member.ExplicitConverterTypeName);
+        hash.Add(member.ExplicitConverterIsFactory);
     }
 
     private static void AddStrings(ref StableHash hash, ImmutableArray<string> values)
