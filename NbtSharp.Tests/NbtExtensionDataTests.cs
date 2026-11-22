@@ -651,7 +651,7 @@ public sealed class NbtExtensionDataTests
     private sealed class FieldWithoutIncludeDto
     {
         [NbtExtensionData]
-        public NbtCompound? Extra = null!;
+        public NbtCompound? Extra;
     }
 
     internal sealed class DomMemberDto
