@@ -270,6 +270,13 @@ A fully resumable converter protocol is a large redesign; a pragmatic middle gro
 only when the buffer has grown meaningfully or the read has completed, instead of on every
 `ReadAsync` chunk.
 
+**Status (2026-11-22): partially mitigated on feat/stj-gap-p1.** Truncation sites now report how
+many bytes they still need (`NbtException.TruncatedAdditionalBytes`, a lower bound), and the retry
+loop reparses only once the writer completes, the reported deficit has arrived, or a 4–64 KiB
+clamped fallback growth has accumulated. Each retry advances past the previous starvation point and
+open-pipe documents complete as soon as their deficit arrives, but a fully resumable state machine
+remains open.
+
 **PERF-4 — caches never freeze.** Priority: P2.
 
 The options converter cache is an `ImmutableDictionary` under a lock (NbtSerializerOptions.cs:17)

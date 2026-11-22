@@ -77,6 +77,15 @@ observed before producing bytes; cancellation during stream serialization is che
 flush. `PipeReader` and `ReadOnlySequence<byte>` overloads leave bytes after the root available to the
 caller; stream overloads may read ahead.
 
+A truncated asynchronous parse is not retried on every arriving chunk. The document is reparsed once
+the writer completes, or once the buffered data has grown by at least the number of bytes the
+truncation point reported it still needs, or — when that number is unknown — by a clamped fallback
+between 4 KiB and 64 KiB. Each retry therefore advances past the point where the previous parse
+starved, but the worst case is still quadratic in principle: a producer that feeds exactly one
+deficit at a time forces a reparse per step, and an open, silent writer can hold a completed
+document back by up to the clamped growth. Converters may still run more than once for the same
+document; the throttle only lowers how often.
+
 ## Source generator
 
 - Each attributed context is prepared independently, converted to a symbol-free spec, and emitted

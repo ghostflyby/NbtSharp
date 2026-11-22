@@ -783,4 +783,219 @@ public sealed class NbtStreamAdapterTests
         Assert.Equal(42, NbtSerializer.Deserialize<int>(data, out var rootName, options));
         Assert.Null(rootName);
     }
+
+    private sealed class CountingConverter(NbtSerializerOptions options) : NbtConverter<string>
+    {
+        public int ReadCount;
+
+        public override string Read(ref NbtReader reader, NbtSerializerOptions _) =>
+            ReadCount++ is var count && reader.TagType == NbtTagType.String
+                ? reader.GetString()
+                : throw new NbtException($"Unexpected tag {reader.TagType} (attempt {count}).");
+
+        public override void Write(ref NbtWriter writer, string value, NbtSerializerOptions _) =>
+            writer.WriteString(value);
+
+        public override bool TryGetTagType(string value, NbtSerializerOptions _, out NbtTagType tagType)
+        {
+            tagType = NbtTagType.String;
+            return true;
+        }
+
+        public NbtSerializerOptions Options { get; } = options;
+    }
+
+    private static NbtSerializerOptions OptionsWithCounter(CountingConverter converter)
+    {
+        var options = new NbtSerializerOptions();
+        options.Converters.Add(converter);
+        return options;
+    }
+
+    private static async Task PushInChunksAsync(
+        PipeWriter writer,
+        ReadOnlyMemory<byte> data,
+        int chunkSize,
+        bool complete,
+        int skipFirstBytes = 0)
+    {
+        // The first push covers at least the full root header (tag type + name + payload length
+        // prefix) so the first parse attempt reaches the root converter and is counted.
+        var firstPush = Math.Max(skipFirstBytes, 9);
+        await writer.WriteAsync(data[..Math.Min(firstPush, data.Length)], TestContext.Current.CancellationToken);
+        for (var offset = firstPush; offset < data.Length; offset += chunkSize)
+        {
+            await writer.WriteAsync(
+                data[offset..Math.Min(offset + chunkSize, data.Length)],
+                TestContext.Current.CancellationToken);
+        }
+
+        if (complete)
+        {
+            await writer.FlushAsync(TestContext.Current.CancellationToken);
+            await writer.CompleteAsync();
+        }
+    }
+
+    [Fact]
+    public async Task DeserializeAsyncParsesASingleBlockDocumentOnce()
+    {
+        var data = NbtSerializer.Serialize("hello", "root");
+        var pipe = new Pipe();
+        var converter = new CountingConverter(new NbtSerializerOptions());
+        var producer = PushInChunksAsync(pipe.Writer, data, chunkSize: data.Length, complete: true);
+
+        var actual = await NbtSerializer.DeserializeAsync<string>(
+            pipe.Reader,
+            OptionsWithCounter(converter),
+            TestContext.Current.CancellationToken);
+        await producer;
+
+        Assert.Equal("hello", actual);
+        Assert.Equal(1, converter.ReadCount);
+        await pipe.Reader.CompleteAsync();
+    }
+
+    [Fact]
+    public async Task DeserializeAsyncReparsesAnOpenPipeOnlyAfterTheDeficitArrives()
+    {
+        var text = new string('x', 4000);
+        var data = NbtSerializer.Serialize(text, "root");
+        var firstLength = data.Length * 3 / 5;
+        var pipe = new Pipe();
+        var converter = new CountingConverter(new NbtSerializerOptions());
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        cts.CancelAfter(TimeSpan.FromSeconds(5));
+
+        await pipe.Writer.WriteAsync(data.AsMemory(0, firstLength), cts.Token);
+        var task = NbtSerializer.DeserializeAsync<string>(
+            pipe.Reader,
+            OptionsWithCounter(converter),
+            cts.Token);
+        await pipe.Writer.WriteAsync(data.AsMemory(firstLength), cts.Token);
+
+        Assert.Equal(text, await task);
+        // The truncation reports the exact payload deficit, so the second write satisfies the
+        // growth requirement and the document completes without the writer finishing the pipe.
+        Assert.True(converter.ReadCount <= 2, $"ReadCount was {converter.ReadCount}.");
+        await pipe.Reader.CompleteAsync();
+        await pipe.Writer.CompleteAsync();
+    }
+
+    [Fact]
+    public async Task DeserializeAsyncBoundsReparseAttemptsForTrickledPayloads()
+    {
+        var text = new string('y', 32 * 1024);
+        var data = NbtSerializer.Serialize(text, "root");
+        var pipe = new Pipe();
+        var converter = new CountingConverter(new NbtSerializerOptions());
+
+        var producer = PushInChunksAsync(pipe.Writer, data, chunkSize: 1, complete: true);
+        var actual = await NbtSerializer.DeserializeAsync<string>(
+            pipe.Reader,
+            OptionsWithCounter(converter),
+            TestContext.Current.CancellationToken);
+        await producer;
+
+        Assert.Equal(text, actual);
+        Assert.True(converter.ReadCount <= 4, $"ReadCount was {converter.ReadCount}.");
+        await pipe.Reader.CompleteAsync();
+    }
+
+    [Fact]
+    public async Task DeserializeAsyncBoundsReparseAttemptsForDeepDocumentsWithLargeChunks()
+    {
+        var compound = new NbtCompound();
+        var current = compound;
+        for (var depth = 0; depth < 250; depth++)
+        {
+            var nested = new NbtCompound();
+            current[$"N{depth}"] = nested;
+            current["V"] = depth;
+            current = nested;
+        }
+
+        current["Leaf"] = "end";
+        var data = NbtSerializer.Serialize(new NbtRoot("root", compound));
+        var pipe = new Pipe();
+        var options = new NbtSerializerOptions
+        {
+            TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
+        };
+        var expected = NbtSerializer.Deserialize<NbtRoot>(data, options);
+
+        var producer = PushInChunksAsync(pipe.Writer, data, chunkSize: 16 * 1024, complete: true);
+        var actual = await NbtSerializer.DeserializeAsync<NbtRoot>(
+            pipe.Reader,
+            options,
+            TestContext.Current.CancellationToken);
+        await producer;
+
+        Assert.Equal(expected.Name, actual.Name);
+        Assert.Equal(((NbtCompound)expected.Value.Value!).Count, ((NbtCompound)actual.Value.Value!).Count);
+        await pipe.Reader.CompleteAsync();
+    }
+
+    [Fact]
+    public async Task DeserializeAsyncSucceedsWithoutCompletionWhenTheLastChunkMatchesTheDeficit()
+    {
+        var text = new string('z', 1000);
+        var data = NbtSerializer.Serialize(text, "root");
+        // Truncate just before the payload's last byte: the deficit is exactly one byte, so the
+        // final single-byte push satisfies the growth requirement while the writer stays open.
+        var firstLength = data.Length - 1;
+        var pipe = new Pipe();
+        var converter = new CountingConverter(new NbtSerializerOptions());
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        cts.CancelAfter(TimeSpan.FromSeconds(5));
+
+        await pipe.Writer.WriteAsync(data.AsMemory(0, firstLength), cts.Token);
+        var task = NbtSerializer.DeserializeAsync<string>(
+            pipe.Reader,
+            OptionsWithCounter(converter),
+            cts.Token);
+        await pipe.Writer.WriteAsync(data.AsMemory(firstLength, 1), cts.Token);
+
+        Assert.Equal(text, await task);
+        await pipe.Reader.CompleteAsync();
+        await pipe.Writer.CompleteAsync();
+    }
+
+    [Fact]
+    public async Task DeserializeAsyncRejectsAnOverLimitDocumentWhileWaitingForMoreData()
+    {
+        var text = new string('w', 200);
+        var data = NbtSerializer.Serialize(text, "root");
+        var pipe = new Pipe();
+        var strict = new NbtSerializerOptions { MaxDocumentBytes = 40 };
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        cts.CancelAfter(TimeSpan.FromSeconds(5));
+
+        await pipe.Writer.WriteAsync(data, cts.Token);
+        await Assert.ThrowsAsync<NbtException>(() =>
+            NbtSerializer.DeserializeAsync<string>(pipe.Reader, strict, cts.Token));
+
+        // The pipe stays usable after the failure.
+        var relaxed = new NbtSerializerOptions { MaxDocumentBytes = data.Length + 16 };
+        await pipe.Writer.FlushAsync(cts.Token);
+        await pipe.Writer.CompleteAsync();
+        Assert.Equal(text, await NbtSerializer.DeserializeAsync<string>(pipe.Reader, relaxed, cts.Token));
+        await pipe.Reader.CompleteAsync();
+    }
+
+    [Fact]
+    public async Task DeserializeAsyncThrowsWhenTheWriterCompletesOnTruncatedData()
+    {
+        var text = new string('v', 500);
+        var data = NbtSerializer.Serialize(text, "root");
+        var pipe = new Pipe();
+        await pipe.Writer.WriteAsync(data.AsMemory(0, 64), TestContext.Current.CancellationToken);
+        await pipe.Writer.CompleteAsync();
+
+        await Assert.ThrowsAsync<NbtException>(() =>
+            NbtSerializer.DeserializeAsync<string>(
+                pipe.Reader,
+                cancellationToken: TestContext.Current.CancellationToken));
+        await pipe.Reader.CompleteAsync();
+    }
 }

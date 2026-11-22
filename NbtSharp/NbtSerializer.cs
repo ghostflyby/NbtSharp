@@ -31,6 +31,18 @@ namespace NbtSharp;
 /// </remarks>
 public static class NbtSerializer
 {
+    /// <summary>
+    /// The minimum buffered-growth a truncated asynchronous read waits for before reparsing when
+    /// the truncation point does not report how many bytes it still needs.
+    /// </summary>
+    internal const long AsyncRetryMinGrowthBytes = 4096;
+
+    /// <summary>
+    /// The maximum buffered-growth a truncated asynchronous read waits for before reparsing when
+    /// the truncation point does not report how many bytes it still needs.
+    /// </summary>
+    internal const long AsyncRetryMaxGrowthBytes = 64 * 1024;
+
     /// <summary>Serializes <paramref name="value"/> into a new byte array.</summary>
     /// <typeparam name="T">The declared value type.</typeparam>
     /// <param name="value">The value to serialize.</param>
@@ -491,8 +503,10 @@ public static class NbtSerializer
     /// consumed, and bytes after the root remain available to the next call.
     /// </para>
     /// <para>
-    /// A truncated parse can invoke converters again for the same bytes, so converters should not
-    /// depend on being called exactly once.
+    /// After a truncated parse, the document is reparsed only once the writer has completed, the
+    /// buffered data has grown by at least the number of bytes the truncation point still needs
+    /// (or a bounded fallback of up to 64 KiB), so converters can still be invoked again for the
+    /// same bytes — just far less often — and must not depend on being called exactly once.
     /// </para>
     /// </remarks>
     [RequiresUnreferencedCode("Converter resolution may use reflection or runtime generic construction.")]
@@ -523,6 +537,18 @@ public static class NbtSerializer
     /// <param name="typeInfo">The type information that supplies the root converter and options.</param>
     /// <param name="cancellationToken">The token used to cancel the read.</param>
     /// <returns>A task that yields the decoded value.</returns>
+    /// <remarks>
+    /// <para>
+    /// The caller owns <paramref name="reader"/>; this method does not complete it. One document is
+    /// consumed, and bytes after the root remain available to the next call.
+    /// </para>
+    /// <para>
+    /// After a truncated parse, the document is reparsed only once the writer has completed, the
+    /// buffered data has grown by at least the number of bytes the truncation point still needs
+    /// (or a bounded fallback of up to 64 KiB), so converters can still be invoked again for the
+    /// same bytes — just far less often — and must not depend on being called exactly once.
+    /// </para>
+    /// </remarks>
     public static async Task<T> DeserializeAsync<T>(
         PipeReader reader,
         NbtTypeInfo<T> typeInfo,
@@ -545,6 +571,8 @@ public static class NbtSerializer
         CancellationToken cancellationToken)
     {
         var readerOptions = options.CreateReaderOptions();
+        long lastFailedLength = -1;
+        var lastRequiredGrowth = 0L;
 
         while (true)
         {
@@ -553,6 +581,25 @@ public static class NbtSerializer
             {
                 reader.AdvanceTo(result.Buffer.Start, result.Buffer.End);
                 throw new OperationCanceledException("The pipe read was canceled.");
+            }
+
+            if (lastFailedLength >= 0 && !result.IsCompleted)
+            {
+                // After a truncated parse, reparse only once the buffer has grown past the deficit
+                // reported by the truncation (or a clamped fallback). Marking the whole buffer as
+                // examined keeps ReadAsync asleep until genuinely new data arrives.
+                if (options.MaxDocumentBytes > 0 && result.Buffer.Length >= options.MaxDocumentBytes)
+                {
+                    reader.AdvanceTo(result.Buffer.Start, result.Buffer.End);
+                    throw new NbtException(
+                        $"The NBT document exceeds the configured limit of {options.MaxDocumentBytes} bytes.");
+                }
+
+                if (result.Buffer.Length - lastFailedLength < lastRequiredGrowth)
+                {
+                    reader.AdvanceTo(result.Buffer.Start, result.Buffer.End);
+                    continue;
+                }
             }
 
             try
@@ -578,6 +625,17 @@ public static class NbtSerializer
                     {
                         throw new NbtException(
                             $"The NBT document exceeds the configured limit of {options.MaxDocumentBytes} bytes.");
+                    }
+
+                    // An empty buffer is the "no root tag" case; retry as soon as any byte arrives.
+                    if (result.Buffer.Length > 0)
+                    {
+                        lastFailedLength = result.Buffer.Length;
+                        lastRequiredGrowth = ex.TruncatedAdditionalBytes ??
+                            Math.Clamp(
+                                result.Buffer.Length,
+                                AsyncRetryMinGrowthBytes,
+                                AsyncRetryMaxGrowthBytes);
                     }
 
                     reader.AdvanceTo(result.Buffer.Start, result.Buffer.End);

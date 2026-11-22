@@ -677,6 +677,7 @@ public ref struct NbtReader
                 $"The NBT list declares {count} elements but the remaining data is too short.")
             {
                 IsTruncated = true,
+                TruncatedAdditionalBytes = required - remaining,
                 BytePosition = position,
             };
         }
@@ -733,6 +734,7 @@ public ref struct NbtReader
             throw new NbtException("Unexpected end of NBT data.")
             {
                 IsTruncated = true,
+                TruncatedAdditionalBytes = 1,
                 BytePosition = position,
             };
         }
@@ -853,6 +855,7 @@ public ref struct NbtReader
             throw new NbtException("Unexpected end of NBT data.")
             {
                 IsTruncated = true,
+                TruncatedAdditionalBytes = 1,
                 BytePosition = position,
             };
         }
@@ -1100,6 +1103,7 @@ public ref struct NbtReader
                 throw new NbtException("Unexpected end of NBT data.")
                 {
                     IsTruncated = true,
+                    TruncatedAdditionalBytes = destination.Length - offset,
                     BytePosition = BytesConsumed,
                 };
             }
@@ -1135,6 +1139,7 @@ public ref struct NbtReader
                 throw new NbtException("Unexpected end of NBT data.")
                 {
                     IsTruncated = true,
+                    TruncatedAdditionalBytes = count,
                     BytePosition = BytesConsumed,
                 };
             }
@@ -1234,6 +1239,7 @@ public ref struct NbtReader
                 $"The NBT payload declares {byteCount} bytes but only {remaining} are available.")
             {
                 IsTruncated = true,
+                TruncatedAdditionalBytes = byteCount - remaining,
                 BytePosition = BytesConsumed,
             };
         }
