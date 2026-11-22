@@ -21,7 +21,7 @@ namespace NbtSharp;
 /// </remarks>
 public sealed class NbtSerializerOptions
 {
-    private static readonly NbtSerializerOptions s_default = new(isSharedDefault: true);
+    private static readonly NbtSerializerOptions DefaultInstance = new(isSharedDefault: true);
 
     private readonly bool _isSharedDefault;
     private volatile bool _isFrozen;
@@ -62,7 +62,7 @@ public sealed class NbtSerializerOptions
     /// that context, and it is never frozen.
     /// </para>
     /// </remarks>
-    public static NbtSerializerOptions Default => s_default;
+    public static NbtSerializerOptions Default => DefaultInstance;
 
     /// <summary>
     /// Gets the custom converters, checked in order before the built-in converters. Mutating the
