@@ -327,6 +327,49 @@ non-canonically encoded wire names still match their canonical equivalents. The 
 overloads do not validate the name content as modified UTF-8; they can emit names the reader will
 reject, and validity is the caller's responsibility.
 
+## Read-only DOM (NbtDocument)
+
+`NbtDocument` is for random access over a document you want to probe repeatedly without a
+forward-only token loop or a fully materialized `NbtValue` tree. `Parse` indexes the whole
+document in one pass — structure is fully validated at parse time — and every
+`NbtElement` getter afterwards reads the indexed bytes without re-parsing. `Dispose` returns the
+pooled buffers, so the recommended shape is `using`:
+
+```csharp
+using var document = NbtDocument.Parse(data);
+
+int health = document.RootElement.GetMember("Health").GetInt32();
+foreach (var element in document.RootElement.GetMember("Numbers").EnumerateElements())
+{
+    Console.WriteLine(element.GetInt32());
+}
+```
+
+Input handling mirrors `System.Text.Json.JsonDocument`. `Parse(ReadOnlyMemory<byte>)` reads
+directly from the supplied memory with no copy — the caller must keep the underlying buffer alive
+and unmodified until `Dispose` (returning it to an array pool early is undefined behavior), and
+`byte[]` arguments share the array the same way through implicit conversion. Sequence and stream
+inputs are copied into pooled buffers first; the copy is clamped to
+`NbtReaderOptions.MaxDocumentBytes`, and trailing bytes after the root value never count towards
+the limit. There is no `ReadOnlySpan<byte>` overload by design: span callers wrap the span in a
+memory themselves, which keeps the zero-copy contract explicit.
+
+Each indexed value costs a 28-byte slot, so indexing multiplies the document size by up to about
+6x in the worst case (one-byte list elements); `Dispose` returns both the slot array and the
+copied buffer to their pools. Documents are bounded by `int.MaxValue` bytes — longer input throws
+`NbtException` at parse time, because element offsets are 32-bit (the streaming reader has no such
+limit). A document is safe to read from multiple threads concurrently, but `Dispose` must not
+race with reads; elements of a disposed document throw `ObjectDisposedException`.
+
+Access costs are deterministic: `MemberCount`/`ElementCount`/`ElementType` are O(1); member and
+element enumeration follows wire order; `GetElementAt` is O(1) on lists of scalars, strings, and
+arrays, and O(index) on lists of compounds or nested lists; `GetMember`/`TryGetMember` walk the
+members, with duplicated names resolving to the last occurrence. Typed getters can be called
+repeatedly — unlike the reader, they do not consume anything. `Name` and `GetString` decode
+modified UTF-8 on every access (invalid payload bytes throw at that point, not at parse time);
+`NameEquals(ReadOnlySpan<byte>)` compares encoded bytes on the fast path. `ToNbtValue()`
+materializes an element into the boxed `NbtValue` DOM when you need writable data.
+
 ## Converters
 
 A converter writes exactly one complete value; it does not write the member name. Dynamic tag types

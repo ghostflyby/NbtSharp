@@ -69,6 +69,18 @@ the intended hot paths and the trade-offs that can disable them.
 - Empty collections encode as `TAG_List<TAG_End>`; a declared element type other than `TAG_End` is
   still checked for built-in converters.
 
+## Read-only DOM
+
+`NbtDocument.Parse` indexes the entire document in one pass over contiguous bytes, so its cost is
+a full structural validation plus one 28-byte slot per indexed value — up to roughly 6x the input
+size in the worst case (one-byte list elements), far less for typical documents. Slot arrays and
+copied sequence/stream buffers come from `ArrayPool` and are returned by `Dispose`; memory input is
+not copied at all. After parsing, every element access is a lookup: counts are O(1), scalar
+getters read the indexed bytes directly, and member lookup walks the compound's members. Names and
+string payloads are decoded lazily per access, never during indexing (only their length prefixes
+are validated), which is why probing a large document through `NameEquals` and `Skip`-style access
+never pays for names it does not materialize.
+
 ## Async paths
 
 `DeserializeAsync` reads asynchronously through a `PipeReader`. `SerializeAsync` writes through the

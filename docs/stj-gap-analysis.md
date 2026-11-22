@@ -189,6 +189,13 @@ compound end tag is the exception), so a disposable, skip-based view over a
 `ReadOnlySequence<byte>` is feasible on top of the existing `Skip` machinery. Unlocks cheap probing
 of large files and decode-free re-emit in converters.
 
+**Status (2026-11-22): implemented on feat/stj-gap-p1.** `NbtDocument`/`NbtElement` provide the
+pooled read-only DOM: a single-pass indexer that validates the whole document at parse time, with
+`Parse` over memory (zero-copy), sequences, and streams, lazy modified UTF-8 name decoding,
+`NameEquals` byte fast paths, O(1) counts, and `ToNbtValue` materialization. The raw pass-through
+half is still open for converters; the `GetRawBytes` hook is in place as an internal API, ready to
+expose when converter capture lands.
+
 **G-DOM-2 — reference preservation and cycle handling.** Priority: P3.
 
 No `ReferenceHandler` equivalent; cyclic DTOs hit `MaxDepth` with a clear error. `$id`/`$ref`

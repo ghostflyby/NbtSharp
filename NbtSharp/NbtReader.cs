@@ -1,8 +1,6 @@
 using System.Buffers;
 using System.Buffers.Binary;
 using System.Runtime.InteropServices;
-using System.Text;
-using Myitian.Text;
 
 namespace NbtSharp;
 
@@ -35,8 +33,6 @@ public ref struct NbtReader
     private const int DefaultMaxDepth = 512;
     private const int DefaultMaxCollectionLength = 16 * 1024 * 1024;
     private const int DefaultStreamBufferSize = 64 * 1024;
-
-    private static readonly ModifiedUTF8Encoding StringEncoding = new(throwOnInvalidBytes: true);
 
     private ReadOnlySpan<byte> _span;
     private readonly NbtRootFormat _rootFormat;
@@ -162,7 +158,7 @@ public ref struct NbtReader
                 return null;
             }
 
-            return _nameCached ??= DecodeString(_nameSpan, _nameBytePosition);
+            return _nameCached ??= ModifiedUtf8.Decode(_nameSpan, _nameBytePosition);
         }
     }
 
@@ -211,8 +207,8 @@ public ref struct NbtReader
         }
 
         return string.Equals(
-            DecodeString(recorded, _nameBytePosition),
-            DecodeString(name, _nameBytePosition),
+            ModifiedUtf8.Decode(recorded, _nameBytePosition),
+            ModifiedUtf8.Decode(name, _nameBytePosition),
             StringComparison.Ordinal);
     }
 
@@ -920,7 +916,7 @@ public ref struct NbtReader
         if (_span.Length >= length)
         {
             var bytes = _span[..length];
-            var value = DecodeString(bytes, position);
+            var value = ModifiedUtf8.Decode(bytes, position);
             _span = _span[length..];
             BytesConsumed += length;
             return value;
@@ -929,34 +925,7 @@ public ref struct NbtReader
 
         var buffer = new byte[length];
         ReadExactly(buffer);
-        return DecodeString(buffer, position);
-    }
-
-    private static string DecodeString(ReadOnlySpan<byte> bytes, long position)
-    {
-        foreach (var value in bytes)
-        {
-            if (value >= 0xF0)
-            {
-                throw new NbtException(
-                    "Invalid modified UTF-8 string: lead bytes of 0xF0 or greater are not allowed.")
-                {
-                    BytePosition = position,
-                };
-            }
-        }
-
-        try
-        {
-            return StringEncoding.GetString(bytes);
-        }
-        catch (DecoderFallbackException ex)
-        {
-            throw new NbtException("Invalid modified UTF-8 string.", ex)
-            {
-                BytePosition = position,
-            };
-        }
+        return ModifiedUtf8.Decode(buffer, position);
     }
 
     // Reads a compound member or root name without decoding it. The recorded bytes are addressed
@@ -985,7 +954,7 @@ public ref struct NbtReader
         if (_stream is null && _span.Length >= length)
         {
             var bytes = _span[..length];
-            _nameNonCanonical = ScanNameBytes(bytes);
+            ModifiedUtf8.Scan(bytes, _nameBytePosition, out _nameNonCanonical);
             _nameSpan = bytes;
             _span = _span[length..];
             BytesConsumed += length;
@@ -1001,53 +970,9 @@ public ref struct NbtReader
 
         var destination = _nameCopy.AsSpan(0, length);
         ReadExactly(destination);
-        _nameNonCanonical = ScanNameBytes(destination);
+        ModifiedUtf8.Scan(destination, _nameBytePosition, out _nameNonCanonical);
         _nameSpan = destination;
         _hasName = true;
-    }
-
-    // Pre-scans name bytes while they are still addressable: rejects lead bytes of 0xF0 or
-    // greater, and records whether the encoding is non-canonical (a raw 0x00 byte, an overlong
-    // two-byte form, or an overlong three-byte form), which makes NameEquals fall back to a
-    // decoded string comparison. Deeper validation is deferred to the first Name access.
-    private bool ScanNameBytes(ReadOnlySpan<byte> bytes)
-    {
-        var nonCanonical = false;
-        for (var i = 0; i < bytes.Length; i++)
-        {
-            var value = bytes[i];
-            if (value >= 0xF0)
-            {
-                throw new NbtException(
-                    "Invalid modified UTF-8 string: lead bytes of 0xF0 or greater are not allowed.")
-                {
-                    BytePosition = _nameBytePosition,
-                };
-            }
-
-            if (value >= 0x80)
-            {
-                if (value <= 0xBF)
-                {
-                    continue; // continuation byte of a multi-byte sequence
-                }
-
-                // Multi-byte lead byte.
-                if (value is 0xC0 or 0xC1 ||
-                    (value == 0xE0 &&
-                     i + 1 < bytes.Length &&
-                     bytes[i + 1] is >= 0x80 and <= 0x9F))
-                {
-                    nonCanonical = true; // overlong two- or three-byte form
-                }
-            }
-            else if (value == 0x00)
-            {
-                nonCanonical = true; // raw null instead of the two-byte form
-            }
-        }
-
-        return nonCanonical;
     }
 
     // T is a one-byte primitive (byte or sbyte), so the payload byte count equals the element count.
