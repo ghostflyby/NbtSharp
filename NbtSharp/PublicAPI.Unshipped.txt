@@ -248,6 +248,7 @@ static NbtSharp.NbtRoot.operator ==(NbtSharp.NbtRoot left, NbtSharp.NbtRoot righ
 static NbtSharp.NbtRoot.operator !=(NbtSharp.NbtRoot left, NbtSharp.NbtRoot right) -> bool
 static NbtSharp.NbtSerializer.Deserialize(System.IO.Stream! stream, NbtSharp.NbtSerializerOptions? options = null) -> NbtSharp.NbtRoot
 NbtSharp.NbtSerializerOptions
+static NbtSharp.NbtSerializerOptions.Default.get -> NbtSharp.NbtSerializerOptions!
 NbtSharp.NbtSerializerOptions.NbtSerializerOptions() -> void
 NbtSharp.NbtSerializerOptions.RootFormat.get -> NbtSharp.NbtRootFormat
 NbtSharp.NbtTagType

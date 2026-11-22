@@ -185,6 +185,11 @@ also construct a resolver per call pay full reflection member analysis every tim
 default must either reject converter registration after first use or hand out copies (STJ throws
 when a read-only options instance is mutated).
 
+**Status (2026-11-22): implemented on feat/stj-gap-p0.** Options-less overloads now share the
+cached `NbtSerializerOptions.Default` singleton. The shared instance freezes on its first use and
+rejects converter-list mutations afterwards, while instances created with the constructor stay
+mutable between operations.
+
 **G-OPT-2 — read-only enforcement.** Priority: P2.
 
 Mutating an options instance mid-operation is documented as unsupported but not enforced; STJ
@@ -228,6 +233,8 @@ modified encoder at generation time, and the runtime needs name-bytes exposure o
 hot-path win.
 
 **PERF-2 — options-less calls rebuild converter caches.** See G-OPT-1; same fix.
+
+**Status (2026-11-22): implemented** through the shared frozen `Default` singleton (see G-OPT-1).
 
 **PERF-3 — `DeserializeAsync` restarts the whole parse on truncation.** Priority: P1.
 

@@ -7,12 +7,25 @@ namespace NbtSharp;
 /// Options that control serialization, deserialization, converter resolution, and NBT limits.
 /// </summary>
 /// <remarks>
+/// <para>
 /// An instance may be reused across operations. Mutating an instance while an operation is running
 /// is not supported. A value of 0 for a limit selects the library default; for
 /// <see cref="MaxDocumentBytes"/>, 0 means that the size is not limited.
+/// </para>
+/// <para>
+/// The shared <see cref="Default"/> instance freezes on its first use by the serializer: once any
+/// options-less operation has run, mutating <see cref="Converters"/> through it throws
+/// <see cref="InvalidOperationException"/>. Instances created with the constructor never freeze;
+/// mutating them between operations stays supported and invalidates the resolution cache.
+/// </para>
 /// </remarks>
 public sealed class NbtSerializerOptions
 {
+    private static readonly NbtSerializerOptions s_default = new(isSharedDefault: true);
+
+    private readonly bool _isSharedDefault;
+    private volatile bool _isFrozen;
+    private readonly List<NbtConverter> _converterItems = [];
     private readonly NbtConverterCollection _converters;
     private volatile ImmutableDictionary<Type, NbtConverter> _cache =
         ImmutableDictionary<Type, NbtConverter>.Empty;
@@ -20,11 +33,43 @@ public sealed class NbtSerializerOptions
 
     /// <summary>Initializes the options with the default limits.</summary>
     public NbtSerializerOptions()
+        : this(isSharedDefault: false)
     {
-        _converters = new NbtConverterCollection(this);
     }
 
-    /// <summary>Gets the custom converters, checked in order before the built-in converters.</summary>
+    private NbtSerializerOptions(bool isSharedDefault)
+    {
+        _isSharedDefault = isSharedDefault;
+        _converters = new NbtConverterCollection(this, _converterItems);
+    }
+
+    /// <summary>
+    /// Gets the shared default options used by every overload that receives no explicit options.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The instance is constructed with the library defaults. Unlike
+    /// <c>System.Text.Json.JsonSerializerOptions.Default</c>, NbtSharp options are init-only except
+    /// for <see cref="Converters"/>, so the limits, policies, and resolver of this instance cannot
+    /// be reconfigured; create an <see cref="NbtSerializerOptions"/> instance for custom settings.
+    /// Converters may be registered through <see cref="Converters"/> until the first options-less
+    /// operation freezes the instance; later mutation attempts throw
+    /// <see cref="InvalidOperationException"/>.
+    /// </para>
+    /// <para>
+    /// This property is unrelated to the <c>Default</c> singleton of a source-generated context:
+    /// <see cref="NbtSerializerContext.Options"/> of such a context is a separate instance bound to
+    /// that context, and it is never frozen.
+    /// </para>
+    /// </remarks>
+    public static NbtSerializerOptions Default => s_default;
+
+    /// <summary>
+    /// Gets the custom converters, checked in order before the built-in converters. Mutating the
+    /// list invalidates the resolution cache. Mutating the list of the shared
+    /// <see cref="Default"/> instance after its first use throws
+    /// <see cref="InvalidOperationException"/>.
+    /// </summary>
     public IList<NbtConverter> Converters => _converters;
 
     /// <summary>
@@ -173,6 +218,11 @@ public sealed class NbtSerializerOptions
     [RequiresDynamicCode("Converter resolution may construct converters for generic types.")]
     internal bool TryGetConverter(Type typeToConvert, out NbtConverter converter)
     {
+        if (_isSharedDefault)
+        {
+            MakeReadOnly();
+        }
+
         ArgumentNullException.ThrowIfNull(typeToConvert);
 
         var cache = _cache;
@@ -204,12 +254,75 @@ public sealed class NbtSerializerOptions
     {
         lock (_cacheLock)
         {
-            _cache = ImmutableDictionary<Type, NbtConverter>.Empty;
+            InvalidateCore();
+        }
+    }
+
+    private void InvalidateCore()
+    {
+        _cache = ImmutableDictionary<Type, NbtConverter>.Empty;
+    }
+
+    // Lock-free and idempotent. GetCustomConverter is reachable from TryResolveConverter while
+    // _cacheLock is already held, so the freeze must not take that lock.
+    internal void MakeReadOnly()
+    {
+        if (_isFrozen)
+        {
+            return;
+        }
+
+        _isFrozen = true;
+    }
+
+    private void ThrowIfFrozen()
+    {
+        if (_isFrozen)
+        {
+            throw new InvalidOperationException(
+                "This NbtSerializerOptions instance is read-only because it has already been used " +
+                "by the serializer. Create a new NbtSerializerOptions instance to configure converters.");
+        }
+    }
+
+    /// <summary>
+    /// Applies a converter-list mutation under the cache lock as one critical section: the frozen
+    /// check, the mutation, and the cache invalidation. Callers must have validated their
+    /// arguments; the mutation itself runs with the lock held.
+    /// </summary>
+    internal void MutateConverters(Action<List<NbtConverter>> mutation)
+    {
+        ArgumentNullException.ThrowIfNull(mutation);
+
+        lock (_cacheLock)
+        {
+            ThrowIfFrozen();
+            mutation(_converterItems);
+            InvalidateCore();
+        }
+    }
+
+    /// <summary>See <see cref="MutateConverters(Action{List{NbtConverter}})"/>.</summary>
+    internal T MutateConverters<T>(Func<List<NbtConverter>, T> mutation)
+    {
+        ArgumentNullException.ThrowIfNull(mutation);
+
+        lock (_cacheLock)
+        {
+            ThrowIfFrozen();
+            var result = mutation(_converterItems);
+            InvalidateCore();
+            return result;
         }
     }
 
     internal NbtConverter? GetCustomConverter(Type typeToConvert)
     {
+        if (_isSharedDefault)
+        {
+            MakeReadOnly();
+        }
+
         ArgumentNullException.ThrowIfNull(typeToConvert);
 
         foreach (var converter in _converters)

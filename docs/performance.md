@@ -9,11 +9,15 @@ the intended hot paths and the trade-offs that can disable them.
   a miss takes a lock, resolves once, and publishes a new dictionary. Resolving `n` distinct types
   costs O(n log n) instead of repeated dictionary copies.
 - Converters resolved through `NbtSerializerOptions.GetConverter` are created once per options
-  instance and type. Reuse a single options instance (or a context's `Default.Options`) across
-  operations instead of constructing options per call. Factory-based `[NbtUseConverter(typeof(...))]`
+  instance and type. The options-less overloads share the cached `NbtSerializerOptions.Default`
+  singleton, so each type is resolved once per process; pass one options instance (or a context's
+  `Default.Options`) to reuse a custom configuration. Factory-based `[NbtUseConverter(typeof(...))]`
   members call `CreateConverter` for every read or write instead of caching the produced converter.
 - `options.Converters` is consulted before the resolver and built-ins. Mutating the converter list
-  invalidates the resolution cache; do that during setup, not on a hot path.
+  invalidates the resolution cache; do that during setup, not on a hot path. The shared `Default`
+  instance freezes on its first use, and converter-list mutations on it throw
+  `InvalidOperationException` afterwards; register converters before the first options-less call,
+  or use a dedicated options instance for per-call configuration.
 - `NbtReflectionTypeInfoResolver` caches reflection converters per type and naming-policy instance.
   Custom naming policies should be immutable; converters snapshot member names on creation.
 

@@ -62,7 +62,7 @@ public static class NbtSerializer
     {
         ArgumentNullException.ThrowIfNull(destination);
         ArgumentNullException.ThrowIfNull(rootName);
-        options ??= new NbtSerializerOptions();
+        options ??= NbtSerializerOptions.Default;
 
         if (options.RootFormat == NbtRootFormat.Unnamed && rootName.Length != 0)
         {
@@ -309,8 +309,14 @@ public static class NbtSerializer
     /// Writing is synchronous; only the flush observes cancellation. <paramref name="root"/>'s
     /// name is preserved.
     /// </remarks>
-    [UnconditionalSuppressMessage("Aot", "IL2026", Justification = "DOM values resolve to built-in converters.")]
-    [UnconditionalSuppressMessage("Aot", "IL3050", Justification = "DOM values resolve to built-in converters.")]
+    [UnconditionalSuppressMessage(
+        "Aot",
+        "IL2026",
+        Justification = "DOM values resolve to built-in converters; the shared default options may also carry converters registered before they froze, which matches the DOM overloads that take explicit options. Neither path uses reflection.")]
+    [UnconditionalSuppressMessage(
+        "Aot",
+        "IL3050",
+        Justification = "DOM values resolve to built-in converters; the shared default options may also carry converters registered before they froze, which matches the DOM overloads that take explicit options. Neither path uses reflection.")]
     public static async Task SerializeDocumentAsync(
         PipeWriter destination,
         NbtRoot root,
@@ -319,7 +325,7 @@ public static class NbtSerializer
     {
         ArgumentNullException.ThrowIfNull(destination);
         cancellationToken.ThrowIfCancellationRequested();
-        options ??= new NbtSerializerOptions();
+        options ??= NbtSerializerOptions.Default;
         ValidateRoot(root, options);
         await SerializeAsync(
             destination,
@@ -340,8 +346,14 @@ public static class NbtSerializer
     /// open. Writing is synchronous; only the flush observes cancellation. <paramref name="root"/>'s
     /// name is preserved.
     /// </remarks>
-    [UnconditionalSuppressMessage("Aot", "IL2026", Justification = "DOM values resolve to built-in converters.")]
-    [UnconditionalSuppressMessage("Aot", "IL3050", Justification = "DOM values resolve to built-in converters.")]
+    [UnconditionalSuppressMessage(
+        "Aot",
+        "IL2026",
+        Justification = "DOM values resolve to built-in converters; the shared default options may also carry converters registered before they froze, which matches the DOM overloads that take explicit options. Neither path uses reflection.")]
+    [UnconditionalSuppressMessage(
+        "Aot",
+        "IL3050",
+        Justification = "DOM values resolve to built-in converters; the shared default options may also carry converters registered before they froze, which matches the DOM overloads that take explicit options. Neither path uses reflection.")]
     public static async Task SerializeDocumentAsync(
         Stream destination,
         NbtRoot root,
@@ -350,7 +362,7 @@ public static class NbtSerializer
     {
         ArgumentNullException.ThrowIfNull(destination);
         cancellationToken.ThrowIfCancellationRequested();
-        options ??= new NbtSerializerOptions();
+        options ??= NbtSerializerOptions.Default;
         ValidateRoot(root, options);
         await SerializeAsync(
             destination,
@@ -383,7 +395,7 @@ public static class NbtSerializer
         out string? rootName,
         NbtSerializerOptions? options = null)
     {
-        options ??= new NbtSerializerOptions();
+        options ??= NbtSerializerOptions.Default;
         var reader = new NbtReader(data, options.CreateReaderOptions());
         return DeserializeCore<T>(ref reader, options, out rootName);
     }
@@ -411,7 +423,7 @@ public static class NbtSerializer
         out string? rootName,
         NbtSerializerOptions? options = null)
     {
-        options ??= new NbtSerializerOptions();
+        options ??= NbtSerializerOptions.Default;
         var reader = new NbtReader(data, options.CreateReaderOptions());
         return DeserializeCore<T>(ref reader, options, out rootName);
     }
@@ -455,7 +467,7 @@ public static class NbtSerializer
         NbtSerializerOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(stream);
-        options ??= new NbtSerializerOptions();
+        options ??= NbtSerializerOptions.Default;
         var reader = new NbtReader(stream, options.CreateReaderOptions());
         try
         {
@@ -491,7 +503,7 @@ public static class NbtSerializer
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(reader);
-        options ??= new NbtSerializerOptions();
+        options ??= NbtSerializerOptions.Default;
         var converter = typeof(T) == typeof(NbtRoot)
             ? options.GetConverter(typeof(NbtValue))
             : options.GetConverter(typeof(T));
@@ -995,15 +1007,21 @@ public static class NbtSerializer
     /// <param name="destination">The buffer writer that receives the document.</param>
     /// <param name="root">The document, including its root name.</param>
     /// <param name="options">The serializer options, or the defaults.</param>
-    [UnconditionalSuppressMessage("Aot", "IL2026", Justification = "DOM values resolve to built-in converters.")]
-    [UnconditionalSuppressMessage("Aot", "IL3050", Justification = "DOM values resolve to built-in converters.")]
+    [UnconditionalSuppressMessage(
+        "Aot",
+        "IL2026",
+        Justification = "DOM values resolve to built-in converters; the shared default options may also carry converters registered before they froze, which matches the DOM overloads that take explicit options. Neither path uses reflection.")]
+    [UnconditionalSuppressMessage(
+        "Aot",
+        "IL3050",
+        Justification = "DOM values resolve to built-in converters; the shared default options may also carry converters registered before they froze, which matches the DOM overloads that take explicit options. Neither path uses reflection.")]
     public static void SerializeDocument(
         IBufferWriter<byte> destination,
         NbtRoot root,
         NbtSerializerOptions? options)
     {
         ArgumentNullException.ThrowIfNull(destination);
-        options ??= new NbtSerializerOptions();
+        options ??= NbtSerializerOptions.Default;
         ValidateRoot(root, options);
         Serialize(destination, root.Value, root.Name ?? string.Empty, options);
     }
@@ -1018,12 +1036,18 @@ public static class NbtSerializer
     /// <param name="destination">The stream that receives the document.</param>
     /// <param name="root">The document, including its root name.</param>
     /// <param name="options">The serializer options, or the defaults.</param>
-    [UnconditionalSuppressMessage("Aot", "IL2026", Justification = "DOM values resolve to built-in converters.")]
-    [UnconditionalSuppressMessage("Aot", "IL3050", Justification = "DOM values resolve to built-in converters.")]
+    [UnconditionalSuppressMessage(
+        "Aot",
+        "IL2026",
+        Justification = "DOM values resolve to built-in converters; the shared default options may also carry converters registered before they froze, which matches the DOM overloads that take explicit options. Neither path uses reflection.")]
+    [UnconditionalSuppressMessage(
+        "Aot",
+        "IL3050",
+        Justification = "DOM values resolve to built-in converters; the shared default options may also carry converters registered before they froze, which matches the DOM overloads that take explicit options. Neither path uses reflection.")]
     public static void SerializeDocument(Stream destination, NbtRoot root, NbtSerializerOptions? options)
     {
         ArgumentNullException.ThrowIfNull(destination);
-        options ??= new NbtSerializerOptions();
+        options ??= NbtSerializerOptions.Default;
         ValidateRoot(root, options);
         Serialize(destination, root.Value, root.Name ?? string.Empty, options);
     }
@@ -1032,8 +1056,14 @@ public static class NbtSerializer
     /// <param name="data">The NBT document.</param>
     /// <param name="options">The serializer options, or the defaults.</param>
     /// <returns>The parsed document.</returns>
-    [UnconditionalSuppressMessage("Aot", "IL2026", Justification = "DOM values resolve to built-in converters.")]
-    [UnconditionalSuppressMessage("Aot", "IL3050", Justification = "DOM values resolve to built-in converters.")]
+    [UnconditionalSuppressMessage(
+        "Aot",
+        "IL2026",
+        Justification = "DOM values resolve to built-in converters; the shared default options may also carry converters registered before they froze, which matches the DOM overloads that take explicit options. Neither path uses reflection.")]
+    [UnconditionalSuppressMessage(
+        "Aot",
+        "IL3050",
+        Justification = "DOM values resolve to built-in converters; the shared default options may also carry converters registered before they froze, which matches the DOM overloads that take explicit options. Neither path uses reflection.")]
     public static NbtRoot Deserialize(ReadOnlySpan<byte> data, NbtSerializerOptions? options = null)
     {
         var value = Deserialize<NbtValue>(data, out var rootName, options);
@@ -1044,8 +1074,14 @@ public static class NbtSerializer
     /// <param name="data">The NBT document.</param>
     /// <param name="options">The serializer options, or the defaults.</param>
     /// <returns>The parsed document.</returns>
-    [UnconditionalSuppressMessage("Aot", "IL2026", Justification = "DOM values resolve to built-in converters.")]
-    [UnconditionalSuppressMessage("Aot", "IL3050", Justification = "DOM values resolve to built-in converters.")]
+    [UnconditionalSuppressMessage(
+        "Aot",
+        "IL2026",
+        Justification = "DOM values resolve to built-in converters; the shared default options may also carry converters registered before they froze, which matches the DOM overloads that take explicit options. Neither path uses reflection.")]
+    [UnconditionalSuppressMessage(
+        "Aot",
+        "IL3050",
+        Justification = "DOM values resolve to built-in converters; the shared default options may also carry converters registered before they froze, which matches the DOM overloads that take explicit options. Neither path uses reflection.")]
     public static NbtRoot Deserialize(ReadOnlySequence<byte> data, NbtSerializerOptions? options = null)
     {
         var value = Deserialize<NbtValue>(data, out var rootName, options);
@@ -1060,8 +1096,14 @@ public static class NbtSerializer
     /// The stream is consumed synchronously through a fixed-size buffer and does not need to be
     /// seekable.
     /// </remarks>
-    [UnconditionalSuppressMessage("Aot", "IL2026", Justification = "DOM values resolve to built-in converters.")]
-    [UnconditionalSuppressMessage("Aot", "IL3050", Justification = "DOM values resolve to built-in converters.")]
+    [UnconditionalSuppressMessage(
+        "Aot",
+        "IL2026",
+        Justification = "DOM values resolve to built-in converters; the shared default options may also carry converters registered before they froze, which matches the DOM overloads that take explicit options. Neither path uses reflection.")]
+    [UnconditionalSuppressMessage(
+        "Aot",
+        "IL3050",
+        Justification = "DOM values resolve to built-in converters; the shared default options may also carry converters registered before they froze, which matches the DOM overloads that take explicit options. Neither path uses reflection.")]
     public static NbtRoot Deserialize(Stream stream, NbtSerializerOptions? options = null)
     {
         var value = Deserialize<NbtValue>(stream, out var rootName, options);

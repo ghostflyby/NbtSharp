@@ -84,6 +84,10 @@ PlayerDto copy = NbtSerializer.Deserialize<PlayerDto>(bytes, options);
 int value = NbtSerializer.Deserialize<int>(data, out string? rootName);
 ```
 
+Overloads without an `options` argument share the cached `NbtSerializerOptions.Default` singleton,
+which freezes on first use; register converters on it before the first options-less call, or create
+an `NbtSerializerOptions` instance for custom settings.
+
 Reflection mapping uses public instance properties by default. `[NbtPropertyName("name")]` renames a
 member, `[NbtIgnore]` excludes it, `[NbtUseConverter]` selects a runtime or explicit member converter,
 and public fields are included only with `[NbtInclude]`. A
