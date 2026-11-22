@@ -98,6 +98,19 @@ members are rejected because NBT has one member namespace per compound. Mapping 
 on a virtual base property are inherited by overrides, matching their `AttributeUsage.Inherited`
 contract; public `[NbtInclude]` fields declared on a base type are included too.
 
+Unknown members can be preserved with `[NbtExtensionData]` on a single
+`NbtCompound`- or `Dictionary<string, NbtValue>`-typed member (both mapping paths): unknown members
+are captured into it on read and appended after the mapped members on write, so files written by
+newer tools round-trip fields an older reader does not map. The member needs a setter, cannot be
+`required`, cannot be combined with `[NbtPropertyName]`/`[NbtUseConverter]`, does not participate
+in constructor binding, and fields also need `[NbtInclude]`. Duplicate unknown names follow
+`RejectDuplicateCompoundNames`; writing an extension key that collides with any mapped member name
+(including members omitted by null handling) throws `NbtException`. Captured values always use the
+built-in DOM converters, even when converters for `NbtValue`/`NbtList`/`NbtCompound` are registered
+in `options.Converters`: such converters still apply when a DOM type is the declared member or root
+type, but no longer intercept values nested inside built-in DOM conversion (the `JsonElement`
+behavior).
+
 Reflection mapping can apply a preset naming policy to members without `[NbtPropertyName]` by
 setting `NbtSerializerOptions.PropertyNamingPolicy`, for example
 `PropertyNamingPolicy = NbtNamingPolicy.SnakeCaseLower`. The presets are `CamelCase`,
@@ -314,6 +327,49 @@ non-canonically encoded wire names still match their canonical equivalents. The 
 overloads do not validate the name content as modified UTF-8; they can emit names the reader will
 reject, and validity is the caller's responsibility.
 
+## Read-only DOM (NbtDocument)
+
+`NbtDocument` is for random access over a document you want to probe repeatedly without a
+forward-only token loop or a fully materialized `NbtValue` tree. `Parse` indexes the whole
+document in one pass — structure is fully validated at parse time — and every
+`NbtElement` getter afterwards reads the indexed bytes without re-parsing. `Dispose` returns the
+pooled buffers, so the recommended shape is `using`:
+
+```csharp
+using var document = NbtDocument.Parse(data);
+
+int health = document.RootElement.GetMember("Health").GetInt32();
+foreach (var element in document.RootElement.GetMember("Numbers").EnumerateElements())
+{
+    Console.WriteLine(element.GetInt32());
+}
+```
+
+Input handling mirrors `System.Text.Json.JsonDocument`. `Parse(ReadOnlyMemory<byte>)` reads
+directly from the supplied memory with no copy — the caller must keep the underlying buffer alive
+and unmodified until `Dispose` (returning it to an array pool early is undefined behavior), and
+`byte[]` arguments share the array the same way through implicit conversion. Sequence and stream
+inputs are copied into pooled buffers first; the copy is clamped to
+`NbtReaderOptions.MaxDocumentBytes`, and trailing bytes after the root value never count towards
+the limit. There is no `ReadOnlySpan<byte>` overload by design: span callers wrap the span in a
+memory themselves, which keeps the zero-copy contract explicit.
+
+Each indexed value costs a 28-byte slot, so indexing multiplies the document size by up to about
+6x in the worst case (one-byte list elements); `Dispose` returns both the slot array and the
+copied buffer to their pools. Documents are bounded by `int.MaxValue` bytes — longer input throws
+`NbtException` at parse time, because element offsets are 32-bit (the streaming reader has no such
+limit). A document is safe to read from multiple threads concurrently, but `Dispose` must not
+race with reads; elements of a disposed document throw `ObjectDisposedException`.
+
+Access costs are deterministic: `MemberCount`/`ElementCount`/`ElementType` are O(1); member and
+element enumeration follows wire order; `GetElementAt` is O(1) on lists of scalars, strings, and
+arrays, and O(index) on lists of compounds or nested lists; `GetMember`/`TryGetMember` walk the
+members, with duplicated names resolving to the last occurrence. Typed getters can be called
+repeatedly — unlike the reader, they do not consume anything. `Name` and `GetString` decode
+modified UTF-8 on every access (invalid payload bytes throw at that point, not at parse time);
+`NameEquals(ReadOnlySpan<byte>)` compares encoded bytes on the fast path. `ToNbtValue()`
+materializes an element into the boxed `NbtValue` DOM when you need writable data.
+
 ## Converters
 
 A converter writes exactly one complete value; it does not write the member name. Dynamic tag types
@@ -367,6 +423,41 @@ non-empty list, because the tag type must be known before the header is written.
 `false`, those operations throw `NotSupportedException`; implement the prediction to use the
 converter in those positions. Within a list, all elements must still share one actual tag type, and
 the writer validates every element against the predicted header type.
+
+### String enums
+
+`[NbtStringEnum]` on an enum switches it from an integer tag to `TAG_String`, following
+System.Text.Json's `JsonStringEnumConverter` semantics:
+
+```csharp
+[NbtStringEnum]
+public enum MobKind : byte
+{
+    Zombie,
+    Creeper,
+}
+```
+
+Defined values are written as their member name (the first declared name when several names share a
+value) and read back with an exact, case-sensitive ordinal match. Values without a defined name —
+including undefined flags combinations — round-trip as the invariant numeric string of the
+underlying width, so `(MobKind)200` serializes to `"200"`. A `[Flags]` enum additionally reads a
+comma-separated list: every segment is trimmed and resolved as a name or a numeric string before
+being OR-combined, so `"Walk, Swim"`, `"1, 2"`, and `"Walk, 2"` all parse; the write side uses the
+runtime's flags formatting, which emits the plain number when a combination has no complete name
+decomposition. Unresolvable input throws `NbtException` naming the offending string and the enum
+type.
+
+Nullable enums, collection elements, map values, object members, and root values all inherit the
+string shape. Converter precedence is unchanged: a member's `[NbtUseConverter]` wins, then
+`options.Converters` (register `new NbtStringEnumConverter<TEnum>()` there to apply the string form
+to an unmarked enum), then the enum's `[NbtStringEnum]`, then the numeric built-in.
+
+Both the reflection resolver and the source generator honor the attribute; the generator
+instantiates `NbtStringEnumConverter<TEnum>` directly, so string enums are AOT-safe. In trimmed
+applications that use the reflection path, the attribute may be stripped from the compiled enum,
+in which case the enum silently falls back to the numeric representation; the generated path sees
+the attribute at compile time and is unaffected.
 
 Automatic sequence support covers arrays, `List<T>`, `IEnumerable<T>`, `ICollection<T>`, `IList<T>`,
 `IReadOnlyList<T>`, `IReadOnlyCollection<T>`, `HashSet<T>`, `ISet<T>`, `IReadOnlySet<T>`,
@@ -443,6 +534,29 @@ the list is empty.
 expected/actual tag types. API misuse (reading a value twice, closing a container that is not open)
 throws `InvalidOperationException`. A CLR type without a converter or type information throws
 `NotSupportedException`.
+
+### Modifying reflection contracts at runtime
+
+A `NbtReflectionTypeInfoResolver` created with an `Action<NbtContractInfo>` callback — or extended
+through `WithAddedModifier`, which appends to a snapshot and keeps an independent cache — can
+rename members (`NbtMemberInfo.NbtName`, already reflecting attributes and the naming policy),
+exclude them (`Ignore`), replace their converters (`Converter`), or reorder them (`Order`) without
+editing DTO attributes. The contract is frozen after the callbacks run; later mutations of a
+stashed `NbtMemberInfo` throw `InvalidOperationException`.
+
+Callbacks are pure functions: they run at most once per `(Type, PropertyNamingPolicy)` pair on
+first use, the resulting converter is cached by the resolver, and a thrown exception is not
+cached, so the next operation retries. They run under the resolver's cache lock, which serializes
+type resolution for that resolver: keep them short and non-blocking, and never block inside a
+callback on another thread that resolves types through the same options. Unlike
+`System.Text.Json`, the callback receives no options instance — the contract is fixed per type and
+naming policy on first use. Resolving other types inside a callback is allowed through same-thread
+lock reentrancy, but looping back to the type currently being built throws
+`InvalidOperationException` instead of overflowing the stack. Polymorphic envelopes stay
+attribute-driven; their derived concrete types resolve normally and run the callbacks. In an
+`NbtTypeInfoResolverChain`, a modified reflection resolver only affects types that fall through to
+the reflection fallback, so a generated context in front of it is untouched (generated contexts
+bake contracts at compile time and have no runtime modifier hook).
 
 ## Scope and AOT
 

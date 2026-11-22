@@ -62,6 +62,16 @@ must operate on the final NBT name, after the naming policy is applied; a kind m
 NbtSharp's converter families (compound / list / map) rather than STJ's; and modified members must
 preserve the duplicate-name and single-member-namespace invariants that mapping already enforces.
 
+**Status (2026-11-22): implemented on feat/stj-gap-p1.** Scope: the reflection resolver only —
+`NbtReflectionTypeInfoResolver` accepts `Action<NbtContractInfo>` modifier callbacks (constructor,
+`WithAddedModifier` appending to an array snapshot with an independent cache), and `NbtContractInfo`
+/`NbtMemberInfo` expose member-level rename (`NbtName`), `Ignore`, `Converter`, and `Order` over the
+discovered contract, frozen after the callbacks run. Contracts are keyed per `(Type,
+PropertyNamingPolicy)` with a per-key in-flight guard that turns modifier re-entrancy into
+`InvalidOperationException`; nested resolution of sibling types is allowed. Generated contexts bake
+contracts at compile time, so there is no interface-level hook. Setters/kind introspection and
+converter-collection callbacks remain open.
+
 ### Member semantics
 
 **G-MEMBER-1 — extension data.** Priority: P1.
@@ -77,6 +87,16 @@ catch-all; the interaction with `RejectDuplicateCompoundNames` (a duplicate acro
 and the extension member) must be defined; and capturing values verbatim means either DOM
 materialization or a raw-capture capability (see G-DOM-1) — with today's DOM the extension member
 pays full materialization.
+
+**Status (2026-11-22): implemented on feat/stj-gap-p1.** `[NbtExtensionData]` claims a single
+`NbtCompound`- or `Dictionary<string, NbtValue>`-typed member per type; unknown members are
+captured through the new built-in DOM helpers (`NbtMetadataServices.ReadDomValue`/`WriteDomMember`)
+and appended after mapped members on write, with name conflicts (including names omitted by null
+handling) rejected. Capturing is deliberately decoupled from `options.Converters`: the built-in DOM
+converters now form a closed family (`JsonElement` semantics), so converters registered for
+`NbtValue`/`NbtList`/`NbtCompound` still apply when such a type is the declared member or root type
+but no longer intercept values nested inside built-in DOM conversion. Raw pass-through remains
+open for G-DOM-1's `GetRawBytes` hook.
 
 **G-MEMBER-2 — default-value elision on write.** Priority: P1–P2.
 
@@ -123,6 +143,12 @@ cached name tables is the natural fit. Constraint: an undefined name on read can
 numeric value the way a numeric enum representation could — storage is a string — so the policy is
 throw or an explicit `IsDefined`-style check.
 
+**Status (2026-11-22): implemented on feat/stj-gap-p1.** `[NbtStringEnum]` routes an enum through
+`NbtStringEnumConverter<TEnum>` with STJ-aligned semantics: cached ordinal name tables,
+first-declared-name writes for aliased values, invariant numeric strings for undefined values,
+comma-split flags parsing with per-segment trim, and case-sensitive reads. Both the reflection
+resolver and the source generator honor the attribute; see the README's Converters section.
+
 **G-TYPE-2 — built-in common scalar types.** Priority: P2, blocked on wire-form decisions.
 
 `decimal`, `Guid`, the date/time family, `Half`, `Int128`/`UInt128`, `BigInteger`, and `nint`/
@@ -162,6 +188,13 @@ raw-value capture). NBT makes such a view tractable: nearly every payload is len
 compound end tag is the exception), so a disposable, skip-based view over a
 `ReadOnlySequence<byte>` is feasible on top of the existing `Skip` machinery. Unlocks cheap probing
 of large files and decode-free re-emit in converters.
+
+**Status (2026-11-22): implemented on feat/stj-gap-p1.** `NbtDocument`/`NbtElement` provide the
+pooled read-only DOM: a single-pass indexer that validates the whole document at parse time, with
+`Parse` over memory (zero-copy), sequences, and streams, lazy modified UTF-8 name decoding,
+`NameEquals` byte fast paths, O(1) counts, and `ToNbtValue` materialization. The raw pass-through
+half is still open for converters; the `GetRawBytes` hook is in place as an internal API, ready to
+expose when converter capture lands.
 
 **G-DOM-2 — reference preservation and cycle handling.** Priority: P3.
 
@@ -253,6 +286,13 @@ than once for the same bytes (documented in the API remarks). STJ resumes throug
 A fully resumable converter protocol is a large redesign; a pragmatic middle ground is to re-parse
 only when the buffer has grown meaningfully or the read has completed, instead of on every
 `ReadAsync` chunk.
+
+**Status (2026-11-22): partially mitigated on feat/stj-gap-p1.** Truncation sites now report how
+many bytes they still need (`NbtException.TruncatedAdditionalBytes`, a lower bound), and the retry
+loop reparses only once the writer completes, the reported deficit has arrived, or a 4–64 KiB
+clamped fallback growth has accumulated. Each retry advances past the previous starvation point and
+open-pipe documents complete as soon as their deficit arrives, but a fully resumable state machine
+remains open.
 
 **PERF-4 — caches never freeze.** Priority: P2.
 

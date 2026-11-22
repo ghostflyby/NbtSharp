@@ -120,6 +120,14 @@ internal static class Diagnostics
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
+    public static readonly DiagnosticDescriptor InvalidExtensionData = new(
+        "NBTSG010",
+        "Invalid NbtExtensionData declaration",
+        "The [NbtExtensionData] declaration on member '{0}' is invalid: {1}",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
     public static readonly DiagnosticDescriptor BuiltInRoot = new(
         "NBTSG013",
         "Type already uses a built-in converter",

@@ -48,7 +48,11 @@ internal static class NbtBuiltInConverters
 
         if (type.IsEnum)
         {
-            converter = CreateGeneric(typeof(NbtEnumConverter<>), type);
+            converter = CreateGeneric(
+                type.IsDefined(typeof(NbtStringEnumAttribute), inherit: false)
+                    ? typeof(NbtStringEnumConverter<>)
+                    : typeof(NbtEnumConverter<>),
+                type);
             return true;
         }
 

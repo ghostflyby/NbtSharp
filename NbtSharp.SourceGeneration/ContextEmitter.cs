@@ -482,7 +482,7 @@ internal sealed partial class ContextEmitter
                 _writer.WriteLine();
                 EmitObjectConverter(entry, entry.Object);
             }
-            else if (entry.Kind == TypeEntryKind.Enum)
+            else if (entry.Kind == TypeEntryKind.Enum && entry.EnumMapping is not null)
             {
                 _writer.WriteLine();
                 EmitEnumConverter(entry);
@@ -581,7 +581,9 @@ internal sealed partial class ContextEmitter
     private string GetFactory(TypeSpec entry) => entry.Kind switch
     {
         TypeEntryKind.Object => $"new {entry.ConverterName}()",
-        TypeEntryKind.Enum => $"new {entry.ConverterName}()",
+        TypeEntryKind.Enum => entry.EnumIsString
+            ? $"new global::NbtSharp.NbtStringEnumConverter<{entry.TypeName}>()"
+            : $"new {entry.ConverterName}()",
         TypeEntryKind.Array =>
             $"{MetadataServices}.CreateArrayConverter<{entry.ElementTypeName!}>()",
         TypeEntryKind.Collection => GetCollectionFactory(entry),
@@ -925,6 +927,19 @@ internal sealed partial class ContextEmitter
             ? entry
             : null;
 
+    private static IEnumerable<MemberSpec> AllMembers(ObjectSpec model)
+    {
+        foreach (var member in model.Members)
+        {
+            yield return member;
+        }
+
+        if (model.ExtensionMember is { } extension)
+        {
+            yield return extension;
+        }
+    }
+
     private void EmitMemberConverters(ObjectSpec model)
     {
         var emitted = false;
@@ -983,7 +998,7 @@ internal sealed partial class ContextEmitter
 
     private void EmitAccessors(ObjectSpec model)
     {
-        foreach (var member in model.Members)
+        foreach (var member in AllMembers(model))
         {
             if (!member.NeedsSetterAccessor || member.ConstructorParameterIndex >= 0)
             {
@@ -1091,6 +1106,13 @@ internal sealed partial class ContextEmitter
         {
             _writer.WriteLine($"var __v{member.Index} = default({member.TypeName})!;");
             _writer.WriteLine($"var __p{member.Index} = false;");
+        }
+
+        // The extension member has no presence flag: it is never required and is only assigned
+        // once the first unknown member materializes it.
+        if (model.ExtensionMember is { } extension)
+        {
+            _writer.WriteLine($"var __v{extension.Index} = default({extension.TypeName})!;");
         }
 
         var hasDirectMembers = model.Members.Any(
@@ -1204,7 +1226,7 @@ internal sealed partial class ContextEmitter
             _writer.WriteLine("if (__matched < 0)");
             _writer.WriteLine("{");
             _writer.Indent();
-            _writer.WriteLine("reader.Skip();");
+            EmitUnknownMemberBody(model);
             _writer.Outdent();
             _writer.WriteLine("}");
             _writer.WriteLine("else");
@@ -1265,7 +1287,7 @@ internal sealed partial class ContextEmitter
 
             _writer.WriteLine("default:");
             _writer.Indent();
-            _writer.WriteLine("reader.Skip();");
+            EmitUnknownMemberBody(model);
             _writer.WriteLine("break;");
             _writer.Outdent();
             _writer.Outdent();
@@ -1280,6 +1302,44 @@ internal sealed partial class ContextEmitter
 
         _writer.Outdent();
         _writer.WriteLine("}");
+    }
+
+    // Emits the body for a member that matched no mapped name. Without an extension member the
+    // token is skipped (the fast path keeps the established silent skip); with one the name is
+    // decoded, checked for duplicates, and captured as DOM data. ReadDomValue is the only Path
+    // source for this branch, so __path must not be assigned here: the fast path resets it at the
+    // loop top and the outer catch prepend becomes a no-op.
+    private void EmitUnknownMemberBody(ObjectSpec model)
+    {
+        if (model.ExtensionMember is not { } extension)
+        {
+            _writer.WriteLine("reader.Skip();");
+            return;
+        }
+
+        _writer.WriteLine("var __n = reader.Name;");
+        _writer.WriteLine("if (__n is null)");
+        _writer.WriteLine("{");
+        _writer.Indent();
+        _writer.WriteLine(
+            "throw global::NbtSharp.NbtMetadataServices.MissingMemberName(reader);");
+        _writer.Outdent();
+        _writer.WriteLine("}");
+        _writer.WriteLine();
+        _writer.WriteLine(
+            $"if (__v{extension.Index} is not null && " +
+            $"__v{extension.Index}.ContainsKey(__n) && options.RejectDuplicateCompoundNames)");
+        _writer.WriteLine("{");
+        _writer.Indent();
+        _writer.WriteLine(
+            "throw global::NbtSharp.NbtMetadataServices.DuplicateMember(reader, __n);");
+        _writer.Outdent();
+        _writer.WriteLine("}");
+        _writer.WriteLine();
+        _writer.WriteLine($"__v{extension.Index} ??= new {extension.TypeName}();");
+        _writer.WriteLine(
+            $"__v{extension.Index}[__n] = global::NbtSharp.NbtMetadataServices.ReadDomValue(" +
+            "ref reader, options, \".\" + __n);");
     }
 
     // Emits the body shared by every dispatch shape: duplicate-name detection, the direct or
@@ -1389,6 +1449,36 @@ internal sealed partial class ContextEmitter
             {
                 _writer.WriteLine(
                     $"if (__p{member.Index}) __result.{member.EscapedClrName} = __v{member.Index};");
+            }
+        }
+
+        if (model.ExtensionMember is { } extension)
+        {
+            if (extension.NeedsSetterAccessor)
+            {
+                if (extension.SetterIsGeneric)
+                {
+                    var receiverPrefix = extension.SetterReceiverIsValueType
+                        ? "ref __result, "
+                        : "__result, ";
+                    _writer.WriteLine(
+                        $"if (__v{extension.Index} is not null) Accessors_{extension.Index}" +
+                        $"<{extension.SetterTypeArguments}>" +
+                        $".Set_{extension.Index}({receiverPrefix}__v{extension.Index});");
+                }
+                else
+                {
+                    var receiverPrefix = model.IsValueType ? "ref __result, " : "__result, ";
+                    _writer.WriteLine(
+                        $"if (__v{extension.Index} is not null) " +
+                        $"Set_{extension.Index}({receiverPrefix}__v{extension.Index});");
+                }
+            }
+            else
+            {
+                _writer.WriteLine(
+                    $"if (__v{extension.Index} is not null) " +
+                    $"__result.{extension.EscapedClrName} = __v{extension.Index};");
             }
         }
 
@@ -1538,6 +1628,46 @@ internal sealed partial class ContextEmitter
             _writer.WriteLine(
                 "global::NbtSharp.NbtMetadataServices.PrependPath(__ex, __path);");
             _writer.WriteLine("throw;");
+            _writer.Outdent();
+            _writer.WriteLine("}");
+        }
+
+        if (model.ExtensionMember is { } extension)
+        {
+            // Appended after every mapped member. The conflict chain covers the final NBT names of
+            // all mapped members, including ones omitted by null handling, so an extension entry
+            // can never shadow a name the mapping owns. Dictionary order is not preserved.
+            _writer.WriteLine($"var __ext = value.{extension.EscapedClrName};");
+            _writer.WriteLine("if (__ext is not null)");
+            _writer.WriteLine("{");
+            _writer.Indent();
+            _writer.WriteLine("foreach (var __pair in __ext)");
+            _writer.WriteLine("{");
+            _writer.Indent();
+            var mappedNames = model.Members
+                .Select(static member => SymbolDisplay.FormatLiteral(member.NbtName, quote: true))
+                .ToArray();
+            if (mappedNames.Length > 0)
+            {
+                var chain = string.Join(
+                    " || ",
+                    mappedNames.Select(static name => $"__pair.Key == {name}"));
+                _writer.WriteLine($"if ({chain})");
+                _writer.WriteLine("{");
+                _writer.Indent();
+                _writer.WriteLine(
+                    "throw global::NbtSharp.NbtMetadataServices.ExtensionMemberConflict(" +
+                    "writer, __pair.Key);");
+                _writer.Outdent();
+                _writer.WriteLine("}");
+                _writer.WriteLine();
+            }
+
+            _writer.WriteLine(
+                "global::NbtSharp.NbtMetadataServices.WriteDomMember(" +
+                "ref writer, __pair.Key, __pair.Value, options);");
+            _writer.Outdent();
+            _writer.WriteLine("}");
             _writer.Outdent();
             _writer.WriteLine("}");
         }

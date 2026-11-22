@@ -69,6 +69,18 @@ the intended hot paths and the trade-offs that can disable them.
 - Empty collections encode as `TAG_List<TAG_End>`; a declared element type other than `TAG_End` is
   still checked for built-in converters.
 
+## Read-only DOM
+
+`NbtDocument.Parse` indexes the entire document in one pass over contiguous bytes, so its cost is
+a full structural validation plus one 28-byte slot per indexed value — up to roughly 6x the input
+size in the worst case (one-byte list elements), far less for typical documents. Slot arrays and
+copied sequence/stream buffers come from `ArrayPool` and are returned by `Dispose`; memory input is
+not copied at all. After parsing, every element access is a lookup: counts are O(1), scalar
+getters read the indexed bytes directly, and member lookup walks the compound's members. Names and
+string payloads are decoded lazily per access, never during indexing (only their length prefixes
+are validated), which is why probing a large document through `NameEquals` and `Skip`-style access
+never pays for names it does not materialize.
+
 ## Async paths
 
 `DeserializeAsync` reads asynchronously through a `PipeReader`. `SerializeAsync` writes through the
@@ -76,6 +88,15 @@ synchronous writer core and awaits the final flush. Cancellation requested befor
 observed before producing bytes; cancellation during stream serialization is checked on the final
 flush. `PipeReader` and `ReadOnlySequence<byte>` overloads leave bytes after the root available to the
 caller; stream overloads may read ahead.
+
+A truncated asynchronous parse is not retried on every arriving chunk. The document is reparsed once
+the writer completes, or once the buffered data has grown by at least the number of bytes the
+truncation point reported it still needs, or — when that number is unknown — by a clamped fallback
+between 4 KiB and 64 KiB. Each retry therefore advances past the point where the previous parse
+starved, but the worst case is still quadratic in principle: a producer that feeds exactly one
+deficit at a time forces a reparse per step, and an open, silent writer can hold a completed
+document back by up to the clamped growth. Converters may still run more than once for the same
+document; the throttle only lowers how often.
 
 ## Source generator
 

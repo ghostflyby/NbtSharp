@@ -39,7 +39,9 @@ AOT-safe.
 - Built-in scalars: `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`, `long`, `ulong`, `char`,
   `float`, `double`, `bool`, `string`, and their nullable variants.
 - Enums, including flags combinations, undefined values, and nullable enums. They use the signed tag
-  matching the underlying width; unsigned values preserve their bit pattern.
+  matching the underlying width; unsigned values preserve their bit pattern. Enums marked
+  `[NbtStringEnum]` use `TAG_String` instead: the generator instantiates the runtime
+  `NbtStringEnumConverter<TEnum>`, so no numeric converter is emitted for them.
 - Classes and structs with public instance properties, plus public fields marked `[NbtInclude]`.
 - Arrays, nullable values, and the supported sequence/map shapes. See the README for the full list.
 - Types discovered through `CollectionBuilderAttribute`, companion `Create`/`CreateRange` factories,

@@ -43,4 +43,11 @@ public class NbtException : Exception
     public NbtTagType? ActualTagType { get; internal init; }
 
     internal bool IsTruncated { get; init; }
+
+    /// <summary>
+    /// Gets the minimum number of additional bytes the parser needs to advance past the point where
+    /// the truncation was detected, when known. The value is a lower bound, not an exact
+    /// requirement: for a declared list it is derived from the minimum element size.
+    /// </summary>
+    internal long? TruncatedAdditionalBytes { get; init; }
 }

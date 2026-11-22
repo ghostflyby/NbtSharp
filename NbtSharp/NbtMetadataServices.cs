@@ -438,6 +438,50 @@ public static class NbtMetadataServices
         NbtSerializer.SerializeMemberCore(ref writer, name, value, typed, options);
     }
 
+    /// <summary>
+    /// Reads one <see cref="NbtValue"/> through the built-in DOM converter, without consulting
+    /// <see cref="NbtSerializerOptions.Converters"/>.
+    /// </summary>
+    /// <param name="reader">The reader positioned at the value's first token.</param>
+    /// <param name="options">The serializer options.</param>
+    /// <param name="pathSegment">The path segment for error reporting.</param>
+    /// <returns>The decoded value.</returns>
+    /// <remarks>
+    /// Converters registered for DOM types never intercept values read through this method,
+    /// matching <see cref="System.Text.Json.JsonElement"/> semantics for extension data.
+    /// </remarks>
+    public static NbtValue ReadDomValue(
+        ref NbtReader reader,
+        NbtSerializerOptions options,
+        string? pathSegment)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return NbtSerializer.DeserializeValueCore(ref reader, NbtDomConverters.Value, options, pathSegment);
+    }
+
+    /// <summary>
+    /// Writes one named compound member through the built-in DOM converter, without consulting
+    /// <see cref="NbtSerializerOptions.Converters"/>.
+    /// </summary>
+    /// <param name="writer">The writer that receives the member.</param>
+    /// <param name="name">The member name.</param>
+    /// <param name="value">The member value.</param>
+    /// <param name="options">The serializer options.</param>
+    /// <remarks>
+    /// Converters registered for DOM types never intercept values written through this method,
+    /// matching <see cref="System.Text.Json.JsonElement"/> semantics for extension data.
+    /// </remarks>
+    public static void WriteDomMember(
+        ref NbtWriter writer,
+        string name,
+        NbtValue value,
+        NbtSerializerOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        ArgumentNullException.ThrowIfNull(options);
+        NbtSerializer.SerializeMemberCore(ref writer, name, value, NbtDomConverters.Value, options);
+    }
+
     /// <summary>Prepends a path segment to an exception.</summary>
     /// <param name="exception">The exception to update.</param>
     /// <param name="segment">The path segment to prepend, or <see langword="null"/>.</param>
@@ -484,6 +528,17 @@ public static class NbtMetadataServices
         new($"The compound contains the duplicate member '{name}'.")
         {
             BytePosition = reader.BytesConsumed,
+            Path = "." + name,
+        };
+
+    /// <summary>Creates the exception for an extension data entry that uses a mapped member name.</summary>
+    /// <param name="writer">The writer at the extension entry.</param>
+    /// <param name="name">The conflicting member name.</param>
+    /// <returns>The exception.</returns>
+    public static NbtException ExtensionMemberConflict(NbtWriter writer, string name) =>
+        new($"The extension data contains the member '{name}' which is already mapped.")
+        {
+            BytePosition = writer.BytesWritten,
             Path = "." + name,
         };
 

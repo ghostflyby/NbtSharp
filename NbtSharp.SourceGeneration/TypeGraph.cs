@@ -67,6 +67,8 @@ internal sealed class TypeEntry
 
     public ITypeSymbol? UnderlyingType { get; set; }
 
+    public bool EnumIsString { get; set; }
+
     public ImmutableArray<DerivedTypeModel> DerivedTypes { get; set; } = [];
 }
 
@@ -76,12 +78,14 @@ internal sealed class ObjectModel
         INamedTypeSymbol type,
         ImmutableArray<MemberModel> members,
         ConstructorModel? constructor,
-        bool useConstructorAccessor)
+        bool useConstructorAccessor,
+        MemberModel? extensionMember = null)
     {
         Type = type;
         Members = members;
         Constructor = constructor;
         UseConstructorAccessor = useConstructorAccessor;
+        ExtensionMember = extensionMember;
     }
 
     public INamedTypeSymbol Type { get; }
@@ -91,6 +95,12 @@ internal sealed class ObjectModel
     public ConstructorModel? Constructor { get; }
 
     public bool UseConstructorAccessor { get; }
+
+    /// <summary>
+    /// The [NbtExtensionData] member, excluded from <see cref="Members"/> so it never participates
+    /// in name grouping, constructor binding, or converter emission. Its Index is Members.Length.
+    /// </summary>
+    public MemberModel? ExtensionMember { get; }
 }
 
 internal sealed class ConstructorModel
@@ -142,6 +152,8 @@ internal sealed class MemberModel
 
     public bool IsRequired { get; set; }
 
+    public bool IsExtensionData { get; set; }
+
     public ConverterMode ConverterMode { get; set; } = ConverterMode.Generated;
 
     public ITypeSymbol? ExplicitConverterType { get; set; }
@@ -171,6 +183,8 @@ internal sealed class TypeGraph
     private const string PropertyNameAttribute = "NbtSharp.NbtPropertyNameAttribute";
     private const string UseConverterAttribute = "NbtSharp.NbtUseConverterAttribute";
     private const string DerivedAttribute = "NbtSharp.NbtDerivedAttribute";
+    private const string StringEnumAttribute = "NbtSharp.NbtStringEnumAttribute";
+    private const string ExtensionDataAttribute = "NbtSharp.NbtExtensionDataAttribute";
 
     private static readonly SymbolDisplayFormat FullyQualified = SymbolDisplayFormat.FullyQualifiedFormat;
 
@@ -276,6 +290,7 @@ internal sealed class TypeGraph
             var enumEntry = new TypeEntry(type, TypeEntryKind.Enum)
             {
                 UnderlyingType = underlying,
+                EnumIsString = HasStringEnumAttribute(named),
             };
             Register(enumEntry);
             return enumEntry;
@@ -611,6 +626,10 @@ internal sealed class TypeGraph
         type.GetAttributes().Any(static attribute =>
             attribute.AttributeClass?.ToDisplayString() == DerivedAttribute);
 
+    private static bool HasStringEnumAttribute(INamedTypeSymbol type) =>
+        type.GetAttributes().Any(static attribute =>
+            attribute.AttributeClass?.ToDisplayString() == StringEnumAttribute);
+
     private static bool IsDerivedFrom(INamedTypeSymbol baseType, INamedTypeSymbol derivedType)
     {
         if (baseType.TypeKind == TypeKind.Interface)
@@ -636,12 +655,15 @@ internal sealed class TypeGraph
 
     private ObjectModel? BuildObjectModel(INamedTypeSymbol type, Location? location)
     {
-        var members = CollectMembers(type, location);
-        if (members is null)
+        var collected = CollectMembers(type, location);
+        if (collected is null)
         {
             HasErrors = true;
             return null;
         }
+
+        var members = collected.Members;
+        var extensionMember = collected.Extension;
 
         var duplicate = members
             .GroupBy(static member => member.NbtName, StringComparer.Ordinal)
@@ -708,6 +730,13 @@ internal sealed class TypeGraph
             members[i].Index = i;
         }
 
+        if (extensionMember is not null)
+        {
+            // The extension member indexes past every mapped member so generated local names do
+            // not collide; it is not part of Members and is never constructor-bound.
+            extensionMember.Index = members.Count;
+        }
+
         foreach (var member in members)
         {
             if (member.ConverterMode != ConverterMode.Generated)
@@ -721,13 +750,26 @@ internal sealed class TypeGraph
                 $"member '{member.ClrName}' of {type.ToDisplayString(FullyQualified)}");
         }
 
-        return new ObjectModel(type, members.ToImmutableArray(), constructor, useConstructorAccessor);
+        return new ObjectModel(
+            type,
+            members.ToImmutableArray(),
+            constructor,
+            useConstructorAccessor,
+            extensionMember);
     }
 
-    private List<MemberModel>? CollectMembers(INamedTypeSymbol type, Location? location)
+    private sealed class CollectedMembers
+    {
+        public List<MemberModel> Members { get; set; } = [];
+
+        public MemberModel? Extension { get; set; }
+    }
+
+    private CollectedMembers? CollectMembers(INamedTypeSymbol type, Location? location)
     {
         var fields = new List<MemberModel>();
         var properties = new List<MemberModel>();
+        var collected = new CollectedMembers();
         var overriddenProperties = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
         var declarationTypes = new List<INamedTypeSymbol>();
 
@@ -775,6 +817,16 @@ internal sealed class TypeGraph
                         continue;
                     }
 
+                    if (FindAttribute(property, ExtensionDataAttribute) is not null)
+                    {
+                        if (!TryClaimExtensionMember(collected, property, canWrite: property.SetMethod is not null, location))
+                        {
+                            return null;
+                        }
+
+                        continue;
+                    }
+
                     var nbtName = FindAttribute(property, PropertyNameAttribute)?.ConstructorArguments
                             .FirstOrDefault().Value as string ??
                         _namePolicy?.Invoke(property.Name) ??
@@ -811,6 +863,26 @@ internal sealed class TypeGraph
 
                     if (FindAttribute(field, IgnoreAttribute) is not null)
                     {
+                        continue;
+                    }
+
+                    if (FindAttribute(field, ExtensionDataAttribute) is not null)
+                    {
+                        if (FindAttribute(field, IncludeAttribute) is null)
+                        {
+                            Report(
+                                Diagnostics.InvalidExtensionData,
+                                field.Locations.FirstOrDefault() ?? location,
+                                field.Name,
+                                "fields require [NbtInclude] in addition to [NbtExtensionData]");
+                            return null;
+                        }
+
+                        if (!TryClaimExtensionMember(collected, field, canWrite: true, location))
+                        {
+                            return null;
+                        }
+
                         continue;
                     }
 
@@ -867,7 +939,113 @@ internal sealed class TypeGraph
             return null;
         }
 
-        return fields;
+        collected.Members = fields;
+        return collected;
+    }
+
+    // Claims one [NbtExtensionData] member for the type, reporting NBTSG010 and returning false on
+    // any invalid declaration. The member is kept out of the mapped member lists so it never
+    // reaches name grouping, constructor binding, or converter configuration.
+    private bool TryClaimExtensionMember(
+        CollectedMembers collected,
+        ISymbol symbol,
+        bool canWrite,
+        Location? containingLocation)
+    {
+        var location = symbol.Locations.FirstOrDefault() ?? containingLocation;
+        var clrName = symbol.Name;
+        if (collected.Extension is not null)
+        {
+            Report(
+                Diagnostics.InvalidExtensionData,
+                location,
+                clrName,
+                "the type maps more than one extension member");
+            return false;
+        }
+
+        var memberType = symbol switch
+        {
+            IPropertySymbol property => property.Type,
+            IFieldSymbol field => field.Type,
+            _ => null,
+        };
+        if (memberType is null || !IsExtensionMemberType(memberType))
+        {
+            Report(
+                Diagnostics.InvalidExtensionData,
+                location,
+                clrName,
+                "the member type must be NbtSharp.NbtCompound or Dictionary<string, NbtSharp.NbtValue>");
+            return false;
+        }
+
+        if (FindAttribute(symbol, PropertyNameAttribute) is not null ||
+            FindAttribute(symbol, UseConverterAttribute) is not null)
+        {
+            Report(
+                Diagnostics.InvalidExtensionData,
+                location,
+                clrName,
+                "it cannot be combined with [NbtPropertyName] or [NbtUseConverter]");
+            return false;
+        }
+
+        if (!canWrite)
+        {
+            Report(
+                Diagnostics.InvalidExtensionData,
+                location,
+                clrName,
+                "the member must have a setter");
+            return false;
+        }
+
+        if (symbol is IPropertySymbol { IsRequired: true } or IFieldSymbol { IsRequired: true })
+        {
+            Report(
+                Diagnostics.InvalidExtensionData,
+                location,
+                clrName,
+                "required members are not supported");
+            return false;
+        }
+
+        collected.Extension = new MemberModel(
+            symbol,
+            clrName,
+            nbtName: clrName,
+            memberType,
+            isField: symbol is IFieldSymbol,
+            canWrite,
+            isInitOnly: symbol is IPropertySymbol { SetMethod.IsInitOnly: true },
+            setterContainingType: symbol.ContainingType)
+        {
+            IsExtensionData = true,
+            DeclaringType = symbol.ContainingType,
+        };
+        return true;
+    }
+
+    // NbtCompound is sealed, so an exact display-name match is an exact symbol match. The
+    // dictionary form must be a closed Dictionary<string, NbtValue>; derived, interface, and
+    // differently-parameterized shapes are rejected.
+    private static bool IsExtensionMemberType(ITypeSymbol type)
+    {
+        if (type is not INamedTypeSymbol named)
+        {
+            return false;
+        }
+
+        if (named.ToDisplayString(FullyQualified) == "global::NbtSharp.NbtCompound")
+        {
+            return true;
+        }
+
+        return IsNamed(named.OriginalDefinition, "System.Collections.Generic", "Dictionary", 2) &&
+            named.TypeArguments.Length == 2 &&
+            named.TypeArguments[0].SpecialType == SpecialType.System_String &&
+            named.TypeArguments[1].ToDisplayString(FullyQualified) == "global::NbtSharp.NbtValue";
     }
 
     private static (string Name, Location? Location)? FindHiddenMember(

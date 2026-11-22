@@ -289,6 +289,54 @@ public sealed class GeneratedSerializationAotTests
     }
 
     [Fact]
+    public void RoundTripsStringEnums()
+    {
+        var value = new AotStringEnums
+        {
+            Kind = AotMob.Creeper,
+            Undefined = (AotMob)200,
+            Flags = AotStringFlags.Walk | AotStringFlags.Swim,
+        };
+
+        var data = NbtSerializer.Serialize(value, AotContext.Default.AotStringEnums, "root");
+        var copy = NbtSerializer.Deserialize(data, AotContext.Default.AotStringEnums);
+
+        var root = (NbtCompound)NbtSerializer.Deserialize(data).Value.Value!;
+        Assert.Equal(NbtTagType.String, root["Kind"].TagType);
+        Assert.Equal("Creeper", root["Kind"].Value);
+        Assert.Equal("200", root["Undefined"].Value);
+        Assert.Equal("Walk, Swim", root["Flags"].Value);
+
+        Assert.Equal(value.Kind, copy.Kind);
+        Assert.Equal(value.Undefined, copy.Undefined);
+        Assert.Equal(value.Flags, copy.Flags);
+    }
+
+    [Fact]
+    public void RoundTripsExtensionData()
+    {
+        var document = new NbtCompound
+        {
+            ["Name"] = "Steve",
+            ["Health"] = 20,
+            ["UnknownTag"] = "extra",
+        };
+        var data = NbtSerializer.Serialize(new NbtRoot("root", document));
+
+        var copy = NbtSerializer.Deserialize(data, AotContext.Default.AotExtensionData);
+        Assert.Equal("Steve", copy.Name);
+        Assert.Equal(20, copy.Health);
+        var extra = Assert.IsType<NbtCompound>(copy.Extra);
+        Assert.Equal("extra", extra["UnknownTag"].Value);
+
+        var rewritten = NbtSerializer.Serialize(copy, AotContext.Default.AotExtensionData, "root");
+        var root = (NbtCompound)NbtSerializer.Deserialize(rewritten).Value.Value!;
+        Assert.Equal("Steve", root["Name"].Value);
+        Assert.Equal(20, root["Health"].Value);
+        Assert.Equal("extra", root["UnknownTag"].Value);
+    }
+
+    [Fact]
     public void RoundTripsPolymorphicMembers()
     {
         var value = new AotPetOwner
@@ -342,6 +390,7 @@ internal sealed class AotPetOwner
 [NbtSerializable(typeof(AotSimple))]
 [NbtSerializable(typeof(AotRequired))]
 [NbtSerializable(typeof(AotEnums))]
+[NbtSerializable(typeof(AotStringEnums))]
 [NbtSerializable(typeof(AotWrapper<AotSimple>))]
 [NbtSerializable(typeof(AotCollections))]
 [NbtSerializable(typeof(AotCollectionShapes))]
@@ -350,6 +399,7 @@ internal sealed class AotPetOwner
 [NbtSerializable(typeof(AotRecord))]
 [NbtSerializable(typeof(AotConverters))]
 [NbtSerializable(typeof(AotPetOwner))]
+[NbtSerializable(typeof(AotExtensionData))]
 internal partial class AotContext : NbtSerializerContext
 {
     public AotContext()
@@ -389,6 +439,43 @@ internal sealed class AotEnums
     public AotKind? Optional { get; init; }
 
     public List<AotKind> Values { get; init; } = [];
+}
+
+[NbtStringEnum]
+internal enum AotMob : byte
+{
+    Zombie,
+    Creeper,
+    Skeleton,
+}
+
+[NbtStringEnum]
+[Flags]
+internal enum AotStringFlags
+{
+    None = 0,
+    Walk = 1,
+    Swim = 2,
+    Fly = 4,
+}
+
+internal sealed class AotStringEnums
+{
+    public AotMob Kind { get; init; }
+
+    public AotMob Undefined { get; init; }
+
+    public AotStringFlags Flags { get; init; }
+}
+
+internal sealed class AotExtensionData
+{
+    public string Name { get; init; } = "";
+
+    public int Health { get; init; }
+
+    [NbtExtensionData]
+    public NbtCompound? Extra { get; set; }
 }
 
 internal sealed class AotWrapper<T>
