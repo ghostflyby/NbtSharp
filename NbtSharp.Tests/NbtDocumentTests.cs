@@ -294,7 +294,7 @@ public sealed class NbtDocumentTests
 
         Assert.True(root.TryGetMember("Health", out var health));
         Assert.Equal(20, health.GetInt32());
-        Assert.False(root.TryGetMember("Missing", out var missing));
+        Assert.False(root.TryGetMember("Missing", out _));
         Assert.Throws<NbtException>(() => root.GetMember("Numbers").TryGetMember("Health", out _));
     }
 
@@ -1196,24 +1196,32 @@ public sealed class NbtDocumentTests
     {
         var expectedEnumerator = expected.GetEnumerator();
         var actualEnumerator = actual.GetEnumerator();
-        while (true)
+        try
         {
-            var expectedNext = expectedEnumerator.MoveNext();
-            var actualNext = actualEnumerator.MoveNext();
-            if (expectedNext != actualNext)
+            while (true)
             {
-                return false;
-            }
+                var expectedNext = expectedEnumerator.MoveNext();
+                var actualNext = actualEnumerator.MoveNext();
+                if (expectedNext != actualNext)
+                {
+                    return false;
+                }
 
-            if (!expectedNext)
-            {
-                return true;
-            }
+                if (!expectedNext)
+                {
+                    return true;
+                }
 
-            if (!ValueEquals(expectedEnumerator.Current, actualEnumerator.Current))
-            {
-                return false;
+                if (!ValueEquals(expectedEnumerator.Current, actualEnumerator.Current))
+                {
+                    return false;
+                }
             }
+        }
+        finally
+        {
+            (expectedEnumerator as IDisposable)?.Dispose();
+            (actualEnumerator as IDisposable)?.Dispose();
         }
     }
 

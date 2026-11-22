@@ -784,7 +784,7 @@ public sealed class NbtStreamAdapterTests
         Assert.Null(rootName);
     }
 
-    private sealed class CountingConverter(NbtSerializerOptions options) : NbtConverter<string>
+    private sealed class CountingConverter : NbtConverter<string>
     {
         public int ReadCount;
 
@@ -801,8 +801,6 @@ public sealed class NbtStreamAdapterTests
             tagType = NbtTagType.String;
             return true;
         }
-
-        public NbtSerializerOptions Options { get; } = options;
     }
 
     private static NbtSerializerOptions OptionsWithCounter(CountingConverter converter)
@@ -842,7 +840,7 @@ public sealed class NbtStreamAdapterTests
     {
         var data = NbtSerializer.Serialize("hello", "root");
         var pipe = new Pipe();
-        var converter = new CountingConverter(new NbtSerializerOptions());
+        var converter = new CountingConverter();
         var producer = PushInChunksAsync(pipe.Writer, data, chunkSize: data.Length, complete: true);
 
         var actual = await NbtSerializer.DeserializeAsync<string>(
@@ -863,7 +861,7 @@ public sealed class NbtStreamAdapterTests
         var data = NbtSerializer.Serialize(text, "root");
         var firstLength = data.Length * 3 / 5;
         var pipe = new Pipe();
-        var converter = new CountingConverter(new NbtSerializerOptions());
+        var converter = new CountingConverter();
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
         cts.CancelAfter(TimeSpan.FromSeconds(5));
 
@@ -888,7 +886,7 @@ public sealed class NbtStreamAdapterTests
         var text = new string('y', 32 * 1024);
         var data = NbtSerializer.Serialize(text, "root");
         var pipe = new Pipe();
-        var converter = new CountingConverter(new NbtSerializerOptions());
+        var converter = new CountingConverter();
 
         var producer = PushInChunksAsync(pipe.Writer, data, chunkSize: 1, complete: true);
         var actual = await NbtSerializer.DeserializeAsync<string>(
@@ -945,7 +943,7 @@ public sealed class NbtStreamAdapterTests
         // final single-byte push satisfies the growth requirement while the writer stays open.
         var firstLength = data.Length - 1;
         var pipe = new Pipe();
-        var converter = new CountingConverter(new NbtSerializerOptions());
+        var converter = new CountingConverter();
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
         cts.CancelAfter(TimeSpan.FromSeconds(5));
 

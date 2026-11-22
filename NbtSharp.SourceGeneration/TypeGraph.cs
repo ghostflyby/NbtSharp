@@ -152,8 +152,6 @@ internal sealed class MemberModel
 
     public bool IsRequired { get; set; }
 
-    public bool IsExtensionData { get; set; }
-
     public ConverterMode ConverterMode { get; set; } = ConverterMode.Generated;
 
     public ITypeSymbol? ExplicitConverterType { get; set; }
@@ -1021,7 +1019,6 @@ internal sealed class TypeGraph
             isInitOnly: symbol is IPropertySymbol { SetMethod.IsInitOnly: true },
             setterContainingType: symbol.ContainingType)
         {
-            IsExtensionData = true,
             DeclaringType = symbol.ContainingType,
         };
         return true;

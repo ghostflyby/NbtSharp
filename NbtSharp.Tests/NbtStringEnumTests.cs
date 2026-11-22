@@ -291,6 +291,20 @@ public sealed class NbtStringEnumTests
             CreatePath(SerializationMode.Generated).Serialize(value));
     }
 
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void RawStringDtoRoundTrips(SerializationMode mode)
+    {
+        var path = CreatePath(mode);
+        var value = new RawStringDto { Kind = "Alpha", Flags = "1, 32768" };
+
+        var copy = path.Deserialize<RawStringDto>(path.Serialize(value));
+
+        Assert.Equal(value.Kind, copy.Kind);
+        Assert.Equal(value.Flags, copy.Flags);
+    }
+
     private static NbtSerializerOptions OptionsWithPlainKindConverter()
     {
         var options = new NbtSerializerOptions
@@ -456,6 +470,7 @@ internal sealed class RawStringDto
 [NbtSerializable(typeof(StringFlagsReaderDto))]
 [NbtSerializable(typeof(PlainEnumDto))]
 [NbtSerializable(typeof(ExplicitConverterDto))]
+[NbtSerializable(typeof(RawStringDto))]
 [NbtSerializable(typeof(StringEnumKind))]
 [NbtSerializable(typeof(StringEnumFlags))]
 [NbtSerializable(typeof(StringAliasEnum))]

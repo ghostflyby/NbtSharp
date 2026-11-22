@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 
 namespace NbtSharp.Tests;
 
@@ -337,15 +338,16 @@ public sealed class NbtContractModifierTests
     [Fact]
     public void ReentrantResolutionOfTheSameTypeThrows()
     {
-        var options = new NbtSerializerOptions();
+        var optionsSlot = new OptionsSlot();
         var resolver = new NbtReflectionTypeInfoResolver(c =>
         {
             if (c.Type == typeof(SelfRefDto))
             {
-                NbtSerializer.Serialize(new SelfRefDto(), "nested", options);
+                NbtSerializer.Serialize(new SelfRefDto(), "nested", optionsSlot.Value);
             }
         });
-        options = options.WithTypeInfoResolver(resolver);
+        optionsSlot.Value = optionsSlot.Value.WithTypeInfoResolver(resolver);
+        var options = optionsSlot.Value;
 
         var exception = Assert.Throws<InvalidOperationException>(() =>
             NbtSerializer.Serialize(new SelfRefDto(), "root", options));
@@ -358,19 +360,20 @@ public sealed class NbtContractModifierTests
     public void NestedResolutionOfASiblingTypeSucceedsExactlyOnce()
     {
         var siblingRuns = 0;
-        var options = new NbtSerializerOptions();
+        var optionsSlot = new OptionsSlot();
         var resolver = new NbtReflectionTypeInfoResolver(c =>
         {
             if (c.Type == typeof(SiblingADto))
             {
-                NbtSerializer.Serialize(new SiblingBDto { Value = 3 }, "sibling", options);
+                NbtSerializer.Serialize(new SiblingBDto { Value = 3 }, "sibling", optionsSlot.Value);
             }
             else if (c.Type == typeof(SiblingBDto))
             {
                 siblingRuns++;
             }
         });
-        options = options.WithTypeInfoResolver(resolver);
+        optionsSlot.Value = optionsSlot.Value.WithTypeInfoResolver(resolver);
+        var options = optionsSlot.Value;
 
         var data = NbtSerializer.Serialize(new SiblingADto { Name = "a" }, "root", options);
 
@@ -385,19 +388,20 @@ public sealed class NbtContractModifierTests
     [Fact]
     public void CyclicNestedResolutionThrows()
     {
-        var options = new NbtSerializerOptions();
+        var optionsSlot = new OptionsSlot();
         var resolver = new NbtReflectionTypeInfoResolver(c =>
         {
             if (c.Type == typeof(CycleADto))
             {
-                NbtSerializer.Serialize(new CycleBDto(), "b", options);
+                NbtSerializer.Serialize(new CycleBDto(), "b", optionsSlot.Value);
             }
             else if (c.Type == typeof(CycleBDto))
             {
-                NbtSerializer.Serialize(new CycleADto(), "a", options);
+                NbtSerializer.Serialize(new CycleADto(), "a", optionsSlot.Value);
             }
         });
-        options = options.WithTypeInfoResolver(resolver);
+        optionsSlot.Value = optionsSlot.Value.WithTypeInfoResolver(resolver);
+        var options = optionsSlot.Value;
 
         Assert.Throws<InvalidOperationException>(() =>
             NbtSerializer.Serialize(new CycleADto(), "root", options));
@@ -406,7 +410,7 @@ public sealed class NbtContractModifierTests
     [Fact]
     public void NestedResolutionOfCachedAndResolverlessTypesSucceeds()
     {
-        var options = new NbtSerializerOptions();
+        var optionsSlot = new OptionsSlot();
         var resolver = new NbtReflectionTypeInfoResolver(c =>
         {
             if (c.Type != typeof(UsesPreResolvedDto))
@@ -414,10 +418,11 @@ public sealed class NbtContractModifierTests
                 return;
             }
 
-            NbtSerializer.Serialize(new CachedSiblingDto { Value = 2 }, "cached", options);
+            NbtSerializer.Serialize(new CachedSiblingDto { Value = 2 }, "cached", optionsSlot.Value);
             NbtSerializer.Serialize(42, "plain");
         });
-        options = options.WithTypeInfoResolver(resolver);
+        optionsSlot.Value = optionsSlot.Value.WithTypeInfoResolver(resolver);
+        var options = optionsSlot.Value;
         NbtSerializer.Serialize(new CachedSiblingDto { Value = 1 }, "warm", options);
 
         var data = NbtSerializer.Serialize(new UsesPreResolvedDto { Name = "ok" }, "root", options);
@@ -517,7 +522,7 @@ public sealed class NbtContractModifierTests
         var payload = (NbtCompound)envelope["$value"].Value!;
         Assert.True(payload.ContainsKey("v"));
 
-        var copy = (ModifierPolyDerived)NbtSerializer.Deserialize<ModifierPolyBase>(data, options)!;
+        var copy = (ModifierPolyDerived)NbtSerializer.Deserialize<ModifierPolyBase>(data, options);
         Assert.Equal(4, copy.Value);
         Assert.Equal(1, derivedRuns);
     }
@@ -525,8 +530,8 @@ public sealed class NbtContractModifierTests
     [Fact]
     public async Task ConcurrentFirstTouchRunsTheModifierOnce()
     {
-        var runs = 0;
-        var resolver = new NbtReflectionTypeInfoResolver(_ => Interlocked.Increment(ref runs));
+        var runs = new StrongBox<int>();
+        var resolver = new NbtReflectionTypeInfoResolver(_ => Interlocked.Increment(ref runs.Value));
         var options = new NbtSerializerOptions { TypeInfoResolver = resolver };
         const int threads = 4;
         var barrier = new Barrier(threads);
@@ -543,7 +548,7 @@ public sealed class NbtContractModifierTests
             .ToArray();
         await Task.WhenAll(tasks);
 
-        Assert.Equal(1, Volatile.Read(ref runs));
+        Assert.Equal(1, Volatile.Read(ref runs.Value));
         Assert.All(results, result => Assert.Equal(results[0], result));
     }
 
@@ -710,6 +715,11 @@ public sealed class NbtContractModifierTests
 
     private static int IndexOfNameBytes(byte[] data, ReadOnlySpan<byte> needle) =>
         data.AsSpan().IndexOf(needle);
+
+    private sealed class OptionsSlot
+    {
+        public NbtSerializerOptions Value = new();
+    }
 
     private sealed class RenameDto
     {

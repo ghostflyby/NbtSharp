@@ -337,6 +337,25 @@ public sealed class GeneratedSerializationAotTests
     }
 
     [Fact]
+    public void WritesExtensionDataFromAnInitializedInstance()
+    {
+        var value = new AotExtensionData
+        {
+            Name = "Steve",
+            Health = 20,
+            Extra = new NbtCompound { ["UnknownTag"] = "extra" },
+        };
+
+        var data = NbtSerializer.Serialize(value, AotContext.Default.AotExtensionData, "root");
+        var copy = NbtSerializer.Deserialize(data, AotContext.Default.AotExtensionData);
+
+        Assert.Equal(value.Name, copy.Name);
+        Assert.Equal(value.Health, copy.Health);
+        var extra = Assert.IsType<NbtCompound>(copy.Extra);
+        Assert.Equal("extra", extra["UnknownTag"].Value);
+    }
+
+    [Fact]
     public void RoundTripsPolymorphicMembers()
     {
         var value = new AotPetOwner
