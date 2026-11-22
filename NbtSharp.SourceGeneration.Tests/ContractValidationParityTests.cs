@@ -383,15 +383,41 @@ public sealed class ContractValidationParityTests
         SerializationMode mode,
         string variant)
     {
+        // The same reason text is the contract on both paths: the generated diagnostic embeds it in
+        // the message, so asserting the message (not just the ID) keeps each row attributable to
+        // the rule it exercises. Without it, the abstract row would also pass through the
+        // "no public parameterless constructor" branch. The wrong-type row spells types differently
+        // by design: the generator renders symbols as keywords ('string'/'int'), while the runtime
+        // message uses Type names ('System.String'/'System.Int32').
+        var generatedReason = variant switch
+        {
+            "abstract" => "the converter type must not be abstract",
+            "no-default-constructor" =>
+                "the converter type must have a public parameterless constructor",
+            "wrong-type" => "the converter handles 'string' but the member type is 'int'",
+            _ => throw new ArgumentOutOfRangeException(nameof(variant), variant, "Unknown variant."),
+        };
+        var reason = variant switch
+        {
+            "abstract" => "the converter type must not be abstract",
+            "no-default-constructor" =>
+                "the converter type must have a public parameterless constructor",
+            "wrong-type" =>
+                "the converter handles 'System.String' but the member type is 'System.Int32'",
+            _ => throw new ArgumentOutOfRangeException(nameof(variant), variant, "Unknown variant."),
+        };
+
         if (mode == SerializationMode.Generated)
         {
             var output = Run(Source(CreateInvalidConverterDeclaration(variant)));
-            Assert.Contains(output.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG016");
+            var diagnostic = Assert.Single(
+                output.GeneratorDiagnostics,
+                static candidate => candidate.Id == "NBTSG016");
+            Assert.Contains(generatedReason, diagnostic.GetMessage(), StringComparison.Ordinal);
             return;
         }
 
         Type dtoType;
-        string reason;
         switch (variant)
         {
             case "abstract":
@@ -399,7 +425,6 @@ public sealed class ContractValidationParityTests
                 var value = new AbstractConverterDto { Value = 1 };
                 Assert.Equal(1, value.Value);
                 dtoType = typeof(AbstractConverterDto);
-                reason = "the converter type must not be abstract";
                 break;
             }
             case "no-default-constructor":
@@ -408,7 +433,6 @@ public sealed class ContractValidationParityTests
                 Assert.Equal(1, value.Value);
                 Assert.IsType<ParityNoDefaultCtorConverter>(ParityNoDefaultCtorConverter.Create());
                 dtoType = typeof(NoDefaultCtorConverterDto);
-                reason = "the converter type must have a public parameterless constructor";
                 break;
             }
             case "wrong-type":
@@ -416,7 +440,6 @@ public sealed class ContractValidationParityTests
                 var value = new WrongTypeConverterDto { Value = 1 };
                 Assert.Equal(1, value.Value);
                 dtoType = typeof(WrongTypeConverterDto);
-                reason = "the converter handles 'System.String' but the member type is 'System.Int32'";
                 break;
             }
             default:
@@ -472,6 +495,9 @@ public sealed class ContractValidationParityTests
             Assert.DoesNotContain(output.GeneratorDiagnostics, static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
             Assert.DoesNotContain(output.CompilationDiagnostics, static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
             Assert.True(output.GeneratedSourceCount > 0);
+            // The DTO converter must still be emitted for the mapped member; otherwise a silent
+            // "nothing generated for Dto" regression would pass every assertion above.
+            Assert.Contains("Kept", output.GeneratedSource, StringComparison.Ordinal);
             return;
         }
 
@@ -605,7 +631,12 @@ public sealed class ContractValidationParityTests
         return new GeneratorOutput(
             generatorDiagnostics,
             outputCompilation.GetDiagnostics(TestContext.Current.CancellationToken),
-            generatorDriver.GetRunResult().Results.Sum(static result => result.GeneratedSources.Length));
+            generatorDriver.GetRunResult().Results.Sum(static result => result.GeneratedSources.Length),
+            string.Join(
+                Environment.NewLine,
+                generatorDriver.GetRunResult().Results
+                    .SelectMany(static result => result.GeneratedSources)
+                    .Select(static source => source.SourceText.ToString())));
     }
 
     private static ImmutableArray<MetadataReference> GetReferences()
@@ -625,11 +656,13 @@ public sealed class ContractValidationParityTests
         public GeneratorOutput(
             ImmutableArray<Diagnostic> generatorDiagnostics,
             ImmutableArray<Diagnostic> compilationDiagnostics,
-            int generatedSourceCount)
+            int generatedSourceCount,
+            string generatedSource)
         {
             GeneratorDiagnostics = generatorDiagnostics;
             CompilationDiagnostics = compilationDiagnostics;
             GeneratedSourceCount = generatedSourceCount;
+            GeneratedSource = generatedSource;
         }
 
         public ImmutableArray<Diagnostic> GeneratorDiagnostics { get; }
@@ -637,6 +670,8 @@ public sealed class ContractValidationParityTests
         public ImmutableArray<Diagnostic> CompilationDiagnostics { get; }
 
         public int GeneratedSourceCount { get; }
+
+        public string GeneratedSource { get; }
     }
 
     private sealed class IgnoredRequiredDto

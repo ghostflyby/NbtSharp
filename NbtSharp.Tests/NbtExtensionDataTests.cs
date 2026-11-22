@@ -366,9 +366,10 @@ public sealed class NbtExtensionDataTests
     [Fact]
     public void ReflectionRejectsFieldsWithoutInclude()
     {
-        var options = ReflectionOptions();
+        var value = new FieldWithoutIncludeDto { Extra = new() };
+        Assert.NotNull(value.Extra);
 
-        Assert.Throws<NotSupportedException>(() => options.GetConverter(typeof(FieldWithoutIncludeDto)));
+        AssertExtensionContractRejected(value);
     }
 
     [Fact]
@@ -647,7 +648,6 @@ public sealed class NbtExtensionDataTests
     }
 
     [SuppressMessage("ReSharper", "UnusedAutoPropertyAccessor.Local")]
-    [SuppressMessage("ReSharper", "NotAccessedField.Compiler")]
     private sealed class FieldWithoutIncludeDto
     {
         [NbtExtensionData]

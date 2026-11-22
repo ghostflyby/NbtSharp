@@ -971,11 +971,11 @@ public sealed class NbtContractModifierTests
 
     internal sealed class TwinDeclarationOrderDto
     {
+        public int Third { get; set; }
+
         public int First { get; set; }
 
         public int Second { get; set; }
-
-        public int Third { get; set; }
     }
 
     [NbtDerived(typeof(TwinPolyDerived))]
