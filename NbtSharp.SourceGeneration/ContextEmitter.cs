@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Globalization;
 using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -681,6 +682,7 @@ internal sealed partial class ContextEmitter
         _writer.Indent();
 
         EmitMemberConverters(model);
+        EmitNameTables(model);
         EmitAccessors(model);
 
         EmitRead(model, typeName);
@@ -945,6 +947,35 @@ internal sealed partial class ContextEmitter
         }
     }
 
+    // Emits one pre-encoded modified UTF-8 name per member, inside the converter class. The names
+    // are written as decimal byte array initializers because U+0000 and supplementary characters
+    // have no representable string or u8 literal; the runtime compares them through
+    // NbtReader.NameEquals and writes them through the byte-name overloads without transcoding.
+    // member.Index is per type, so the fields must live in the converter class, not the context.
+    private void EmitNameTables(ObjectSpec model)
+    {
+        if (model.Members.Length == 0)
+        {
+            return;
+        }
+
+        foreach (var member in model.Members)
+        {
+            var encoded = NbtModifiedUtf8.GetBytes(member.NbtName);
+            var literals = new string[encoded.Length];
+            for (var i = 0; i < encoded.Length; i++)
+            {
+                literals[i] = encoded[i].ToString(CultureInfo.InvariantCulture);
+            }
+
+            _writer.WriteLine(
+                $"private static readonly byte[] __name{member.Index} = " +
+                $"new byte[] {{ {string.Join(", ", literals)} }};");
+        }
+
+        _writer.WriteLine();
+    }
+
     private void EmitAccessors(ObjectSpec model)
     {
         foreach (var member in model.Members)
@@ -1100,112 +1131,97 @@ internal sealed partial class ContextEmitter
         _writer.WriteLine("}");
         _writer.WriteLine();
 
-        _writer.WriteLine("var __name = reader.Name;");
-        _writer.WriteLine("if (__name is null)");
-        _writer.WriteLine("{");
-        _writer.Indent();
-        _writer.WriteLine(
-            "throw global::NbtSharp.NbtMetadataServices.MissingMemberName(reader);");
-        _writer.Outdent();
-        _writer.WriteLine("}");
-        _writer.WriteLine();
-
         if (hasDirectMembers)
         {
+            // The direct fast path dispatches on pre-encoded name bytes without decoding the wire
+            // name; the slow path keeps the decoded-string switch. Both resolve to a member index
+            // so the member body itself exists only once.
             _writer.WriteLine("try");
             _writer.WriteLine("{");
             _writer.Indent();
-        }
-
-        _writer.WriteLine("switch (__name)");
-        _writer.WriteLine("{");
-        _writer.Indent();
-        foreach (var member in model.Members)
-        {
-            var nbtName = SymbolDisplay.FormatLiteral(member.NbtName, quote: true);
-            var path = SymbolDisplay.FormatLiteral("." + member.NbtName, quote: true);
-            var scalarKind = member.ScalarKind;
-            _writer.WriteLine($"case {nbtName}:");
+            _writer.WriteLine("int __matched;");
+            _writer.WriteLine("if (__direct)");
+            _writer.WriteLine("{");
             _writer.Indent();
-            _writer.WriteLine(
-                $"if (__p{member.Index} && options.RejectDuplicateCompoundNames)");
+            _writer.WriteLine("__matched = -1;");
+            for (var i = 0; i < model.Members.Length; i++)
+            {
+                var member = model.Members[i];
+                _writer.WriteLine(
+                    i == 0
+                        ? $"if (reader.NameEquals(__name{member.Index}))"
+                        : $"else if (reader.NameEquals(__name{member.Index}))");
+                _writer.WriteLine("{");
+                _writer.Indent();
+                _writer.WriteLine($"__matched = {member.Index};");
+                _writer.Outdent();
+                _writer.WriteLine("}");
+            }
+
+            _writer.Outdent();
+            _writer.WriteLine("}");
+            _writer.WriteLine("else");
+            _writer.WriteLine("{");
+            _writer.Indent();
+            _writer.WriteLine("var __name = reader.Name;");
+            _writer.WriteLine("if (__name is null)");
             _writer.WriteLine("{");
             _writer.Indent();
             _writer.WriteLine(
-                $"throw global::NbtSharp.NbtMetadataServices.DuplicateMember(reader, {nbtName});");
+                "throw global::NbtSharp.NbtMetadataServices.MissingMemberName(reader);");
+            _writer.Outdent();
+            _writer.WriteLine("}");
+            _writer.WriteLine();
+            _writer.WriteLine("switch (__name)");
+            _writer.WriteLine("{");
+            _writer.Indent();
+            foreach (var member in model.Members)
+            {
+                var nbtName = SymbolDisplay.FormatLiteral(member.NbtName, quote: true);
+                _writer.WriteLine($"case {nbtName}:");
+                _writer.Indent();
+                _writer.WriteLine($"__matched = {member.Index};");
+                _writer.WriteLine("break;");
+                _writer.Outdent();
+            }
+
+            _writer.WriteLine("default:");
+            _writer.Indent();
+            _writer.WriteLine("__matched = -1;");
+            _writer.WriteLine("break;");
+            _writer.Outdent();
+            _writer.Outdent();
+            _writer.WriteLine("}");
             _writer.Outdent();
             _writer.WriteLine("}");
 
-            if (scalarKind != ScalarKind.None)
-            {
-                _writer.WriteLine("if (__direct)");
-                _writer.WriteLine("{");
-                _writer.Indent();
-                _writer.WriteLine($"__path = {path};");
-                _writer.WriteLine($"__v{member.Index} = {GetReadExpression(scalarKind)};");
-                _writer.WriteLine("__path = null;");
-                _writer.Outdent();
-                _writer.WriteLine("}");
-                _writer.WriteLine("else");
-                _writer.WriteLine("{");
-                _writer.Indent();
-            }
-
-            if (member.ConverterMode == ConverterMode.Explicit)
-            {
-                _writer.WriteLine(
-                    $"__v{member.Index} = global::NbtSharp.NbtMetadataServices.ReadValueWithConverter<{member.TypeName}>(" +
-                    $"ref reader, __converter{member.Index}, options, {path});");
-            }
-            else if (GetStaticConverterEntry(member) is { } staticEntry)
-            {
-                _writer.WriteLine(
-                    $"if (options.Converters.Count == 0 && " +
-                    $"options.TypeInfoResolver?.GetType() == typeof({ContextTypeName}))");
-                _writer.WriteLine("{");
-                _writer.Indent();
-                _writer.WriteLine(
-                    $"__v{member.Index} = global::NbtSharp.NbtMetadataServices.ReadValueWithConverter<{member.TypeName}>(" +
-                    $"ref reader, {ContextTypeName}.{staticEntry.StaticConverterName}.Value, options, {path});");
-                _writer.Outdent();
-                _writer.WriteLine("}");
-                _writer.WriteLine("else");
-                _writer.WriteLine("{");
-                _writer.Indent();
-                _writer.WriteLine(
-                    $"__v{member.Index} = global::NbtSharp.NbtMetadataServices.ReadValue<{member.TypeName}>(" +
-                    $"ref reader, options, {path});");
-                _writer.Outdent();
-                _writer.WriteLine("}");
-            }
-            else
-            {
-                _writer.WriteLine(
-                    $"__v{member.Index} = global::NbtSharp.NbtMetadataServices.ReadValue<{member.TypeName}>(" +
-                    $"ref reader, options, {path});");
-            }
-
-            if (scalarKind != ScalarKind.None)
-            {
-                _writer.Outdent();
-                _writer.WriteLine("}");
-            }
-
-            _writer.WriteLine($"__p{member.Index} = true;");
-            _writer.WriteLine("break;");
+            _writer.WriteLine();
+            _writer.WriteLine("if (__matched < 0)");
+            _writer.WriteLine("{");
+            _writer.Indent();
+            _writer.WriteLine("reader.Skip();");
             _writer.Outdent();
-        }
+            _writer.WriteLine("}");
+            _writer.WriteLine("else");
+            _writer.WriteLine("{");
+            _writer.Indent();
+            _writer.WriteLine("switch (__matched)");
+            _writer.WriteLine("{");
+            _writer.Indent();
+            foreach (var member in model.Members)
+            {
+                _writer.WriteLine($"case {member.Index}:");
+                _writer.Indent();
+                EmitMemberBody(member);
+                _writer.WriteLine("break;");
+                _writer.Outdent();
+            }
 
-        _writer.WriteLine("default:");
-        _writer.Indent();
-        _writer.WriteLine("reader.Skip();");
-        _writer.WriteLine("break;");
-        _writer.Outdent();
-        _writer.Outdent();
-        _writer.WriteLine("}");
+            _writer.Outdent();
+            _writer.WriteLine("}");
+            _writer.Outdent();
+            _writer.WriteLine("}");
 
-        if (hasDirectMembers)
-        {
             _writer.Outdent();
             _writer.WriteLine("}");
             _writer.WriteLine("catch (global::NbtSharp.NbtException __ex)");
@@ -1214,6 +1230,39 @@ internal sealed partial class ContextEmitter
             _writer.WriteLine(
                 "global::NbtSharp.NbtMetadataServices.PrependPath(__ex, __path);");
             _writer.WriteLine("throw;");
+            _writer.Outdent();
+            _writer.WriteLine("}");
+        }
+        else
+        {
+            _writer.WriteLine("var __name = reader.Name;");
+            _writer.WriteLine("if (__name is null)");
+            _writer.WriteLine("{");
+            _writer.Indent();
+            _writer.WriteLine(
+                "throw global::NbtSharp.NbtMetadataServices.MissingMemberName(reader);");
+            _writer.Outdent();
+            _writer.WriteLine("}");
+            _writer.WriteLine();
+
+            _writer.WriteLine("switch (__name)");
+            _writer.WriteLine("{");
+            _writer.Indent();
+            foreach (var member in model.Members)
+            {
+                var nbtName = SymbolDisplay.FormatLiteral(member.NbtName, quote: true);
+                _writer.WriteLine($"case {nbtName}:");
+                _writer.Indent();
+                EmitMemberBody(member);
+                _writer.WriteLine("break;");
+                _writer.Outdent();
+            }
+
+            _writer.WriteLine("default:");
+            _writer.Indent();
+            _writer.WriteLine("reader.Skip();");
+            _writer.WriteLine("break;");
+            _writer.Outdent();
             _writer.Outdent();
             _writer.WriteLine("}");
         }
@@ -1226,6 +1275,80 @@ internal sealed partial class ContextEmitter
 
         _writer.Outdent();
         _writer.WriteLine("}");
+    }
+
+    // Emits the body shared by every dispatch shape: duplicate-name detection, the direct or
+    // converter-based read, and the presence flag.
+    private void EmitMemberBody(MemberSpec member)
+    {
+        var nbtName = SymbolDisplay.FormatLiteral(member.NbtName, quote: true);
+        var path = SymbolDisplay.FormatLiteral("." + member.NbtName, quote: true);
+        var scalarKind = member.ScalarKind;
+        _writer.WriteLine(
+            $"if (__p{member.Index} && options.RejectDuplicateCompoundNames)");
+        _writer.WriteLine("{");
+        _writer.Indent();
+        _writer.WriteLine(
+            $"throw global::NbtSharp.NbtMetadataServices.DuplicateMember(reader, {nbtName});");
+        _writer.Outdent();
+        _writer.WriteLine("}");
+
+        if (scalarKind != ScalarKind.None)
+        {
+            _writer.WriteLine("if (__direct)");
+            _writer.WriteLine("{");
+            _writer.Indent();
+            _writer.WriteLine($"__path = {path};");
+            _writer.WriteLine($"__v{member.Index} = {GetReadExpression(scalarKind)};");
+            _writer.WriteLine("__path = null;");
+            _writer.Outdent();
+            _writer.WriteLine("}");
+            _writer.WriteLine("else");
+            _writer.WriteLine("{");
+            _writer.Indent();
+        }
+
+        if (member.ConverterMode == ConverterMode.Explicit)
+        {
+            _writer.WriteLine(
+                $"__v{member.Index} = global::NbtSharp.NbtMetadataServices.ReadValueWithConverter<{member.TypeName}>(" +
+                $"ref reader, __converter{member.Index}, options, {path});");
+        }
+        else if (GetStaticConverterEntry(member) is { } staticEntry)
+        {
+            _writer.WriteLine(
+                $"if (options.Converters.Count == 0 && " +
+                $"options.TypeInfoResolver?.GetType() == typeof({ContextTypeName}))");
+            _writer.WriteLine("{");
+            _writer.Indent();
+            _writer.WriteLine(
+                $"__v{member.Index} = global::NbtSharp.NbtMetadataServices.ReadValueWithConverter<{member.TypeName}>(" +
+                $"ref reader, {ContextTypeName}.{staticEntry.StaticConverterName}.Value, options, {path});");
+            _writer.Outdent();
+            _writer.WriteLine("}");
+            _writer.WriteLine("else");
+            _writer.WriteLine("{");
+            _writer.Indent();
+            _writer.WriteLine(
+                $"__v{member.Index} = global::NbtSharp.NbtMetadataServices.ReadValue<{member.TypeName}>(" +
+                $"ref reader, options, {path});");
+            _writer.Outdent();
+            _writer.WriteLine("}");
+        }
+        else
+        {
+            _writer.WriteLine(
+                $"__v{member.Index} = global::NbtSharp.NbtMetadataServices.ReadValue<{member.TypeName}>(" +
+                $"ref reader, options, {path});");
+        }
+
+        if (scalarKind != ScalarKind.None)
+        {
+            _writer.Outdent();
+            _writer.WriteLine("}");
+        }
+
+        _writer.WriteLine($"__p{member.Index} = true;");
     }
 
     private void EmitConstruction(ObjectSpec model, string typeName)
@@ -1370,7 +1493,7 @@ internal sealed partial class ContextEmitter
                 }
 
                 _writer.WriteLine($"__path = {path};");
-                _writer.WriteLine(GetWriteStatement(scalarKind, nbtName, value));
+                _writer.WriteLine(GetWriteStatement(scalarKind, $"__name{member.Index}", value));
                 _writer.WriteLine("__path = null;");
 
                 if (needsNullFallback)
@@ -1745,25 +1868,27 @@ internal sealed partial class ContextEmitter
             _ => throw new InvalidOperationException($"Unsupported scalar kind {kind}."),
         };
 
-    private static string GetWriteStatement(ScalarKind kind, string name, string value)
+    // nameExpression is the pre-encoded name field (__name{Index}) for the direct path; slow paths
+    // keep the formatted string literal.
+    private static string GetWriteStatement(ScalarKind kind, string nameExpression, string value)
     {
         var underlying = GetUnderlyingScalarKind(kind);
         var operand = IsNullableScalar(kind) ? $"{value}.Value" : value;
         return underlying switch
         {
-            ScalarKind.SByte => $"writer.WriteSByte({name}, {operand});",
-            ScalarKind.Byte => $"writer.WriteSByte({name}, unchecked((sbyte){operand}));",
-            ScalarKind.Int16 => $"writer.WriteInt16({name}, {operand});",
-            ScalarKind.Int32 => $"writer.WriteInt32({name}, {operand});",
-            ScalarKind.Int64 => $"writer.WriteInt64({name}, {operand});",
-            ScalarKind.UInt16 => $"writer.WriteInt16({name}, unchecked((short){operand}));",
-            ScalarKind.UInt32 => $"writer.WriteInt32({name}, unchecked((int){operand}));",
-            ScalarKind.UInt64 => $"writer.WriteInt64({name}, unchecked((long){operand}));",
-            ScalarKind.Char => $"writer.WriteInt16({name}, unchecked((short){operand}));",
-            ScalarKind.Single => $"writer.WriteSingle({name}, {operand});",
-            ScalarKind.Double => $"writer.WriteDouble({name}, {operand});",
-            ScalarKind.Boolean => $"writer.WriteSByte({name}, {operand} ? (sbyte)1 : (sbyte)0);",
-            ScalarKind.String => $"writer.WriteString({name}, {operand});",
+            ScalarKind.SByte => $"writer.WriteSByte({nameExpression}, {operand});",
+            ScalarKind.Byte => $"writer.WriteSByte({nameExpression}, unchecked((sbyte){operand}));",
+            ScalarKind.Int16 => $"writer.WriteInt16({nameExpression}, {operand});",
+            ScalarKind.Int32 => $"writer.WriteInt32({nameExpression}, {operand});",
+            ScalarKind.Int64 => $"writer.WriteInt64({nameExpression}, {operand});",
+            ScalarKind.UInt16 => $"writer.WriteInt16({nameExpression}, unchecked((short){operand}));",
+            ScalarKind.UInt32 => $"writer.WriteInt32({nameExpression}, unchecked((int){operand}));",
+            ScalarKind.UInt64 => $"writer.WriteInt64({nameExpression}, unchecked((long){operand}));",
+            ScalarKind.Char => $"writer.WriteInt16({nameExpression}, unchecked((short){operand}));",
+            ScalarKind.Single => $"writer.WriteSingle({nameExpression}, {operand});",
+            ScalarKind.Double => $"writer.WriteDouble({nameExpression}, {operand});",
+            ScalarKind.Boolean => $"writer.WriteSByte({nameExpression}, {operand} ? (sbyte)1 : (sbyte)0);",
+            ScalarKind.String => $"writer.WriteString({nameExpression}, {operand});",
             _ => throw new InvalidOperationException($"Unsupported scalar kind {kind}."),
         };
     }

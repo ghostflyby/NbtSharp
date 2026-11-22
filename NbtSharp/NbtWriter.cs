@@ -82,8 +82,34 @@ public ref struct NbtWriter
         FinishScalar();
     }
 
+    /// <summary>Writes a named signed 8-bit integer with a pre-encoded name.</summary>
+    /// <remarks>
+    /// The name bytes are written verbatim: their content is not validated as modified UTF-8, so
+    /// this overload can emit lead bytes the reader will reject. Validity is the caller's
+    /// responsibility; pre-encode names with the same modified UTF-8 encoder the reader uses.
+    /// </remarks>
+    public void WriteSByte(ReadOnlySpan<byte> name, sbyte value)
+    {
+        WriteNamedHeader(NbtTagType.Byte, name);
+        WriteByte((byte)value);
+        FinishScalar();
+    }
+
     /// <summary>Writes a named signed 16-bit integer.</summary>
     public void WriteInt16(string name, short value)
+    {
+        WriteNamedHeader(NbtTagType.Short, name);
+        WriteInt16Payload(value);
+        FinishScalar();
+    }
+
+    /// <summary>Writes a named signed 16-bit integer with a pre-encoded name.</summary>
+    /// <remarks>
+    /// The name bytes are written verbatim: their content is not validated as modified UTF-8, so
+    /// this overload can emit lead bytes the reader will reject. Validity is the caller's
+    /// responsibility; pre-encode names with the same modified UTF-8 encoder the reader uses.
+    /// </remarks>
+    public void WriteInt16(ReadOnlySpan<byte> name, short value)
     {
         WriteNamedHeader(NbtTagType.Short, name);
         WriteInt16Payload(value);
@@ -98,8 +124,34 @@ public ref struct NbtWriter
         FinishScalar();
     }
 
+    /// <summary>Writes a named signed 32-bit integer with a pre-encoded name.</summary>
+    /// <remarks>
+    /// The name bytes are written verbatim: their content is not validated as modified UTF-8, so
+    /// this overload can emit lead bytes the reader will reject. Validity is the caller's
+    /// responsibility; pre-encode names with the same modified UTF-8 encoder the reader uses.
+    /// </remarks>
+    public void WriteInt32(ReadOnlySpan<byte> name, int value)
+    {
+        WriteNamedHeader(NbtTagType.Int, name);
+        WriteInt32Payload(value);
+        FinishScalar();
+    }
+
     /// <summary>Writes a named signed 64-bit integer.</summary>
     public void WriteInt64(string name, long value)
+    {
+        WriteNamedHeader(NbtTagType.Long, name);
+        WriteInt64Payload(value);
+        FinishScalar();
+    }
+
+    /// <summary>Writes a named signed 64-bit integer with a pre-encoded name.</summary>
+    /// <remarks>
+    /// The name bytes are written verbatim: their content is not validated as modified UTF-8, so
+    /// this overload can emit lead bytes the reader will reject. Validity is the caller's
+    /// responsibility; pre-encode names with the same modified UTF-8 encoder the reader uses.
+    /// </remarks>
+    public void WriteInt64(ReadOnlySpan<byte> name, long value)
     {
         WriteNamedHeader(NbtTagType.Long, name);
         WriteInt64Payload(value);
@@ -114,6 +166,19 @@ public ref struct NbtWriter
         FinishScalar();
     }
 
+    /// <summary>Writes a named 32-bit IEEE 754 number with a pre-encoded name.</summary>
+    /// <remarks>
+    /// The name bytes are written verbatim: their content is not validated as modified UTF-8, so
+    /// this overload can emit lead bytes the reader will reject. Validity is the caller's
+    /// responsibility; pre-encode names with the same modified UTF-8 encoder the reader uses.
+    /// </remarks>
+    public void WriteSingle(ReadOnlySpan<byte> name, float value)
+    {
+        WriteNamedHeader(NbtTagType.Float, name);
+        WriteSinglePayload(value);
+        FinishScalar();
+    }
+
     /// <summary>Writes a named 64-bit IEEE 754 number.</summary>
     public void WriteDouble(string name, double value)
     {
@@ -122,8 +187,38 @@ public ref struct NbtWriter
         FinishScalar();
     }
 
+    /// <summary>Writes a named 64-bit IEEE 754 number with a pre-encoded name.</summary>
+    /// <remarks>
+    /// The name bytes are written verbatim: their content is not validated as modified UTF-8, so
+    /// this overload can emit lead bytes the reader will reject. Validity is the caller's
+    /// responsibility; pre-encode names with the same modified UTF-8 encoder the reader uses.
+    /// </remarks>
+    public void WriteDouble(ReadOnlySpan<byte> name, double value)
+    {
+        WriteNamedHeader(NbtTagType.Double, name);
+        WriteDoublePayload(value);
+        FinishScalar();
+    }
+
     /// <summary>Writes a named string from a span of characters.</summary>
     public void WriteString(string name, ReadOnlySpan<char> value)
+    {
+        ValidateStringLength(value);
+        WriteNamedHeader(NbtTagType.String, name);
+        WriteStringPayload(value);
+        FinishScalar();
+    }
+
+    /// <summary>Writes a named string with a pre-encoded name.</summary>
+    /// <remarks>
+    /// <para>
+    /// The name bytes are written verbatim: their content is not validated as modified UTF-8, so
+    /// this overload can emit lead bytes the reader will reject. Validity is the caller's
+    /// responsibility; pre-encode names with the same modified UTF-8 encoder the reader uses.
+    /// </para>
+    /// <para>The string value itself is still encoded and length-validated as modified UTF-8.</para>
+    /// </remarks>
+    public void WriteString(ReadOnlySpan<byte> name, ReadOnlySpan<char> value)
     {
         ValidateStringLength(value);
         WriteNamedHeader(NbtTagType.String, name);
@@ -431,6 +526,53 @@ public ref struct NbtWriter
         _expectedTagType = tagType;
     }
 
+    /// <summary>Writes a compound member header with a pre-encoded name.</summary>
+    /// <remarks>
+    /// <para>
+    /// Writes the tag type byte and the name (a big-endian ushort byte count followed by the name
+    /// bytes) and marks a value payload as expected; the caller then writes the anonymous payload.
+    /// The member must be written inside an open compound.
+    /// </para>
+    /// <para>
+    /// The name bytes are written verbatim: their content is not validated as modified UTF-8, so
+    /// this overload can emit lead bytes the reader will reject. Validity is the caller's
+    /// responsibility; pre-encode names with the same modified UTF-8 encoder the reader uses.
+    /// A name longer than 65535 bytes throws before any byte is written.
+    /// </para>
+    /// </remarks>
+    /// <param name="tagType">The member's tag type.</param>
+    /// <param name="name">The name bytes, encoded as Java modified UTF-8.</param>
+    public void WriteMemberHeader(NbtTagType tagType, ReadOnlySpan<byte> name)
+    {
+        EnsureNotCompleted();
+        if (IsPayloadExpected)
+        {
+            throw new InvalidOperationException("A value payload is already expected.");
+        }
+
+        if (_rootComplete)
+        {
+            throw new InvalidOperationException("The root value is already complete.");
+        }
+
+        if (_containers is null || _containers.Count == 0)
+        {
+            throw new InvalidOperationException("Root values use WriteRootHeader or a named write method.");
+        }
+
+        if (Top.IsList)
+        {
+            throw new InvalidOperationException("List elements use anonymous writes.");
+        }
+
+        ValidateNameLength(name.Length);
+        WriteByte((byte)tagType);
+        WriteNameBytes(name);
+        IncrementValuesAtDepth(_containers.Count);
+        IsPayloadExpected = true;
+        _expectedTagType = tagType;
+    }
+
     private void WriteNamedHeader(NbtTagType tagType, string name)
     {
         EnsureNotCompleted();
@@ -473,6 +615,66 @@ public ref struct NbtWriter
         WriteByte((byte)tagType);
         WriteStringPayload(name.AsSpan());
         IncrementValuesAtDepth(_containers.Count);
+    }
+
+    private void WriteNamedHeader(NbtTagType tagType, ReadOnlySpan<byte> name)
+    {
+        EnsureNotCompleted();
+        if (IsPayloadExpected)
+        {
+            throw new InvalidOperationException("A value payload is already expected.");
+        }
+
+        if (_rootComplete)
+        {
+            throw new InvalidOperationException("The root value is already complete.");
+        }
+
+        ValidateNameLength(name.Length);
+
+        if (_containers is null || _containers.Count == 0)
+        {
+            if (_rootWritten)
+            {
+                throw new InvalidOperationException("The root value has already been written.");
+            }
+
+            WriteByte((byte)tagType);
+            if (_rootFormat == NbtRootFormat.Named)
+            {
+                WriteNameBytes(name);
+            }
+
+            _rootWritten = true;
+            IncrementValuesAtDepth(0);
+            return;
+        }
+
+        if (Top.IsList)
+        {
+            throw new InvalidOperationException("List elements use the anonymous write methods.");
+        }
+
+        WriteByte((byte)tagType);
+        WriteNameBytes(name);
+        IncrementValuesAtDepth(_containers.Count);
+    }
+
+    private void ValidateNameLength(int byteCount)
+    {
+        if (byteCount > ushort.MaxValue)
+        {
+            throw new NbtException($"The string is too long to encode: {byteCount} bytes.")
+            {
+                BytePosition = BytesWritten,
+            };
+        }
+    }
+
+    private void WriteNameBytes(ReadOnlySpan<byte> name)
+    {
+        WriteUInt16Payload((ushort)name.Length);
+        WriteBytes(name);
     }
 
     private void WriteAnonymousHeader(NbtTagType tagType)

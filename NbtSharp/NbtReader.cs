@@ -54,6 +54,12 @@ public ref struct NbtReader
     private bool _streamCompleted;
     private bool _rootRead;
     private bool _rootComplete;
+    private bool _hasName;
+    private ReadOnlySpan<byte> _nameSpan;
+    private byte[]? _nameCopy;
+    private long _nameBytePosition;
+    private string? _nameCached;
+    private bool _nameNonCanonical;
 
     /// <summary>Initializes a reader over a contiguous span of NBT bytes.</summary>
     /// <param name="data">The complete NBT document.</param>
@@ -112,6 +118,7 @@ public ref struct NbtReader
     /// </remarks>
     public void Dispose()
     {
+        _nameSpan = default;
         if (_streamBuffer is null)
         {
             return;
@@ -129,7 +136,80 @@ public ref struct NbtReader
     public NbtTagType TagType { get; private set; }
 
     /// <summary>Gets the name of the current compound member or root tag, if any.</summary>
-    public string? Name { get; private set; }
+    /// <remarks>
+    /// <para>
+    /// The name is decoded lazily on the first access and cached until the reader advances, so
+    /// members that are matched through <see cref="NameEquals(ReadOnlySpan{byte})"/> or skipped
+    /// never allocate a decoded name string. An empty name is returned as <see cref="string.Empty"/>.
+    /// </para>
+    /// <para>
+    /// Because decoding is deferred, deep name validation failures (truncated or otherwise invalid
+    /// modified UTF-8 other than the lead bytes of 0xF0 or greater, which are rejected while
+    /// reading) throw <see cref="NbtException"/> from the first <see cref="Name"/> access rather
+    /// than from <see cref="Read"/>. <see cref="Skip"/> never materializes the skipped names, so
+    /// invalid names inside a skipped value are not decoded at all.
+    /// </para>
+    /// </remarks>
+    public string? Name
+    {
+        get
+        {
+            if (!_hasName)
+            {
+                return null;
+            }
+
+            return _nameCached ??= DecodeString(_nameSpan, _nameBytePosition);
+        }
+    }
+
+    /// <summary>
+    /// Compares the name of the current compound member or root tag with pre-encoded modified
+    /// UTF-8 name bytes.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Names are compared by their decoded value; the byte comparison is a fast path that applies
+    /// only when the wire name is canonically encoded. Wire names that use a non-canonical
+    /// encoding (a raw 0x00 byte, or an overlong two- or three-byte form) fall back to decoding
+    /// both names and comparing the decoded strings ordinally, so they match the input bytes of
+    /// the equivalent canonical encoding.
+    /// </para>
+    /// <para>
+    /// The result is valid only while the reader is positioned on the current token and the input
+    /// buffer is kept alive and unchanged. Input <paramref name="name"/> bytes that are not valid
+    /// modified UTF-8 throw <see cref="NbtException"/> when the decoded comparison is reached.
+    /// </para>
+    /// </remarks>
+    /// <param name="name">The name bytes, encoded as Java modified UTF-8.</param>
+    /// <returns>
+    /// <see langword="true"/> if the current token carries a name whose decoded value equals the
+    /// decoded value of <paramref name="name"/>; <see langword="false"/> for list elements,
+    /// container-end tokens, unnamed roots, and different names.
+    /// </returns>
+    public bool NameEquals(ReadOnlySpan<byte> name)
+    {
+        if (!_hasName)
+        {
+            return false;
+        }
+
+        var recorded = _nameSpan;
+        if (recorded.SequenceEqual(name))
+        {
+            return true;
+        }
+
+        if (!_nameNonCanonical)
+        {
+            return false;
+        }
+
+        return string.Equals(
+            DecodeString(recorded, _nameBytePosition),
+            DecodeString(name, _nameBytePosition),
+            StringComparison.Ordinal);
+    }
 
     /// <summary>Gets the number of bytes consumed from the start of the document.</summary>
     public long BytesConsumed { get; private set; }
@@ -196,7 +276,7 @@ public ref struct NbtReader
             }
 
             PopContainer();
-            SetToken(NbtTokenType.EndList, NbtTagType.End, null);
+            SetToken(NbtTokenType.EndList, NbtTagType.End, hasName: false);
             FinishRootIfClosed();
             return true;
         }
@@ -206,13 +286,13 @@ public ref struct NbtReader
         if (tagType == NbtTagType.End)
         {
             PopContainer();
-            SetToken(NbtTokenType.EndCompound, NbtTagType.End, null);
+            SetToken(NbtTokenType.EndCompound, NbtTagType.End, hasName: false);
             FinishRootIfClosed();
             return true;
         }
 
-        var name = ReadString();
-        StartTag(tagType, name, position);
+        ReadName();
+        StartTag(tagType, hasName: true, position);
         return true;
     }
 
@@ -265,12 +345,15 @@ public ref struct NbtReader
             }
             else
             {
-                _ = ReadString();
+                ReadName();
                 SkipValue(tagType);
             }
         }
 
-        SetToken(skippedList ? NbtTokenType.EndList : NbtTokenType.EndCompound, NbtTagType.End, null);
+        SetToken(
+            skippedList ? NbtTokenType.EndList : NbtTokenType.EndCompound,
+            NbtTagType.End,
+            hasName: false);
         FinishRootIfClosed();
     }
 
@@ -438,13 +521,18 @@ public ref struct NbtReader
             };
         }
 
-        var name = _rootFormat == NbtRootFormat.Named ? ReadString() : null;
+        var hasName = _rootFormat == NbtRootFormat.Named;
+        if (hasName)
+        {
+            ReadName();
+        }
+
         _rootRead = true;
-        StartTag(tagType, name, position);
+        StartTag(tagType, hasName, position);
         return true;
     }
 
-    private void StartTag(NbtTagType tagType, string? name, long position)
+    private void StartTag(NbtTagType tagType, bool hasName, long position)
     {
         if (tagType == NbtTagType.End)
         {
@@ -461,17 +549,17 @@ public ref struct NbtReader
         {
             case NbtTagType.Compound:
                 PushContainer(isList: false, NbtTagType.End, remaining: 0);
-                SetToken(NbtTokenType.StartCompound, tagType, name);
+                SetToken(NbtTokenType.StartCompound, tagType, hasName);
                 HasPendingContainer = true;
                 break;
             case NbtTagType.List:
-                SetToken(NbtTokenType.StartList, tagType, name);
+                SetToken(NbtTokenType.StartList, tagType, hasName);
                 ReadListHeader();
                 HasPendingContainer = true;
                 break;
             default:
                 _valueStart = BytesConsumed;
-                SetToken(NbtTokenType.Value, tagType, name);
+                SetToken(NbtTokenType.Value, tagType, hasName);
                 HasPendingValue = true;
                 break;
         }
@@ -490,17 +578,17 @@ public ref struct NbtReader
         {
             case NbtTagType.Compound:
                 PushContainer(isList: false, NbtTagType.End, remaining: 0);
-                SetToken(NbtTokenType.StartCompound, elementType, null);
+                SetToken(NbtTokenType.StartCompound, elementType, hasName: false);
                 HasPendingContainer = true;
                 break;
             case NbtTagType.List:
-                SetToken(NbtTokenType.StartList, elementType, null);
+                SetToken(NbtTokenType.StartList, elementType, hasName: false);
                 ReadListHeader();
                 HasPendingContainer = true;
                 break;
             default:
                 _valueStart = BytesConsumed;
-                SetToken(NbtTokenType.Value, elementType, null);
+                SetToken(NbtTokenType.Value, elementType, hasName: false);
                 HasPendingValue = true;
                 break;
         }
@@ -617,11 +705,19 @@ public ref struct NbtReader
         }
     }
 
-    private void SetToken(NbtTokenType tokenType, NbtTagType tagType, string? name)
+    private void SetToken(NbtTokenType tokenType, NbtTagType tagType, bool hasName)
     {
         TokenType = tokenType;
         TagType = tagType;
-        Name = name;
+        if (hasName)
+        {
+            return;
+        }
+
+        _hasName = false;
+        _nameSpan = default;
+        _nameCached = null;
+        _nameNonCanonical = false;
     }
 
     private NbtTagType ReadTagType()
@@ -853,6 +949,91 @@ public ref struct NbtReader
                 BytePosition = position,
             };
         }
+    }
+
+    // Reads a compound member or root name without decoding it. The recorded bytes are addressed
+    // by _nameSpan: either a slice into the current segment, or a slice into the reusable _nameCopy
+    // buffer. Stream input always copies, because the reads that follow the name (a list header
+    // needs up to 5 more bytes) can refill and overwrite the pooled stream buffer; a name that
+    // crosses sequence segments is copied the same way.
+    private void ReadName()
+    {
+        _nameCached = null;
+        _nameBytePosition = BytesConsumed;
+        var length = ReadUInt16();
+        _hasName = true;
+        _nameNonCanonical = false;
+        if (length == 0)
+        {
+            _nameSpan = default;
+            return;
+        }
+
+        EnsurePayloadFits(length);
+        if (_stream is null && _span.Length >= length)
+        {
+            var bytes = _span[..length];
+            _nameNonCanonical = ScanNameBytes(bytes);
+            _nameSpan = bytes;
+            _span = _span[length..];
+            BytesConsumed += length;
+            return;
+        }
+
+        if (_nameCopy is null || _nameCopy.Length < length)
+        {
+            var capacity = _nameCopy?.Length ?? 0;
+            _nameCopy = new byte[Math.Max(length, capacity * 2)];
+        }
+
+        var destination = _nameCopy.AsSpan(0, length);
+        ReadExactly(destination);
+        _nameNonCanonical = ScanNameBytes(destination);
+        _nameSpan = destination;
+    }
+
+    // Pre-scans name bytes while they are still addressable: rejects lead bytes of 0xF0 or
+    // greater, and records whether the encoding is non-canonical (a raw 0x00 byte, an overlong
+    // two-byte form, or an overlong three-byte form), which makes NameEquals fall back to a
+    // decoded string comparison. Deeper validation is deferred to the first Name access.
+    private bool ScanNameBytes(ReadOnlySpan<byte> bytes)
+    {
+        var nonCanonical = false;
+        for (var i = 0; i < bytes.Length; i++)
+        {
+            var value = bytes[i];
+            if (value >= 0xF0)
+            {
+                throw new NbtException(
+                    "Invalid modified UTF-8 string: lead bytes of 0xF0 or greater are not allowed.")
+                {
+                    BytePosition = _nameBytePosition,
+                };
+            }
+
+            if (value >= 0x80)
+            {
+                if (value <= 0xBF)
+                {
+                    continue; // continuation byte of a multi-byte sequence
+                }
+
+                // Multi-byte lead byte.
+                if (value is 0xC0 or 0xC1 ||
+                    (value == 0xE0 &&
+                     i + 1 < bytes.Length &&
+                     bytes[i + 1] is >= 0x80 and <= 0x9F))
+                {
+                    nonCanonical = true; // overlong two- or three-byte form
+                }
+            }
+            else if (value == 0x00)
+            {
+                nonCanonical = true; // raw null instead of the two-byte form
+            }
+        }
+
+        return nonCanonical;
     }
 
     // T is a one-byte primitive (byte or sbyte), so the payload byte count equals the element count.

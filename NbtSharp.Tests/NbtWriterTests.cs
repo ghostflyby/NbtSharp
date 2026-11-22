@@ -1,4 +1,5 @@
 using System.Buffers;
+using Myitian.Text;
 using Xunit.Sdk;
 
 namespace NbtSharp.Tests;
@@ -258,6 +259,151 @@ public sealed class NbtWriterTests
 
         Throws<InvalidOperationException>(ref writer, static (ref value) => value.Complete());
     }
+
+    [Theory]
+    [InlineData("Health")]
+    [InlineData("\0")]
+    [InlineData("é")]
+    [InlineData("€")]
+    [InlineData("中文")]
+    [InlineData("\U0001F600")]
+    [InlineData("")]
+    public void ByteNameOverloadsProduceIdenticalBytes(string name)
+    {
+        var fromStrings = new ArrayBufferWriter<byte>();
+        var stringWriter = new NbtWriter(fromStrings);
+        stringWriter.WriteStartCompound("root");
+        stringWriter.WriteSByte(name, -1);
+        stringWriter.WriteInt16(name, 2);
+        stringWriter.WriteInt32(name, 3);
+        stringWriter.WriteInt64(name, 4);
+        stringWriter.WriteSingle(name, 0.5f);
+        stringWriter.WriteDouble(name, 0.25);
+        stringWriter.WriteString(name, "v");
+        stringWriter.WriteEndCompound();
+        stringWriter.Complete();
+
+        var encoded = EncodeName(name);
+        var fromBytes = new ArrayBufferWriter<byte>();
+        var byteWriter = new NbtWriter(fromBytes);
+        byteWriter.WriteStartCompound("root");
+        byteWriter.WriteSByte(encoded, -1);
+        byteWriter.WriteInt16(encoded, 2);
+        byteWriter.WriteInt32(encoded, 3);
+        byteWriter.WriteInt64(encoded, 4);
+        byteWriter.WriteSingle(encoded, 0.5f);
+        byteWriter.WriteDouble(encoded, 0.25);
+        byteWriter.WriteString(encoded, "v");
+        byteWriter.WriteEndCompound();
+        byteWriter.Complete();
+
+        Assert.Equal(fromStrings.WrittenSpan.ToArray(), fromBytes.WrittenSpan.ToArray());
+    }
+
+    [Fact]
+    public void ByteNameOverloadsAcceptTheLargestName()
+    {
+        var name = new string('a', ushort.MaxValue);
+        var encoded = EncodeName(name);
+        Assert.Equal(ushort.MaxValue, encoded.Length);
+
+        var fromStrings = new ArrayBufferWriter<byte>();
+        var stringWriter = new NbtWriter(fromStrings);
+        stringWriter.WriteInt32(name, 7);
+        stringWriter.Complete();
+
+        var fromBytes = new ArrayBufferWriter<byte>();
+        var byteWriter = new NbtWriter(fromBytes);
+        byteWriter.WriteInt32(encoded, 7);
+        byteWriter.Complete();
+
+        Assert.Equal(fromStrings.WrittenSpan.ToArray(), fromBytes.WrittenSpan.ToArray());
+    }
+
+    [Fact]
+    public void ByteMemberHeaderProducesIdenticalBytes()
+    {
+        var fromStrings = new ArrayBufferWriter<byte>();
+        var stringWriter = new NbtWriter(fromStrings);
+        stringWriter.WriteStartCompound("root");
+        stringWriter.WriteInt32("é\0A", 7);
+        stringWriter.WriteEndCompound();
+        stringWriter.Complete();
+
+        var fromBytes = new ArrayBufferWriter<byte>();
+        var byteWriter = new NbtWriter(fromBytes);
+        byteWriter.WriteStartCompound("root");
+        byteWriter.WriteMemberHeader(NbtTagType.Int, EncodeName("é\0A"));
+        byteWriter.WriteInt32(7);
+        byteWriter.WriteEndCompound();
+        byteWriter.Complete();
+
+        Assert.Equal(fromStrings.WrittenSpan.ToArray(), fromBytes.WrittenSpan.ToArray());
+    }
+
+    [Fact]
+    public void OverlongByteNameThrowsBeforeWriting()
+    {
+        var name = new byte[ushort.MaxValue + 1];
+        for (var overload = 0; overload < 7; overload++)
+        {
+            var buffer = new ArrayBufferWriter<byte>();
+            var writer = new NbtWriter(buffer);
+            var selected = overload;
+            Throws<NbtException>(ref writer, (ref value) =>
+            {
+                switch (selected)
+                {
+                    case 0: value.WriteSByte(name, 1); break;
+                    case 1: value.WriteInt16(name, 2); break;
+                    case 2: value.WriteInt32(name, 3); break;
+                    case 3: value.WriteInt64(name, 4); break;
+                    case 4: value.WriteSingle(name, 0.5f); break;
+                    case 5: value.WriteDouble(name, 0.25); break;
+                    case 6: value.WriteString(name, "v"); break;
+                }
+            });
+
+            Assert.Equal(0, buffer.WrittenCount);
+        }
+
+        // WriteMemberHeader requires an open compound, so the root header is already on the wire.
+        var memberBuffer = new ArrayBufferWriter<byte>();
+        var memberWriter = new NbtWriter(memberBuffer);
+        memberWriter.WriteStartCompound("root");
+        var headerLength = memberBuffer.WrittenCount;
+        Throws<NbtException>(ref memberWriter, (ref value) =>
+            value.WriteMemberHeader(NbtTagType.Int, name));
+        Assert.Equal(headerLength, memberBuffer.WrittenCount);
+    }
+
+    [Fact]
+    public void ByteNameOverloadWritesLeadingF0ThatTheReaderRejects()
+    {
+        var buffer = new ArrayBufferWriter<byte>();
+        var writer = new NbtWriter(buffer);
+        writer.WriteStartCompound("root");
+        writer.WriteInt32([0xF0, 0x41], 7);
+        writer.WriteEndCompound();
+        writer.Complete();
+
+        Assert.Throws<NbtException>(() =>
+        {
+            var reader = new NbtReader(buffer.WrittenSpan);
+            try
+            {
+                while (reader.Read())
+                {
+                }
+            }
+            finally
+            {
+                reader.Dispose();
+            }
+        });
+    }
+
+    private static byte[] EncodeName(string name) => ModifiedUTF8Encoding.Instance.GetBytes(name);
 
     private delegate void NbtWriterAction(ref NbtWriter writer);
 

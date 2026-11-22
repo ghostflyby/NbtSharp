@@ -232,6 +232,15 @@ modified encoder at generation time, and the runtime needs name-bytes exposure o
 `WriteMemberHeader(tag, ReadOnlySpan<byte> name)` on the writer. This is the largest single
 hot-path win.
 
+**Status (2026-11-22): implemented on feat/stj-gap-p0.** The reader records name bytes without
+decoding (`NbtReader.NameEquals(ReadOnlySpan<byte>)` compares against pre-encoded names, with a
+decoded fallback that keeps non-canonical wire encodings matching their canonical equivalents;
+`Name` is now lazy and cached per token). The writer gained byte-name overloads for the scalar
+writes and `WriteMemberHeader(NbtTagType, ReadOnlySpan<byte>)`. Generated converters embed
+per-member modified UTF-8 name byte tables, dispatch reads through `NameEquals`, and write through
+the byte overloads on the direct path. Deferred name validation (`Name` throws on first access,
+skipped names are never decoded) and the writer's verbatim name bytes are documented API behavior.
+
 **PERF-2 — options-less calls rebuild converter caches.** See G-OPT-1; same fix.
 
 **Status (2026-11-22): implemented** through the shared frozen `Default` singleton (see G-OPT-1).

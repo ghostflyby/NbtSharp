@@ -1883,13 +1883,123 @@ public sealed class NbtSourceGeneratorTests
         Assert.Contains("NbtMetadataServices.ReadBoolean(ref reader)", result.GeneratedSource, StringComparison.Ordinal);
         Assert.Contains("reader.GetString()", result.GeneratedSource, StringComparison.Ordinal);
         Assert.Contains("reader.GetInt32()", result.GeneratedSource, StringComparison.Ordinal);
-        Assert.Contains("writer.WriteString(\"Name\", __m", result.GeneratedSource, StringComparison.Ordinal);
+        Assert.Contains("writer.WriteString(__name1, __m", result.GeneratedSource, StringComparison.Ordinal);
         Assert.Contains(
-            "writer.WriteSByte(\"OptionalFlag\", __m",
+            "writer.WriteSByte(__name3, __m",
             result.GeneratedSource,
             StringComparison.Ordinal);
         Assert.Contains(
             ".Value ? (sbyte)1 : (sbyte)0",
+            result.GeneratedSource,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EmitsPreEncodedNameTablesAndByteDispatch()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Player
+            {
+                public int Health { get; set; }
+
+                public string Name { get; set; } = "";
+            }
+            """);
+
+        AssertNoErrors(result);
+        Assert.Contains(
+            "private static readonly byte[] __name0 = new byte[] { 72, 101, 97, 108, 116, 104 };",
+            result.GeneratedSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "private static readonly byte[] __name1 = new byte[] { 78, 97, 109, 101 };",
+            result.GeneratedSource,
+            StringComparison.Ordinal);
+        Assert.Contains("reader.NameEquals(__name0)", result.GeneratedSource, StringComparison.Ordinal);
+        Assert.Contains("reader.NameEquals(__name1)", result.GeneratedSource, StringComparison.Ordinal);
+        Assert.Contains("int __matched;", result.GeneratedSource, StringComparison.Ordinal);
+        Assert.Contains("case \"Health\":", result.GeneratedSource, StringComparison.Ordinal);
+        Assert.Contains("case \"Name\":", result.GeneratedSource, StringComparison.Ordinal);
+        Assert.Contains(
+            "writer.WriteInt32(__name0, value.Health);",
+            result.GeneratedSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "writer.WriteString(__name1, __m1);",
+            result.GeneratedSource,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NameTablesEncodeModifiedUtf8OnlyNames()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Player
+            {
+                [NbtPropertyName("\0a\U0001F600z")]
+                public int Value { get; set; }
+            }
+            """);
+
+        AssertNoErrors(result);
+        // C0 80 61 ED A0 BD ED B8 80 7A: U+0000 as the two-byte form plus the CESU-8 surrogate pair.
+        Assert.Contains(
+            "private static readonly byte[] __name0 = " +
+            "new byte[] { 192, 128, 97, 237, 160, 189, 237, 184, 128, 122 };",
+            result.GeneratedSource,
+            StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(
+        "NbtNamingPolicyKind.CamelCase",
+        "new byte[] { 104, 101, 97, 108, 116, 104, 80, 111, 105, 110, 116, 115 }",
+        "\"healthPoints\"")]
+    [InlineData(
+        "NbtNamingPolicyKind.SnakeCaseLower",
+        "new byte[] { 104, 101, 97, 108, 116, 104, 95, 112, 111, 105, 110, 116, 115 }",
+        "\"health_points\"")]
+    public void NameTablesEncodeThePolicyAdjustedName(
+        string policy,
+        string expectedBytes,
+        string expectedCaseLabel)
+    {
+        var result = Run($$"""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            [NbtSourceGenerationOptions(NamingPolicy = {{policy}})]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal sealed class Player
+            {
+                public int HealthPoints { get; set; }
+            }
+            """);
+
+        AssertNoErrors(result);
+        Assert.Contains(
+            $"private static readonly byte[] __name0 = {expectedBytes};",
+            result.GeneratedSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            $"case {expectedCaseLabel}:",
             result.GeneratedSource,
             StringComparison.Ordinal);
     }
@@ -1977,23 +2087,23 @@ public sealed class NbtSourceGeneratorTests
         Assert.Contains("unchecked((ulong)reader.GetInt64())", result.GeneratedSource, StringComparison.Ordinal);
         Assert.Contains("unchecked((char)reader.GetInt16())", result.GeneratedSource, StringComparison.Ordinal);
         Assert.Contains(
-            "writer.WriteInt16(\"UShort\", unchecked((short)",
+            "writer.WriteInt16(__name0, unchecked((short)",
             result.GeneratedSource,
             StringComparison.Ordinal);
         Assert.Contains(
-            "writer.WriteInt32(\"UInt\", unchecked((int)",
+            "writer.WriteInt32(__name1, unchecked((int)",
             result.GeneratedSource,
             StringComparison.Ordinal);
         Assert.Contains(
-            "writer.WriteInt64(\"ULong\", unchecked((long)",
+            "writer.WriteInt64(__name2, unchecked((long)",
             result.GeneratedSource,
             StringComparison.Ordinal);
         Assert.Contains(
-            "writer.WriteInt16(\"Character\", unchecked((short)",
+            "writer.WriteInt16(__name3, unchecked((short)",
             result.GeneratedSource,
             StringComparison.Ordinal);
         Assert.Contains(
-            "writer.WriteInt64(\"OptionalULong\", unchecked((long)__m",
+            "writer.WriteInt64(__name4, unchecked((long)__m",
             result.GeneratedSource,
             StringComparison.Ordinal);
     }
