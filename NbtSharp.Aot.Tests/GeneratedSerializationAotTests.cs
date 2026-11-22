@@ -289,6 +289,30 @@ public sealed class GeneratedSerializationAotTests
     }
 
     [Fact]
+    public void RoundTripsStringEnums()
+    {
+        var value = new AotStringEnums
+        {
+            Kind = AotMob.Creeper,
+            Undefined = (AotMob)200,
+            Flags = AotStringFlags.Walk | AotStringFlags.Swim,
+        };
+
+        var data = NbtSerializer.Serialize(value, AotContext.Default.AotStringEnums, "root");
+        var copy = NbtSerializer.Deserialize(data, AotContext.Default.AotStringEnums);
+
+        var root = (NbtCompound)NbtSerializer.Deserialize(data).Value.Value!;
+        Assert.Equal(NbtTagType.String, root["Kind"].TagType);
+        Assert.Equal("Creeper", root["Kind"].Value);
+        Assert.Equal("200", root["Undefined"].Value);
+        Assert.Equal("Walk, Swim", root["Flags"].Value);
+
+        Assert.Equal(value.Kind, copy.Kind);
+        Assert.Equal(value.Undefined, copy.Undefined);
+        Assert.Equal(value.Flags, copy.Flags);
+    }
+
+    [Fact]
     public void RoundTripsPolymorphicMembers()
     {
         var value = new AotPetOwner
@@ -342,6 +366,7 @@ internal sealed class AotPetOwner
 [NbtSerializable(typeof(AotSimple))]
 [NbtSerializable(typeof(AotRequired))]
 [NbtSerializable(typeof(AotEnums))]
+[NbtSerializable(typeof(AotStringEnums))]
 [NbtSerializable(typeof(AotWrapper<AotSimple>))]
 [NbtSerializable(typeof(AotCollections))]
 [NbtSerializable(typeof(AotCollectionShapes))]
@@ -389,6 +414,33 @@ internal sealed class AotEnums
     public AotKind? Optional { get; init; }
 
     public List<AotKind> Values { get; init; } = [];
+}
+
+[NbtStringEnum]
+internal enum AotMob : byte
+{
+    Zombie,
+    Creeper,
+    Skeleton,
+}
+
+[NbtStringEnum]
+[Flags]
+internal enum AotStringFlags
+{
+    None = 0,
+    Walk = 1,
+    Swim = 2,
+    Fly = 4,
+}
+
+internal sealed class AotStringEnums
+{
+    public AotMob Kind { get; init; }
+
+    public AotMob Undefined { get; init; }
+
+    public AotStringFlags Flags { get; init; }
 }
 
 internal sealed class AotWrapper<T>

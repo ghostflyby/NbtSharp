@@ -2398,6 +2398,135 @@ public sealed class NbtSourceGeneratorTests
     }
 
     [Fact]
+    public void StringEnumUsesTheRuntimeConverterFactory()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            [NbtStringEnum]
+            internal enum Kind : byte
+            {
+                Zombie,
+                Creeper,
+            }
+
+            internal sealed class Player
+            {
+                public Kind Kind { get; set; }
+            }
+            """);
+
+        AssertNoErrors(result);
+        Assert.Contains(
+            "new global::NbtSharp.NbtStringEnumConverter<",
+            result.GeneratedSource,
+            StringComparison.Ordinal);
+        // The generated numeric enum converter reads through GetSByte(); nothing else in this
+        // graph can, so its absence proves no numeric converter was emitted.
+        Assert.DoesNotContain("GetSByte()", result.GeneratedSource, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AddingAndRemovingTheStringEnumAttributeRegeneratesTheContext()
+    {
+        var parseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
+        const string source = """
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal enum Kind : byte
+            {
+                Zombie,
+                Creeper,
+            }
+
+            internal sealed class Player
+            {
+                public Kind Kind { get; set; }
+            }
+            """;
+        var tree = CSharpSyntaxTree.ParseText(
+            source,
+            parseOptions,
+            path: "Player.cs",
+            cancellationToken: TestContext.Current.CancellationToken);
+        var compilation = CSharpCompilation.Create(
+            "GeneratorTests",
+            [tree],
+            References,
+            new CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable));
+        var driver = CreateTrackingDriver(parseOptions);
+        ContextSpecCache.ResetForTests();
+
+        driver = driver.RunGenerators(compilation, TestContext.Current.CancellationToken);
+        var before = GetGeneratedSource(driver.GetRunResult());
+        Assert.DoesNotContain("NbtStringEnumConverter<", before, StringComparison.Ordinal);
+        Assert.Contains("GetSByte()", before, StringComparison.Ordinal);
+
+        var markedTree = CSharpSyntaxTree.ParseText(
+            source.Replace(
+                "internal enum Kind : byte",
+                "[NbtStringEnum]\n            internal enum Kind : byte",
+                StringComparison.Ordinal),
+            parseOptions,
+            path: "Player.cs",
+            cancellationToken: TestContext.Current.CancellationToken);
+        var markedCompilation = compilation.ReplaceSyntaxTree(tree, markedTree);
+        driver = driver.RunGenerators(markedCompilation, TestContext.Current.CancellationToken);
+        var marked = GetGeneratedSource(driver.GetRunResult());
+        Assert.Contains(
+            "new global::NbtSharp.NbtStringEnumConverter<",
+            marked,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("GetSByte()", marked, StringComparison.Ordinal);
+
+        driver = driver.RunGenerators(
+            markedCompilation.ReplaceSyntaxTree(markedTree, tree),
+            TestContext.Current.CancellationToken);
+        var after = GetGeneratedSource(driver.GetRunResult());
+        Assert.DoesNotContain("NbtStringEnumConverter<", after, StringComparison.Ordinal);
+        Assert.Contains("GetSByte()", after, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UnboundStringEnumConverterStillReportsInvalidUseConverter()
+    {
+        var result = Run("""
+            using NbtSharp;
+
+            [NbtSerializable(typeof(Player))]
+            internal partial class TestContext : NbtSerializerContext
+            {
+            }
+
+            internal enum Kind : byte
+            {
+                Zombie,
+                Creeper,
+            }
+
+            internal sealed class Player
+            {
+                [NbtUseConverter(typeof(NbtStringEnumConverter<>))]
+                public Kind Kind { get; set; }
+            }
+            """);
+
+        Assert.Contains(result.GeneratorDiagnostics, static diagnostic => diagnostic.Id == "NBTSG016");
+    }
+
+    [Fact]
     public void ExplicitConverterFactoryDoesNotSuppressAotWarnings()
     {
         var result = Run("""

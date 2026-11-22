@@ -381,3 +381,10 @@ static NbtSharp.NbtSerializer.SerializeAsync<T>(System.IO.Pipelines.PipeWriter! 
 static NbtSharp.NbtSerializer.SerializeAsync<T>(System.IO.Stream! destination, T value, string! rootName = "", NbtSharp.NbtSerializerOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
 static NbtSharp.NbtSerializer.SerializeAsync<T>(System.IO.Pipelines.PipeWriter! destination, T value, NbtSharp.NbtTypeInfo<T>! typeInfo, string! rootName = "", System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
 static NbtSharp.NbtSerializer.SerializeAsync<T>(System.IO.Stream! destination, T value, NbtSharp.NbtTypeInfo<T>! typeInfo, string! rootName = "", System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+NbtSharp.NbtStringEnumAttribute
+NbtSharp.NbtStringEnumAttribute.NbtStringEnumAttribute() -> void
+NbtSharp.NbtStringEnumConverter<TEnum>
+NbtSharp.NbtStringEnumConverter<TEnum>.NbtStringEnumConverter() -> void
+override NbtSharp.NbtStringEnumConverter<TEnum>.Read(ref NbtSharp.NbtReader reader, NbtSharp.NbtSerializerOptions! options) -> TEnum
+override NbtSharp.NbtStringEnumConverter<TEnum>.TryGetTagType(TEnum value, NbtSharp.NbtSerializerOptions! options, out NbtSharp.NbtTagType tagType) -> bool
+override NbtSharp.NbtStringEnumConverter<TEnum>.Write(ref NbtSharp.NbtWriter writer, TEnum value, NbtSharp.NbtSerializerOptions! options) -> void

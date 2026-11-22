@@ -14,6 +14,7 @@ internal static class ReachableFingerprint
     private const string FormatVersion = "reachable-fingerprint-v10";
     private const string UseConverterAttribute = "NbtSharp.NbtUseConverterAttribute";
     private const string DerivedAttribute = "NbtSharp.NbtDerivedAttribute";
+    private const string StringEnumAttribute = "NbtSharp.NbtStringEnumAttribute";
     private const string CollectionBuilderAttributeName =
         "System.Runtime.CompilerServices.CollectionBuilderAttribute";
 
@@ -116,6 +117,12 @@ internal static class ReachableFingerprint
     {
         if (named.TypeKind == TypeKind.Enum)
         {
+            // Defensive: AddAttributes and the declaration hashes in AddType already cover the
+            // string-enum marker; hashing it here keeps the enum branch self-describing if that
+            // ever changes.
+            hash.Add(named.GetAttributes().Any(static attribute =>
+                attribute.AttributeClass?.ToDisplayString() == StringEnumAttribute));
+
             if (named.EnumUnderlyingType is { } underlying)
             {
                 pending.Push(underlying);

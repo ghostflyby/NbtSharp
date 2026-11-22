@@ -67,6 +67,8 @@ internal sealed class TypeEntry
 
     public ITypeSymbol? UnderlyingType { get; set; }
 
+    public bool EnumIsString { get; set; }
+
     public ImmutableArray<DerivedTypeModel> DerivedTypes { get; set; } = [];
 }
 
@@ -171,6 +173,7 @@ internal sealed class TypeGraph
     private const string PropertyNameAttribute = "NbtSharp.NbtPropertyNameAttribute";
     private const string UseConverterAttribute = "NbtSharp.NbtUseConverterAttribute";
     private const string DerivedAttribute = "NbtSharp.NbtDerivedAttribute";
+    private const string StringEnumAttribute = "NbtSharp.NbtStringEnumAttribute";
 
     private static readonly SymbolDisplayFormat FullyQualified = SymbolDisplayFormat.FullyQualifiedFormat;
 
@@ -276,6 +279,7 @@ internal sealed class TypeGraph
             var enumEntry = new TypeEntry(type, TypeEntryKind.Enum)
             {
                 UnderlyingType = underlying,
+                EnumIsString = HasStringEnumAttribute(named),
             };
             Register(enumEntry);
             return enumEntry;
@@ -610,6 +614,10 @@ internal sealed class TypeGraph
     private static bool HasDerivedRegistrations(INamedTypeSymbol type) =>
         type.GetAttributes().Any(static attribute =>
             attribute.AttributeClass?.ToDisplayString() == DerivedAttribute);
+
+    private static bool HasStringEnumAttribute(INamedTypeSymbol type) =>
+        type.GetAttributes().Any(static attribute =>
+            attribute.AttributeClass?.ToDisplayString() == StringEnumAttribute);
 
     private static bool IsDerivedFrom(INamedTypeSymbol baseType, INamedTypeSymbol derivedType)
     {

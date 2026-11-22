@@ -368,6 +368,41 @@ non-empty list, because the tag type must be known before the header is written.
 converter in those positions. Within a list, all elements must still share one actual tag type, and
 the writer validates every element against the predicted header type.
 
+### String enums
+
+`[NbtStringEnum]` on an enum switches it from an integer tag to `TAG_String`, following
+System.Text.Json's `JsonStringEnumConverter` semantics:
+
+```csharp
+[NbtStringEnum]
+public enum MobKind : byte
+{
+    Zombie,
+    Creeper,
+}
+```
+
+Defined values are written as their member name (the first declared name when several names share a
+value) and read back with an exact, case-sensitive ordinal match. Values without a defined name —
+including undefined flags combinations — round-trip as the invariant numeric string of the
+underlying width, so `(MobKind)200` serializes to `"200"`. A `[Flags]` enum additionally reads a
+comma-separated list: every segment is trimmed and resolved as a name or a numeric string before
+being OR-combined, so `"Walk, Swim"`, `"1, 2"`, and `"Walk, 2"` all parse; the write side uses the
+runtime's flags formatting, which emits the plain number when a combination has no complete name
+decomposition. Unresolvable input throws `NbtException` naming the offending string and the enum
+type.
+
+Nullable enums, collection elements, map values, object members, and root values all inherit the
+string shape. Converter precedence is unchanged: a member's `[NbtUseConverter]` wins, then
+`options.Converters` (register `new NbtStringEnumConverter<TEnum>()` there to apply the string form
+to an unmarked enum), then the enum's `[NbtStringEnum]`, then the numeric built-in.
+
+Both the reflection resolver and the source generator honor the attribute; the generator
+instantiates `NbtStringEnumConverter<TEnum>` directly, so string enums are AOT-safe. In trimmed
+applications that use the reflection path, the attribute may be stripped from the compiled enum,
+in which case the enum silently falls back to the numeric representation; the generated path sees
+the attribute at compile time and is unaffected.
+
 Automatic sequence support covers arrays, `List<T>`, `IEnumerable<T>`, `ICollection<T>`, `IList<T>`,
 `IReadOnlyList<T>`, `IReadOnlyCollection<T>`, `HashSet<T>`, `ISet<T>`, `IReadOnlySet<T>`,
 `SortedSet<T>`, `Queue<T>`, `Stack<T>`, `LinkedList<T>`, `Collection<T>`, `ObservableCollection<T>`,

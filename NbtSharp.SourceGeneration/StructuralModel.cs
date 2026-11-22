@@ -174,6 +174,8 @@ internal sealed class TypeSpec
 
     public string? UnderlyingTypeName { get; set; }
 
+    public bool EnumIsString { get; set; }
+
     public EnumMappingSpec? EnumMapping { get; set; }
 
     public PolymorphicSpec? Polymorphic { get; set; }
@@ -634,6 +636,7 @@ internal static class ContextSpecFingerprint
         hash.Add(entry.ValueTypeName);
         hash.Add((int)entry.MapShape);
         hash.Add(entry.UnderlyingTypeName);
+        hash.Add(entry.EnumIsString);
 
         if (entry.GeneratedBuilder is { } builder)
         {

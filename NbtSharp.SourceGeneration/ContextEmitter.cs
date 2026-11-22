@@ -482,7 +482,7 @@ internal sealed partial class ContextEmitter
                 _writer.WriteLine();
                 EmitObjectConverter(entry, entry.Object);
             }
-            else if (entry.Kind == TypeEntryKind.Enum)
+            else if (entry.Kind == TypeEntryKind.Enum && entry.EnumMapping is not null)
             {
                 _writer.WriteLine();
                 EmitEnumConverter(entry);
@@ -581,7 +581,9 @@ internal sealed partial class ContextEmitter
     private string GetFactory(TypeSpec entry) => entry.Kind switch
     {
         TypeEntryKind.Object => $"new {entry.ConverterName}()",
-        TypeEntryKind.Enum => $"new {entry.ConverterName}()",
+        TypeEntryKind.Enum => entry.EnumIsString
+            ? $"new global::NbtSharp.NbtStringEnumConverter<{entry.TypeName}>()"
+            : $"new {entry.ConverterName}()",
         TypeEntryKind.Array =>
             $"{MetadataServices}.CreateArrayConverter<{entry.ElementTypeName!}>()",
         TypeEntryKind.Collection => GetCollectionFactory(entry),

@@ -123,6 +123,12 @@ cached name tables is the natural fit. Constraint: an undefined name on read can
 numeric value the way a numeric enum representation could — storage is a string — so the policy is
 throw or an explicit `IsDefined`-style check.
 
+**Status (2026-11-22): implemented on feat/stj-gap-p1.** `[NbtStringEnum]` routes an enum through
+`NbtStringEnumConverter<TEnum>` with STJ-aligned semantics: cached ordinal name tables,
+first-declared-name writes for aliased values, invariant numeric strings for undefined values,
+comma-split flags parsing with per-segment trim, and case-sensitive reads. Both the reflection
+resolver and the source generator honor the attribute; see the README's Converters section.
+
 **G-TYPE-2 — built-in common scalar types.** Priority: P2, blocked on wire-form decisions.
 
 `decimal`, `Guid`, the date/time family, `Half`, `Int128`/`UInt128`, `BigInteger`, and `nint`/
