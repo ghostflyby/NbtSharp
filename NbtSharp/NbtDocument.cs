@@ -338,12 +338,10 @@ public sealed class NbtDocument : IDisposable
     /// </remarks>
     public void Dispose()
     {
-        if (_state == StateDisposed)
+        if (Interlocked.Exchange(ref _state, StateDisposed) == StateDisposed)
         {
             return;
         }
-
-        _state = StateDisposed;
         var slots = _slots;
         _slots = null;
         if (slots is not null)

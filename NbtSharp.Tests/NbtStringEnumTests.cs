@@ -301,6 +301,27 @@ public sealed class NbtStringEnumTests
         return options;
     }
 
+    [Theory]
+    [InlineData(SerializationMode.Generated)]
+    [InlineData(SerializationMode.Reflection)]
+    public void ExternallyWrittenTypedEmptyStringEnumListIsAccepted(SerializationMode mode)
+    {
+        // Third-party NBT writers emit typed empty lists (TAG_List<TAG_String> with length zero)
+        // instead of the TAG_List<TAG_End> this library writes, so the empty-list element check
+        // must recognize [NbtStringEnum] members.
+        var buffer = new System.Buffers.ArrayBufferWriter<byte>();
+        var writer = new NbtWriter(buffer);
+        writer.WriteStartCompound("root");
+        writer.WriteStartList("Values", NbtTagType.String, 0);
+        writer.WriteEndList();
+        writer.WriteEndCompound();
+        writer.Complete();
+
+        var copy = CreatePath(mode).Deserialize<StringEnumDto>(buffer.WrittenSpan.ToArray());
+
+        Assert.Empty(copy.Values);
+    }
+
     private static SerializationTestPath CreatePath(
         SerializationMode mode,
         NbtSerializerOptions? options = null) =>

@@ -439,6 +439,30 @@ public sealed class NbtExtensionDataTests
         Assert.Equal(1, (int)rewrittenCell["Cell"].Value!);
     }
 
+    [Fact]
+    public void NestedScalarElementsStaySymmetricWithRegisteredConverters()
+    {
+        // A registered scalar converter applies when the scalar is the declared value (the entry
+        // point), but nested DOM list elements must use the built-in converters on both the read
+        // and the write side, so serialize(deserialize(x)) round-trips byte-stably.
+        var options = ReflectionOptions();
+        options.Converters.Add(new ReversingStringConverter());
+
+        Assert.Equal(
+            "cba",
+            NbtSerializer.Deserialize<string>(
+                NbtSerializer.Serialize("abc", "root", options),
+                options));
+
+        var list = new NbtList(new List<string> { "abc" });
+        var data = NbtSerializer.Serialize(list, "root", options);
+        var copy = NbtSerializer.Deserialize<NbtList>(data, options);
+        var elements = (List<string>)copy.Value;
+        var element = Assert.Single(elements);
+        Assert.Equal("abc", element);
+        Assert.Equal(data, NbtSerializer.Serialize(copy, "root", options));
+    }
+
     private static SerializationTestPath CreatePath(
         SerializationMode mode,
         bool rejectDuplicateCompoundNames = false,
@@ -633,6 +657,24 @@ public sealed class NbtExtensionDataTests
     internal sealed class ExtZoo
     {
         public IExtAnimal? Star { get; set; }
+    }
+
+    private sealed class ReversingStringConverter : NbtConverter<string>
+    {
+        public override string Read(ref NbtReader reader, NbtSerializerOptions _) => reader.GetString();
+
+        public override void Write(ref NbtWriter writer, string value, NbtSerializerOptions _)
+        {
+            var chars = value.ToCharArray();
+            System.Array.Reverse(chars);
+            writer.WriteString(new string(chars));
+        }
+
+        public override bool TryGetTagType(string value, NbtSerializerOptions _, out NbtTagType tagType)
+        {
+            tagType = NbtTagType.String;
+            return true;
+        }
     }
 
     private sealed class ReversingValueConverter : NbtConverter<NbtValue>

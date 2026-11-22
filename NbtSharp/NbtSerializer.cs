@@ -587,15 +587,14 @@ public static class NbtSerializer
             {
                 // After a truncated parse, reparse only once the buffer has grown past the deficit
                 // reported by the truncation (or a clamped fallback). Marking the whole buffer as
-                // examined keeps ReadAsync asleep until genuinely new data arrives.
-                if (options.MaxDocumentBytes > 0 && result.Buffer.Length >= options.MaxDocumentBytes)
-                {
-                    reader.AdvanceTo(result.Buffer.Start, result.Buffer.End);
-                    throw new NbtException(
-                        $"The NBT document exceeds the configured limit of {options.MaxDocumentBytes} bytes.");
-                }
-
-                if (result.Buffer.Length - lastFailedLength < lastRequiredGrowth)
+                // examined keeps ReadAsync asleep until genuinely new data arrives. Once the buffer
+                // reaches the document limit, stop deferring: the reparse either completes within
+                // the limit (multi-document pipelines may hold more buffered bytes than the current
+                // document) or the truncation handler rejects it, so the buffer never grows far
+                // past the limit while waiting.
+                var underLimit = options.MaxDocumentBytes <= 0 ||
+                    result.Buffer.Length < options.MaxDocumentBytes;
+                if (underLimit && result.Buffer.Length - lastFailedLength < lastRequiredGrowth)
                 {
                     reader.AdvanceTo(result.Buffer.Start, result.Buffer.End);
                     continue;

@@ -998,4 +998,27 @@ public sealed class NbtStreamAdapterTests
                 cancellationToken: TestContext.Current.CancellationToken));
         await pipe.Reader.CompleteAsync();
     }
+
+    [Fact]
+    public async Task DeserializeAsyncAcceptsAMultiDocumentBufferAboveTheLimit()
+    {
+        // A pipeline producer may push the rest of the current document together with the next
+        // document; the buffered length then exceeds the limit while the current document is
+        // within it, and the throttled reparse must succeed instead of rejecting by buffer size.
+        var first = NbtSerializer.Serialize("first!", "a");
+        var second = NbtSerializer.Serialize(2, "b");
+        var pipe = new Pipe();
+        var strict = new NbtSerializerOptions { MaxDocumentBytes = first.Length + second.Length - 1 };
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        cts.CancelAfter(TimeSpan.FromSeconds(5));
+
+        await pipe.Writer.WriteAsync(first.AsMemory(0, 9), cts.Token);
+        var task = NbtSerializer.DeserializeAsync<string>(pipe.Reader, strict, cts.Token);
+        await pipe.Writer.WriteAsync(first.AsMemory(9), cts.Token);
+        await pipe.Writer.WriteAsync(second, cts.Token);
+
+        Assert.Equal("first!", await task);
+        await pipe.Reader.CompleteAsync();
+        await pipe.Writer.CompleteAsync();
+    }
 }

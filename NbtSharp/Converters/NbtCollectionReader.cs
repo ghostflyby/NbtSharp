@@ -351,6 +351,12 @@ internal static class NbtCollectionReader
     {
         if (type.IsEnum)
         {
+            if (type.IsDefined(typeof(NbtStringEnumAttribute), inherit: false))
+            {
+                tagType = NbtTagType.String;
+                return true;
+            }
+
             return TryGetKnownElementType(Enum.GetUnderlyingType(type), out tagType);
         }
 

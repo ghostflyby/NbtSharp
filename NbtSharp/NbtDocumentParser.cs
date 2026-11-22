@@ -222,7 +222,17 @@ internal static class NbtDocumentParser
 
             if (_slotCount == _slots.Length)
             {
-                var grown = ArrayPool<NbtDocumentSlot>.Shared.Rent(_slots.Length * 2);
+                // Grow with long math: past 2^30 slots a plain doubling overflows int and reports
+                // the wrong exception type. The document-size cap makes this unreachable in
+                // practice, so simply refuse cleanly.
+                var doubled = (long)_slots.Length * 2;
+                var newLength = doubled > int.MaxValue ? int.MaxValue : _slots.Length + 1;
+                if (newLength <= _slots.Length)
+                {
+                    throw new NbtException("The NBT document has too many values to index.");
+                }
+
+                var grown = ArrayPool<NbtDocumentSlot>.Shared.Rent(newLength);
                 _slots.AsSpan(0, _slotCount).CopyTo(grown);
                 ArrayPool<NbtDocumentSlot>.Shared.Return(_slots);
                 _slots = grown;

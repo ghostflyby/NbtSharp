@@ -205,18 +205,18 @@ internal static class NbtDomConverters
             return reader.ListElementType switch
             {
                 NbtTagType.End => ReadEndList(ref reader),
-                NbtTagType.Byte => new NbtList(NbtCollectionReader.ReadList<sbyte>(ref reader, options)),
-                NbtTagType.Short => new NbtList(NbtCollectionReader.ReadList<short>(ref reader, options)),
-                NbtTagType.Int => new NbtList(NbtCollectionReader.ReadList<int>(ref reader, options)),
-                NbtTagType.Long => new NbtList(NbtCollectionReader.ReadList<long>(ref reader, options)),
-                NbtTagType.Float => new NbtList(NbtCollectionReader.ReadList<float>(ref reader, options)),
-                NbtTagType.Double => new NbtList(NbtCollectionReader.ReadList<double>(ref reader, options)),
-                NbtTagType.ByteArray => new NbtList(NbtCollectionReader.ReadList<sbyte[]>(ref reader, options)),
-                NbtTagType.String => new NbtList(NbtCollectionReader.ReadList<string>(ref reader, options)),
+                NbtTagType.Byte => new NbtList(ReadDomElements<sbyte>(ref reader, options)),
+                NbtTagType.Short => new NbtList(ReadDomElements<short>(ref reader, options)),
+                NbtTagType.Int => new NbtList(ReadDomElements<int>(ref reader, options)),
+                NbtTagType.Long => new NbtList(ReadDomElements<long>(ref reader, options)),
+                NbtTagType.Float => new NbtList(ReadDomElements<float>(ref reader, options)),
+                NbtTagType.Double => new NbtList(ReadDomElements<double>(ref reader, options)),
+                NbtTagType.ByteArray => new NbtList(ReadDomElements<sbyte[]>(ref reader, options)),
+                NbtTagType.String => new NbtList(ReadDomElements<string>(ref reader, options)),
                 NbtTagType.List => new NbtList(ReadDomListElements(ref reader, options)),
                 NbtTagType.Compound => new NbtList(ReadDomCompoundElements(ref reader, options)),
-                NbtTagType.IntArray => new NbtList(NbtCollectionReader.ReadList<int[]>(ref reader, options)),
-                NbtTagType.LongArray => new NbtList(NbtCollectionReader.ReadList<long[]>(ref reader, options)),
+                NbtTagType.IntArray => new NbtList(ReadDomElements<int[]>(ref reader, options)),
+                NbtTagType.LongArray => new NbtList(ReadDomElements<long[]>(ref reader, options)),
                 _ => throw new NbtException($"Unknown NBT list element type {reader.ListElementType}.")
                 {
                     BytePosition = reader.BytesConsumed,
@@ -297,8 +297,40 @@ internal static class NbtDomConverters
 
         // Nested list and compound elements recurse through the built-in DOM converters so that
         // converters registered for NbtList/NbtCompound never intercept nested DOM values. Scalar
-        // element cases keep going through NbtCollectionReader. Count validation and EndList
-        // handling mirror NbtCollectionReader's element loops.
+        // and array element cases go through the same closed family (DomElementConverter), keeping
+        // reads symmetric with the write path. Count validation and EndList handling mirror
+        // NbtCollectionReader's element loops.
+        private static List<TElement> ReadDomElements<TElement>(ref NbtReader reader, NbtSerializerOptions options)
+        {
+            var count = reader.ListLength;
+            var converter = DomElementConverter<TElement>.Converter;
+            var elements = new List<TElement>(Math.Min(count, 4096));
+            for (var i = 0; i < count; i++)
+            {
+                if (!reader.Read())
+                {
+                    throw new NbtException("The list ended before all declared elements were read.")
+                    {
+                        IsTruncated = true,
+                        BytePosition = reader.BytesConsumed,
+                    };
+                }
+
+                try
+                {
+                    elements.Add(converter.Read(ref reader, options));
+                }
+                catch (NbtException ex)
+                {
+                    NbtSerializer.PrependPath(ex, $"[{i}]");
+                    throw;
+                }
+            }
+
+            ReadDomListEnd(ref reader);
+            return elements;
+        }
+
         private static List<NbtList> ReadDomListElements(ref NbtReader reader, NbtSerializerOptions options)
         {
             var count = reader.ListLength;
