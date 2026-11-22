@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace NbtSharp.Tests;
 
 public sealed class NbtContractModifierTests
@@ -874,6 +876,7 @@ public sealed class NbtContractModifierTests
         public int Value { get; set; }
     }
 
+    [SuppressMessage("ReSharper", "NotAccessedField.Compiler")]
     private sealed class FieldUseConverterWithoutIncludeDto
     {
         [NbtUseConverter(typeof(ModifierOffsetIntConverter))]
@@ -904,6 +907,7 @@ public sealed class NbtContractModifierTests
         public int Value { get; set; }
     }
 
+    [SuppressMessage("ReSharper", "NotAccessedField.Compiler")]
     private sealed class IgnoredInvalidConverterDto
     {
         [NbtIgnore]
@@ -918,6 +922,7 @@ public sealed class NbtContractModifierTests
         public int Kept { get; set; }
     }
 
+    [SuppressMessage("ReSharper", "NotAccessedField.Compiler")]
     private sealed class MixedMemberOrderDto
     {
         public int PropOne { get; set; }

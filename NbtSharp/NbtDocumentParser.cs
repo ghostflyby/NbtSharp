@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Buffers.Binary;
+using System.Diagnostics.CodeAnalysis;
 
 namespace NbtSharp;
 
@@ -33,6 +34,7 @@ internal struct NbtDocumentSlot
     public NbtTagType ElementType;
 
     /// <summary>Unused; keeps the header four bytes wide.</summary>
+    [SuppressMessage("ReSharper", "UnassignedField.Compiler", Justification = "Padding only.")]
     public byte Pad1;
 
     /// <summary>The offset of the name bytes, when <see cref="NbtDocumentSlotFlags.HasName"/> is set.</summary>

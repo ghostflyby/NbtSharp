@@ -627,6 +627,7 @@ public sealed class NbtExtensionDataTests
     }
 
     [SuppressMessage("ReSharper", "UnusedAutoPropertyAccessor.Local")]
+    [SuppressMessage("ReSharper", "NotAccessedField.Compiler")]
     private sealed class FieldWithoutIncludeDto
     {
         [NbtExtensionData]
