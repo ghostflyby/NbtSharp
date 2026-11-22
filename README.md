@@ -470,6 +470,7 @@ generic synchronous overloads. The writer does not roll back partial output if a
 - [Migrating from reflection](docs/migration.md)
 - [Diagnostics](docs/diagnostics.md)
 - [Performance characteristics](docs/performance.md)
+- [System.Text.Json gap analysis](docs/stj-gap-analysis.md)
 - [Roadmap](docs/roadmap.md)
 
 ## Build and test
