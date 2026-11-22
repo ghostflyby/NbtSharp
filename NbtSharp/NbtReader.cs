@@ -115,10 +115,13 @@ public ref struct NbtReader
     /// <summary>Returns the stream buffer rented by this reader, if any.</summary>
     /// <remarks>
     /// The stream itself is left open. Span and sequence readers have no resources to release.
+    /// Names recorded for the current token are released.
     /// </remarks>
     public void Dispose()
     {
+        _hasName = false;
         _nameSpan = default;
+        _nameCached = null;
         if (_streamBuffer is null)
         {
             return;
@@ -183,9 +186,11 @@ public ref struct NbtReader
     /// </remarks>
     /// <param name="name">The name bytes, encoded as Java modified UTF-8.</param>
     /// <returns>
-    /// <see langword="true"/> if the current token carries a name whose decoded value equals the
-    /// decoded value of <paramref name="name"/>; <see langword="false"/> for list elements,
-    /// container-end tokens, unnamed roots, and different names.
+    /// <see langword="true"/> when the recorded name bytes match <paramref name="name"/> exactly,
+    /// or when the recorded name is non-canonically encoded and its decoded value equals the
+    /// decoded value of <paramref name="name"/>; the comparison is not symmetric in the encoding
+    /// of <paramref name="name"/>. <see langword="false"/> for list elements, container-end
+    /// tokens, unnamed roots, and different names.
     /// </returns>
     public bool NameEquals(ReadOnlySpan<byte> name)
     {
@@ -958,14 +963,18 @@ public ref struct NbtReader
     // crosses sequence segments is copied the same way.
     private void ReadName()
     {
+        // Reset the name state before touching the input, so a truncated or otherwise failing
+        // read leaves the token deterministically nameless instead of exposing the previous
+        // token's stale (and, on streams, possibly partially overwritten) name bytes.
+        _hasName = false;
+        _nameSpan = default;
         _nameCached = null;
+        _nameNonCanonical = false;
         _nameBytePosition = BytesConsumed;
         var length = ReadUInt16();
-        _hasName = true;
-        _nameNonCanonical = false;
         if (length == 0)
         {
-            _nameSpan = default;
+            _hasName = true;
             return;
         }
 
@@ -977,6 +986,7 @@ public ref struct NbtReader
             _nameSpan = bytes;
             _span = _span[length..];
             BytesConsumed += length;
+            _hasName = true;
             return;
         }
 
@@ -990,6 +1000,7 @@ public ref struct NbtReader
         ReadExactly(destination);
         _nameNonCanonical = ScanNameBytes(destination);
         _nameSpan = destination;
+        _hasName = true;
     }
 
     // Pre-scans name bytes while they are still addressable: rejects lead bytes of 0xF0 or

@@ -250,21 +250,15 @@ public sealed class NbtSerializerOptions
         }
     }
 
-    internal void Invalidate()
-    {
-        lock (_cacheLock)
-        {
-            InvalidateCore();
-        }
-    }
-
     private void InvalidateCore()
     {
         _cache = ImmutableDictionary<Type, NbtConverter>.Empty;
     }
 
-    // Lock-free and idempotent. GetCustomConverter is reachable from TryResolveConverter while
-    // _cacheLock is already held, so the freeze must not take that lock.
+    // Idempotent. The volatile fast path stays lock-free; the write takes _cacheLock so that a
+    // freeze and a converter mutation are mutually exclusive. GetCustomConverter is reachable
+    // from TryResolveConverter while _cacheLock is already held, and Lock is reentrant on the
+    // owning thread, so acquiring the lock again on that path is safe.
     internal void MakeReadOnly()
     {
         if (_isFrozen)
@@ -272,7 +266,10 @@ public sealed class NbtSerializerOptions
             return;
         }
 
-        _isFrozen = true;
+        lock (_cacheLock)
+        {
+            _isFrozen = true;
+        }
     }
 
     private void ThrowIfFrozen()
@@ -287,8 +284,9 @@ public sealed class NbtSerializerOptions
 
     /// <summary>
     /// Applies a converter-list mutation under the cache lock as one critical section: the frozen
-    /// check, the mutation, and the cache invalidation. Callers must have validated their
-    /// arguments; the mutation itself runs with the lock held.
+    /// check, the mutation, and the cache invalidation. Freezing in <see cref="MakeReadOnly"/>
+    /// takes the same lock, so a freeze and a mutation are mutually exclusive. Callers must have
+    /// validated their arguments; the mutation itself runs with the lock held.
     /// </summary>
     internal void MutateConverters(Action<List<NbtConverter>> mutation)
     {

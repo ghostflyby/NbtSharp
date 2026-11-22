@@ -952,9 +952,14 @@ internal sealed partial class ContextEmitter
     // have no representable string or u8 literal; the runtime compares them through
     // NbtReader.NameEquals and writes them through the byte-name overloads without transcoding.
     // member.Index is per type, so the fields must live in the converter class, not the context.
+    // The table exists only for types with direct (scalar) members, the same predicate that gates
+    // the read fast path and the write direct path; types without one never reference __name{Index}
+    // on either side, so the fields would be dead.
     private void EmitNameTables(ObjectSpec model)
     {
-        if (model.Members.Length == 0)
+        var hasDirectMembers = model.Members.Any(
+            static member => member.ScalarKind != ScalarKind.None);
+        if (!hasDirectMembers)
         {
             return;
         }

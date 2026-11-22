@@ -120,6 +120,43 @@ public sealed class NbtSerializerOptionsTests
     }
 
     [Fact]
+    public async Task ConcurrentOptionsLessCallsAndConverterAddsNeverMutateTheFrozenDefault()
+    {
+        ForceFreeze();
+
+        var tasks = new List<Task>();
+
+        for (var worker = 0; worker < 8; worker++)
+        {
+            tasks.Add(Task.Run(() =>
+            {
+                for (var i = 0; i < 25; i++)
+                {
+                    var data = NbtSerializer.Serialize(i, "root");
+                    Assert.Equal(i, NbtSerializer.Deserialize<int>(data));
+                }
+            }, TestContext.Current.CancellationToken));
+
+            // Freezing and mutation are serialized through the cache lock, so once the freeze
+            // above has landed, every concurrent Add must observe the frozen state and throw
+            // instead of mutating the shared instance.
+            tasks.Add(Task.Run(() =>
+            {
+                for (var i = 0; i < 25; i++)
+                {
+                    Assert.Throws<InvalidOperationException>(
+                        () => NbtSerializerOptions.Default.Converters.Add(new InertConverter()));
+                }
+            }, TestContext.Current.CancellationToken));
+        }
+
+        await Task.WhenAll(tasks);
+
+        Assert.Throws<InvalidOperationException>(
+            () => NbtSerializerOptions.Default.Converters.Add(new InertConverter()));
+    }
+
+    [Fact]
     public void WithTypeInfoResolverCopiesTheFrozenDefault()
     {
         ForceFreeze();
