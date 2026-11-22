@@ -62,6 +62,16 @@ must operate on the final NBT name, after the naming policy is applied; a kind m
 NbtSharp's converter families (compound / list / map) rather than STJ's; and modified members must
 preserve the duplicate-name and single-member-namespace invariants that mapping already enforces.
 
+**Status (2026-11-22): implemented on feat/stj-gap-p1.** Scope: the reflection resolver only —
+`NbtReflectionTypeInfoResolver` accepts `Action<NbtContractInfo>` modifier callbacks (constructor,
+`WithAddedModifier` appending to an array snapshot with an independent cache), and `NbtContractInfo`
+/`NbtMemberInfo` expose member-level rename (`NbtName`), `Ignore`, `Converter`, and `Order` over the
+discovered contract, frozen after the callbacks run. Contracts are keyed per `(Type,
+PropertyNamingPolicy)` with a per-key in-flight guard that turns modifier re-entrancy into
+`InvalidOperationException`; nested resolution of sibling types is allowed. Generated contexts bake
+contracts at compile time, so there is no interface-level hook. Setters/kind introspection and
+converter-collection callbacks remain open.
+
 ### Member semantics
 
 **G-MEMBER-1 — extension data.** Priority: P1.

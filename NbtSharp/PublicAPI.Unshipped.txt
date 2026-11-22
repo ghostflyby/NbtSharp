@@ -393,3 +393,21 @@ NbtSharp.NbtExtensionDataAttribute.NbtExtensionDataAttribute() -> void
 static NbtSharp.NbtMetadataServices.ExtensionMemberConflict(NbtSharp.NbtWriter writer, string! name) -> NbtSharp.NbtException!
 static NbtSharp.NbtMetadataServices.ReadDomValue(ref NbtSharp.NbtReader reader, NbtSharp.NbtSerializerOptions! options, string? pathSegment) -> NbtSharp.NbtValue
 static NbtSharp.NbtMetadataServices.WriteDomMember(ref NbtSharp.NbtWriter writer, string! name, NbtSharp.NbtValue value, NbtSharp.NbtSerializerOptions! options) -> void
+NbtSharp.NbtContractInfo
+NbtSharp.NbtContractInfo.GetMember(string! clrName) -> NbtSharp.NbtMemberInfo?
+NbtSharp.NbtContractInfo.Members.get -> System.Collections.Generic.IReadOnlyList<NbtSharp.NbtMemberInfo!>!
+NbtSharp.NbtContractInfo.Type.get -> System.Type!
+NbtSharp.NbtMemberInfo
+NbtSharp.NbtMemberInfo.CanWrite.get -> bool
+NbtSharp.NbtMemberInfo.ClrName.get -> string!
+NbtSharp.NbtMemberInfo.Converter.get -> NbtSharp.NbtConverter?
+NbtSharp.NbtMemberInfo.Converter.set -> void
+NbtSharp.NbtMemberInfo.Ignore.get -> bool
+NbtSharp.NbtMemberInfo.Ignore.set -> void
+NbtSharp.NbtMemberInfo.NbtName.get -> string!
+NbtSharp.NbtMemberInfo.NbtName.set -> void
+NbtSharp.NbtMemberInfo.Order.get -> int
+NbtSharp.NbtMemberInfo.Order.set -> void
+NbtSharp.NbtMemberInfo.Type.get -> System.Type!
+NbtSharp.NbtReflectionTypeInfoResolver.NbtReflectionTypeInfoResolver(System.Action<NbtSharp.NbtContractInfo!>? modifier) -> void
+NbtSharp.NbtReflectionTypeInfoResolver.WithAddedModifier(System.Action<NbtSharp.NbtContractInfo!>! modifier) -> NbtSharp.NbtReflectionTypeInfoResolver!

@@ -206,6 +206,45 @@ public sealed class NbtResolverChainTests
         Assert.Equal(7, copy.Count);
     }
 
+    [Fact]
+    public void ReflectionModifierOnAChainOnlyAffectsFallbackTypes()
+    {
+        var options = new NbtSerializerOptions
+        {
+            TypeInfoResolver = new NbtTypeInfoResolverChain(
+                SourceGenerationContext.Default,
+                new NbtReflectionTypeInfoResolver(c =>
+                {
+                    if (c.GetMember("Id") is { } id)
+                    {
+                        id.NbtName = "renamed_id";
+                    }
+
+                    if (c.GetMember("Name") is { } name)
+                    {
+                        name.NbtName = "renamed_name";
+                    }
+                })),
+        };
+
+        var generatedData = NbtSerializer.Serialize(
+            new SourceGenItem { Id = "generated", Count = 1 },
+            "root",
+            options);
+        var generatedCompound = (NbtCompound)NbtSerializer.Deserialize(generatedData).Value.Value!;
+        Assert.True(generatedCompound.ContainsKey("Id"));
+        Assert.False(generatedCompound.ContainsKey("renamed_id"));
+
+        var reflectedData = NbtSerializer.Serialize(
+            new UnannotatedDto { Name = "fallback", Value = 2 },
+            "root",
+            options);
+        var reflectedCompound = (NbtCompound)NbtSerializer.Deserialize(reflectedData).Value.Value!;
+        Assert.True(reflectedCompound.ContainsKey("renamed_name"));
+        Assert.False(reflectedCompound.ContainsKey("Name"));
+        Assert.Equal("fallback", NbtSerializer.Deserialize<UnannotatedDto>(reflectedData, options).Name);
+    }
+
     private sealed class FixedResolver(Type? type, NbtTypeInfo? info) : INbtTypeInfoResolver
     {
         public NbtTypeInfo? GetTypeInfo(Type requestedType, NbtSerializerOptions options) =>

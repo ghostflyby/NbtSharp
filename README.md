@@ -492,6 +492,29 @@ expected/actual tag types. API misuse (reading a value twice, closing a containe
 throws `InvalidOperationException`. A CLR type without a converter or type information throws
 `NotSupportedException`.
 
+### Modifying reflection contracts at runtime
+
+A `NbtReflectionTypeInfoResolver` created with an `Action<NbtContractInfo>` callback — or extended
+through `WithAddedModifier`, which appends to a snapshot and keeps an independent cache — can
+rename members (`NbtMemberInfo.NbtName`, already reflecting attributes and the naming policy),
+exclude them (`Ignore`), replace their converters (`Converter`), or reorder them (`Order`) without
+editing DTO attributes. The contract is frozen after the callbacks run; later mutations of a
+stashed `NbtMemberInfo` throw `InvalidOperationException`.
+
+Callbacks are pure functions: they run at most once per `(Type, PropertyNamingPolicy)` pair on
+first use, the resulting converter is cached by the resolver, and a thrown exception is not
+cached, so the next operation retries. They run under the resolver's cache lock, which serializes
+type resolution for that resolver: keep them short and non-blocking, and never block inside a
+callback on another thread that resolves types through the same options. Unlike
+`System.Text.Json`, the callback receives no options instance — the contract is fixed per type and
+naming policy on first use. Resolving other types inside a callback is allowed through same-thread
+lock reentrancy, but looping back to the type currently being built throws
+`InvalidOperationException` instead of overflowing the stack. Polymorphic envelopes stay
+attribute-driven; their derived concrete types resolve normally and run the callbacks. In an
+`NbtTypeInfoResolverChain`, a modified reflection resolver only affects types that fall through to
+the reflection fallback, so a generated context in front of it is untouched (generated contexts
+bake contracts at compile time and have no runtime modifier hook).
+
 ## Scope and AOT
 
 This package implements Java Edition encoding. Bedrock encodings and compression wrappers are not
