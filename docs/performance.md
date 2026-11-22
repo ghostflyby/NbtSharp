@@ -9,11 +9,15 @@ the intended hot paths and the trade-offs that can disable them.
   a miss takes a lock, resolves once, and publishes a new dictionary. Resolving `n` distinct types
   costs O(n log n) instead of repeated dictionary copies.
 - Converters resolved through `NbtSerializerOptions.GetConverter` are created once per options
-  instance and type. Reuse a single options instance (or a context's `Default.Options`) across
-  operations instead of constructing options per call. Factory-based `[NbtUseConverter(typeof(...))]`
+  instance and type. The options-less overloads share the cached `NbtSerializerOptions.Default`
+  singleton, so each type is resolved once per process; pass one options instance (or a context's
+  `Default.Options`) to reuse a custom configuration. Factory-based `[NbtUseConverter(typeof(...))]`
   members call `CreateConverter` for every read or write instead of caching the produced converter.
 - `options.Converters` is consulted before the resolver and built-ins. Mutating the converter list
-  invalidates the resolution cache; do that during setup, not on a hot path.
+  invalidates the resolution cache; do that during setup, not on a hot path. The shared `Default`
+  instance freezes on its first use, and converter-list mutations on it throw
+  `InvalidOperationException` afterwards; register converters before the first options-less call,
+  or use a dedicated options instance for per-call configuration.
 - `NbtReflectionTypeInfoResolver` caches reflection converters per type and naming-policy instance.
   Custom naming policies should be immutable; converters snapshot member names on creation.
 
@@ -21,6 +25,23 @@ the intended hot paths and the trade-offs that can disable them.
 
 - When `options.Converters` is empty, generated object converters read and write numeric, boolean,
   string, and nullable scalar members directly, without per-member converter lookup.
+- Each converter class embeds its members' names as pre-encoded modified UTF-8 byte tables
+  (`__name{i}`). The direct read path dispatches through `NbtReader.NameEquals` without decoding
+  the wire name, and the direct write path uses the writer's byte-name overloads, so member names
+  are never transcoded on the hot path. The slow (converter-registered) path keeps the decoded
+  string switch.
+- `NameEquals` compares by decoded name value: the byte comparison is a fast path for canonically
+  encoded wire names, and non-canonical encodings (raw `0x00`, overlong two- or three-byte forms)
+  fall back to decoding both names so they match their canonical equivalents.
+- The reader decodes names lazily: `NbtReader.Name` materializes and caches the string on first
+  access, so names matched through `NameEquals` or bypassed by `Skip` are never decoded. Deep name
+  validation errors therefore surface on the first `Name` access (or the decoded `NameEquals`
+  fallback) instead of during `Read`; lead bytes of 0xF0 or greater are still rejected while
+  reading. `Skip` never validates the names it skips.
+- The writer's byte-name overloads (`WriteInt32(ReadOnlySpan<byte>, ...)` and friends,
+  `WriteMemberHeader(NbtTagType, ReadOnlySpan<byte>)`) write the name bytes verbatim without
+  modified UTF-8 validation — they can emit names the reader will reject; validity is the caller's
+  responsibility. A name longer than 65535 bytes throws before any byte is written.
 - Generated member types get static typed `Lazy<NbtConverter<T>>` fields. They are used only when the
   converter list is empty and the exact context is the resolver; otherwise resolution falls back to
   the options so custom converters and alternative resolvers keep precedence.

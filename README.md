@@ -84,6 +84,10 @@ PlayerDto copy = NbtSerializer.Deserialize<PlayerDto>(bytes, options);
 int value = NbtSerializer.Deserialize<int>(data, out string? rootName);
 ```
 
+Overloads without an `options` argument share the cached `NbtSerializerOptions.Default` singleton,
+which freezes on first use; register converters on it before the first options-less call, or create
+an `NbtSerializerOptions` instance for custom settings.
+
 Reflection mapping uses public instance properties by default. `[NbtPropertyName("name")]` renames a
 member, `[NbtIgnore]` excludes it, `[NbtUseConverter]` selects a runtime or explicit member converter,
 and public fields are included only with `[NbtInclude]`. A
@@ -301,6 +305,15 @@ element has the declared type and that exactly the declared number of elements w
 `WriteString` accepts both `string` and `ReadOnlySpan<char>`; the span overload is the
 allocation-free path and is used by the built-in string converter.
 
+Names can also travel as bytes. `NbtReader.NameEquals(ReadOnlySpan<byte>)` compares the current name
+against pre-encoded modified UTF-8 bytes without decoding it (`Name` itself is decoded lazily and
+cached per token), and the writer accepts pre-encoded names — `WriteInt32(ReadOnlySpan<byte>, int)`
+and the other scalar overloads, plus `WriteMemberHeader(NbtTagType, ReadOnlySpan<byte>)` — producing
+byte-identical output to the string overloads. Names are compared by decoded value, so
+non-canonically encoded wire names still match their canonical equivalents. The byte-name write
+overloads do not validate the name content as modified UTF-8; they can emit names the reader will
+reject, and validity is the caller's responsibility.
+
 ## Converters
 
 A converter writes exactly one complete value; it does not write the member name. Dynamic tag types
@@ -470,6 +483,7 @@ generic synchronous overloads. The writer does not roll back partial output if a
 - [Migrating from reflection](docs/migration.md)
 - [Diagnostics](docs/diagnostics.md)
 - [Performance characteristics](docs/performance.md)
+- [System.Text.Json gap analysis](docs/stj-gap-analysis.md)
 - [Roadmap](docs/roadmap.md)
 
 ## Build and test

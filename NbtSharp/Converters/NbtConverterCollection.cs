@@ -5,11 +5,14 @@ using System.Collections;
 namespace NbtSharp;
 
 /// <summary>
-/// A converter list that invalidates the options cache whenever its contents change.
+/// A converter list that invalidates the options cache whenever its contents change. Every mutation
+/// runs through <see cref="NbtSerializerOptions.MutateConverters{T}"/>, which rejects changes to a
+/// frozen options instance and invalidates the cache inside the same critical section.
 /// </summary>
-internal sealed class NbtConverterCollection(NbtSerializerOptions options) : IList<NbtConverter>
+internal sealed class NbtConverterCollection(NbtSerializerOptions options, List<NbtConverter> items)
+    : IList<NbtConverter>
 {
-    private readonly List<NbtConverter> _items = [];
+    private readonly List<NbtConverter> _items = items;
 
     public NbtConverter this[int index]
     {
@@ -17,8 +20,7 @@ internal sealed class NbtConverterCollection(NbtSerializerOptions options) : ILi
         set
         {
             ArgumentNullException.ThrowIfNull(value);
-            _items[index] = value;
-            options.Invalidate();
+            options.MutateConverters(items => items[index] = value);
         }
     }
 
@@ -29,14 +31,12 @@ internal sealed class NbtConverterCollection(NbtSerializerOptions options) : ILi
     public void Add(NbtConverter item)
     {
         ArgumentNullException.ThrowIfNull(item);
-        _items.Add(item);
-        options.Invalidate();
+        options.MutateConverters(items => items.Add(item));
     }
 
     public void Clear()
     {
-        _items.Clear();
-        options.Invalidate();
+        options.MutateConverters(static items => items.Clear());
     }
 
     public bool Contains(NbtConverter item) => _items.Contains(item);
@@ -50,25 +50,14 @@ internal sealed class NbtConverterCollection(NbtSerializerOptions options) : ILi
     public void Insert(int index, NbtConverter item)
     {
         ArgumentNullException.ThrowIfNull(item);
-        _items.Insert(index, item);
-        options.Invalidate();
+        options.MutateConverters(items => items.Insert(index, item));
     }
 
-    public bool Remove(NbtConverter item)
-    {
-        var removed = _items.Remove(item);
-        if (removed)
-        {
-            options.Invalidate();
-        }
-
-        return removed;
-    }
+    public bool Remove(NbtConverter item) => options.MutateConverters(items => items.Remove(item));
 
     public void RemoveAt(int index)
     {
-        _items.RemoveAt(index);
-        options.Invalidate();
+        options.MutateConverters(items => items.RemoveAt(index));
     }
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();

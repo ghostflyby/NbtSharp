@@ -131,20 +131,27 @@ NbtSharp.NbtWriter.WriteByteArray(string! name, System.ReadOnlySpan<byte> values
 NbtSharp.NbtWriter.WriteByteArray(System.ReadOnlySpan<byte> values) -> void
 NbtSharp.NbtWriter.WriteDouble(double value) -> void
 NbtSharp.NbtWriter.WriteDouble(string! name, double value) -> void
+NbtSharp.NbtWriter.WriteDouble(System.ReadOnlySpan<byte> name, double value) -> void
 NbtSharp.NbtWriter.WriteInt16(short value) -> void
 NbtSharp.NbtWriter.WriteInt16(string! name, short value) -> void
+NbtSharp.NbtWriter.WriteInt16(System.ReadOnlySpan<byte> name, short value) -> void
 NbtSharp.NbtWriter.WriteInt32(int value) -> void
 NbtSharp.NbtWriter.WriteInt32(string! name, int value) -> void
+NbtSharp.NbtWriter.WriteInt32(System.ReadOnlySpan<byte> name, int value) -> void
 NbtSharp.NbtWriter.WriteInt32Array(string! name, System.ReadOnlySpan<int> values) -> void
 NbtSharp.NbtWriter.WriteInt32Array(System.ReadOnlySpan<int> values) -> void
 NbtSharp.NbtWriter.WriteInt64(long value) -> void
 NbtSharp.NbtWriter.WriteInt64(string! name, long value) -> void
+NbtSharp.NbtWriter.WriteInt64(System.ReadOnlySpan<byte> name, long value) -> void
 NbtSharp.NbtWriter.WriteInt64Array(string! name, System.ReadOnlySpan<long> values) -> void
 NbtSharp.NbtWriter.WriteInt64Array(System.ReadOnlySpan<long> values) -> void
+NbtSharp.NbtWriter.WriteMemberHeader(NbtSharp.NbtTagType tagType, System.ReadOnlySpan<byte> name) -> void
 NbtSharp.NbtWriter.WriteSByte(sbyte value) -> void
 NbtSharp.NbtWriter.WriteSByte(string! name, sbyte value) -> void
+NbtSharp.NbtWriter.WriteSByte(System.ReadOnlySpan<byte> name, sbyte value) -> void
 NbtSharp.NbtWriter.WriteSingle(float value) -> void
 NbtSharp.NbtWriter.WriteSingle(string! name, float value) -> void
+NbtSharp.NbtWriter.WriteSingle(System.ReadOnlySpan<byte> name, float value) -> void
 NbtSharp.NbtWriter.WriteStartCompound() -> void
 NbtSharp.NbtWriter.WriteStartCompound(string! name) -> void
 NbtSharp.NbtWriter.WriteStartList(NbtSharp.NbtTagType elementType, int count) -> void
@@ -152,6 +159,7 @@ NbtSharp.NbtWriter.WriteStartList(string! name, NbtSharp.NbtTagType elementType,
 NbtSharp.NbtWriter.WriteString(string! name, string! value) -> void
 NbtSharp.NbtWriter.WriteString(string! name, System.ReadOnlySpan<char> value) -> void
 NbtSharp.NbtWriter.WriteString(string! value) -> void
+NbtSharp.NbtWriter.WriteString(System.ReadOnlySpan<byte> name, System.ReadOnlySpan<char> value) -> void
 NbtSharp.NbtWriter.WriteString(System.ReadOnlySpan<char> value) -> void
 NbtSharp.NbtWriterOptions
 NbtSharp.NbtWriterOptions.MaxCollectionLength.get -> int
@@ -203,6 +211,7 @@ NbtSharp.NbtReader.GetSingle() -> float
 NbtSharp.NbtReader.GetString() -> string!
 NbtSharp.NbtReader.ListElementType.get -> NbtSharp.NbtTagType
 NbtSharp.NbtReader.Name.get -> string?
+NbtSharp.NbtReader.NameEquals(System.ReadOnlySpan<byte> name) -> bool
 NbtSharp.NbtReader.Read() -> bool
 NbtSharp.NbtReader.Skip() -> void
 NbtSharp.NbtReader.TagType.get -> NbtSharp.NbtTagType
@@ -248,6 +257,7 @@ static NbtSharp.NbtRoot.operator ==(NbtSharp.NbtRoot left, NbtSharp.NbtRoot righ
 static NbtSharp.NbtRoot.operator !=(NbtSharp.NbtRoot left, NbtSharp.NbtRoot right) -> bool
 static NbtSharp.NbtSerializer.Deserialize(System.IO.Stream! stream, NbtSharp.NbtSerializerOptions? options = null) -> NbtSharp.NbtRoot
 NbtSharp.NbtSerializerOptions
+static NbtSharp.NbtSerializerOptions.Default.get -> NbtSharp.NbtSerializerOptions!
 NbtSharp.NbtSerializerOptions.NbtSerializerOptions() -> void
 NbtSharp.NbtSerializerOptions.RootFormat.get -> NbtSharp.NbtRootFormat
 NbtSharp.NbtTagType
