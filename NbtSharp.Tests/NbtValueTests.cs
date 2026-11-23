@@ -89,7 +89,7 @@ public sealed class NbtValueTests
         NbtValue value = default(NbtList);
 
         Assert.False(value.Value is NbtEndList);
-        Assert.True(value is NbtList list && list is NbtEndList);
+        Assert.True(value is NbtList and NbtEndList);
     }
 
     private static string Describe(NbtValue value) => value switch

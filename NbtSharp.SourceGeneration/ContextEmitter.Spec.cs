@@ -116,7 +116,7 @@ internal sealed partial class ContextEmitter
 
             // String enums have no numeric mapping; their factory instantiates the runtime
             // NbtStringEnumConverter<TEnum> instead of a generated converter class.
-            if (entry.Kind == TypeEntryKind.Enum && !entry.EnumIsString)
+            if (entry is { Kind: TypeEntryKind.Enum, EnumIsString: false })
             {
                 var mapping = GetEnumMapping(typeName, entry.UnderlyingType!);
                 spec.EnumMapping = new EnumMappingSpec(

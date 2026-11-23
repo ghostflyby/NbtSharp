@@ -23,7 +23,7 @@ public sealed class NbtContractModifierTests
         }
 
         AssertRenamed(
-            ReflectionPath(static contract => contract.GetMember("Name")!.NbtName = "label"),
+            ReflectionPath(static contract => contract["Name"].NbtName = "label"),
             new RenameDto { Name = "steve" },
             static value => value.Name,
             static value => value.Health);
@@ -45,7 +45,7 @@ public sealed class NbtContractModifierTests
         }
 
         AssertLegacyNameIsIgnored(
-            ReflectionPath(static contract => contract.GetMember("Name")!.NbtName = "label"),
+            ReflectionPath(static contract => contract["Name"].NbtName = "label"),
             new RenameDto { Name = "steve", Health = 3 },
             static value => value.Name,
             static value => value.Health);
@@ -71,8 +71,8 @@ public sealed class NbtContractModifierTests
         var path = ReflectionPath(
             contract =>
             {
-                policySeen = contract.GetMember("UserName")!.NbtName;
-                attributeSeen = contract.GetMember("Value")!.NbtName;
+                policySeen = contract["UserName"].NbtName;
+                attributeSeen = contract["Value"].NbtName;
             },
             NbtNamingPolicy.CamelCase);
 
@@ -102,7 +102,7 @@ public sealed class NbtContractModifierTests
         }
 
         AssertIgnoredHealth(
-            ReflectionPath(static contract => contract.GetMember("Health")!.Ignore = true),
+            ReflectionPath(static contract => contract["Health"].Ignore = true),
             new RenameDto { Name = "kept", Health = 20 },
             static value => value.Name,
             static value => value.Health);
@@ -124,7 +124,7 @@ public sealed class NbtContractModifierTests
         }
 
         AssertEmptyName(
-            ReflectionPath(static contract => contract.GetMember("Name")!.NbtName = ""),
+            ReflectionPath(static contract => contract["Name"].NbtName = ""),
             new RenameDto { Name = "anon" },
             static value => value.Name,
             static value => value.Health);
@@ -153,7 +153,7 @@ public sealed class NbtContractModifierTests
 
         AssertOffsetConverter(
             ReflectionPath(static contract =>
-                contract.GetMember("Value")!.Converter = new ModifierOffsetIntConverter(200)),
+                contract["Value"].Converter = new ModifierOffsetIntConverter(200)),
             new AttributeConverterDto { Value = 5 },
             static value => value.Value,
             expectedWire: 205);
@@ -175,7 +175,7 @@ public sealed class NbtContractModifierTests
         }
 
         AssertOffsetConverter(
-            ReflectionPath(static contract => contract.GetMember("Value")!.Converter = new ModifierIntFactory()),
+            ReflectionPath(static contract => contract["Value"].Converter = new ModifierIntFactory()),
             new PlainIntDto { Value = 5 },
             static value => value.Value,
             expectedWire: 15);
@@ -199,7 +199,7 @@ public sealed class NbtContractModifierTests
         {
             if (contract.Type == typeof(NullConverterTargetDto))
             {
-                contract.GetMember("Value")!.Converter = new ModifierOffsetIntConverter(100);
+                contract["Value"].Converter = new ModifierOffsetIntConverter(100);
             }
         });
 
@@ -232,8 +232,8 @@ public sealed class NbtContractModifierTests
         AssertReorderedMembers(
             ReflectionPath(static contract =>
             {
-                contract.GetMember("Third")!.Order = -1;
-                contract.GetMember("Second")!.Order = 10;
+                contract["Third"].Order = -1;
+                contract["Second"].Order = 10;
             }),
             new OrderDto { First = 1, Second = 2, Third = 3 },
             static value => value.First,
@@ -260,8 +260,8 @@ public sealed class NbtContractModifierTests
         AssertDeclarationOrder(
             ReflectionPath(static contract =>
             {
-                contract.GetMember("First")!.Order = 5;
-                contract.GetMember("Second")!.Order = 5;
+                contract["First"].Order = 5;
+                contract["Second"].Order = 5;
             }),
             new OrderDto { First = 1, Second = 2, Third = 3 },
             static value => value.First,
@@ -286,7 +286,7 @@ public sealed class NbtContractModifierTests
         }
 
         AssertOrderedRoundTrip(
-            ReflectionPath(static contract => contract.GetMember("Third")!.Order = -1),
+            ReflectionPath(static contract => contract["Third"].Order = -1),
             new OrderDto { First = 1, Second = 2, Third = 3 },
             static value => value.First,
             static value => value.Second,
@@ -317,7 +317,7 @@ public sealed class NbtContractModifierTests
             }
 
             baseRuns++;
-            contract.GetMember("Name")!.NbtName = "renamed";
+            contract["Name"].NbtName = "renamed";
         });
 
         AssertPlainPolymorphicEnvelope<ModifierPolyBase, ModifierPlainPolyDerived>(
@@ -353,7 +353,7 @@ public sealed class NbtContractModifierTests
             }
 
             derivedRuns++;
-            contract.GetMember("Value")!.NbtName = "v";
+            contract["Value"].NbtName = "v";
         });
 
         AssertRenamedPolymorphicPayload<ModifierPolyBase, ModifierPolyDerived>(
@@ -426,7 +426,7 @@ public sealed class NbtContractModifierTests
             NbtSerializer.Serialize(new AttributeCollisionDto { A = 1, B = 2 }, "root", ReflectionOptions()));
 
         AssertResolvedCollision(
-            ReflectionPath(static contract => contract.GetMember("B")!.NbtName = "b"),
+            ReflectionPath(static contract => contract["B"].NbtName = "b"),
             new AttributeCollisionDto { A = 1, B = 2 },
             static value => value.A,
             static value => value.B);
@@ -435,7 +435,7 @@ public sealed class NbtContractModifierTests
     [Fact]
     public void RenameModifierAndTwinProduceIdenticalBytes()
     {
-        var reflection = ReflectionPath(static contract => contract.GetMember("Name")!.NbtName = "label");
+        var reflection = ReflectionPath(static contract => contract["Name"].NbtName = "label");
         var generated = GeneratedPath();
 
         var reflectedData = reflection.Serialize(new RenameDto { Name = "steve" });
@@ -453,7 +453,7 @@ public sealed class NbtContractModifierTests
     [Fact]
     public void IgnoreModifierAndTwinProduceIdenticalBytes()
     {
-        var reflection = ReflectionPath(static contract => contract.GetMember("Health")!.Ignore = true);
+        var reflection = ReflectionPath(static contract => contract["Health"].Ignore = true);
         var generated = GeneratedPath();
 
         var reflectedData = reflection.Serialize(new RenameDto { Name = "kept", Health = 20 });
@@ -474,7 +474,7 @@ public sealed class NbtContractModifierTests
     public void ConverterModifierAndTwinProduceIdenticalBytes()
     {
         var reflection = ReflectionPath(static contract =>
-            contract.GetMember("Value")!.Converter = new ModifierOffsetIntConverter(200));
+            contract["Value"].Converter = new ModifierOffsetIntConverter(200));
         var generated = GeneratedPath();
 
         var reflectedData = reflection.Serialize(new AttributeConverterDto { Value = 5 });
@@ -494,8 +494,8 @@ public sealed class NbtContractModifierTests
     {
         var reflection = ReflectionPath(static contract =>
         {
-            contract.GetMember("Third")!.Order = -1;
-            contract.GetMember("Second")!.Order = 10;
+            contract["Third"].Order = -1;
+            contract["Second"].Order = 10;
         });
         var generated = GeneratedPath();
 

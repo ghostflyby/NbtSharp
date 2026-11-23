@@ -542,8 +542,7 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
                     }
 
                     if (property?.GetMethod is { } mappedGetter &&
-                        candidate is PropertyInfo candidateProperty &&
-                        candidateProperty.GetMethod is { } candidateGetter &&
+                        candidate is PropertyInfo { GetMethod: { } candidateGetter } &&
                         candidateGetter.GetBaseDefinition() == mappedGetter.GetBaseDefinition())
                     {
                         continue;
@@ -709,7 +708,7 @@ internal sealed class NbtReflectionObjectConverter : NbtConverter
             existing,
             field.Name,
             field.FieldType,
-            canWrite: !field.IsInitOnly && !field.IsLiteral,
+            canWrite: field is { IsInitOnly: false, IsLiteral: false },
             isRequired: field.IsDefined(
                 typeof(System.Runtime.CompilerServices.RequiredMemberAttribute),
                 inherit: false),

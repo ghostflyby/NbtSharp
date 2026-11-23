@@ -11,28 +11,30 @@ namespace NbtSharp;
 /// the view allocates nothing while navigating. The view stays valid only while its document is
 /// alive and undisposed.
 /// </para>
+/// <para>
+/// This is a wire-order view: duplicate member names are preserved by <see cref="Count"/> and
+/// enumeration, while the indexer and <see cref="TryGetValue"/> resolve the last occurrence. It
+/// therefore does not implement <see cref="IReadOnlyDictionary{TKey,TValue}"/>.
+/// </para>
 /// </remarks>
 public readonly struct NbtCompoundElement
 {
-    private readonly NbtDocument? _owner;
-    private readonly int _slotIndex;
-
     internal NbtCompoundElement(NbtDocument owner, int slotIndex)
     {
-        _owner = owner;
-        _slotIndex = slotIndex;
+        Owner = owner;
+        SlotIndex = slotIndex;
     }
 
     /// <summary>Gets the owning document, when the view was created by one.</summary>
-    internal NbtDocument? Owner => _owner;
+    internal NbtDocument? Owner { get; }
 
     /// <summary>Gets the document slot index of this view.</summary>
-    internal int SlotIndex => _slotIndex;
+    internal int SlotIndex { get; }
 
     /// <summary>Gets the number of members.</summary>
     /// <exception cref="NbtException">The document slot is not a compound.</exception>
     /// <exception cref="ObjectDisposedException">The owning document has been disposed.</exception>
-    public int MemberCount
+    public int Count
     {
         get
         {
@@ -41,47 +43,50 @@ public readonly struct NbtCompoundElement
         }
     }
 
-    /// <summary>Gets the member with the specified name.</summary>
-    /// <param name="name">The member name.</param>
+    /// <summary>Gets the member with the specified key.</summary>
+    /// <param name="key">The member name.</param>
     /// <returns>The member.</returns>
-    /// <remarks>When the name occurs more than once, the last occurrence wins.</remarks>
-    /// <exception cref="ArgumentNullException"><paramref name="name"/> is <see langword="null"/>.</exception>
-    /// <exception cref="KeyNotFoundException">No member has the specified name.</exception>
+    /// <remarks>When the key occurs more than once, the last occurrence wins.</remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="key"/> is <see langword="null"/>.</exception>
+    /// <exception cref="KeyNotFoundException">No member has the specified key.</exception>
     /// <exception cref="NbtException">The document slot is not a compound.</exception>
     /// <exception cref="ObjectDisposedException">The owning document has been disposed.</exception>
-    public NbtElement GetMember(string name)
+    public NbtElement this[string key]
     {
-        ArgumentNullException.ThrowIfNull(name);
-        if (!TryGetMember(name, out var value))
+        get
         {
-            throw new KeyNotFoundException($"The given key '{name}' was not present in the dictionary.");
-        }
+            ArgumentNullException.ThrowIfNull(key);
+            if (!TryGetValue(key, out var value))
+            {
+                throw new KeyNotFoundException($"The given key '{key}' was not present in the dictionary.");
+            }
 
-        return value;
+            return value;
+        }
     }
 
-    /// <summary>Gets the member with the specified name, when present.</summary>
-    /// <param name="name">The member name.</param>
+    /// <summary>Gets the member with the specified key, when present.</summary>
+    /// <param name="key">The member name.</param>
     /// <param name="value">The member, or a default value when absent.</param>
     /// <returns><see langword="true"/> when the member was found.</returns>
     /// <remarks>
     /// The query string is compared with each member's wire name by decoded value. Wire names
     /// decode into a stack buffer when at most 256 chars, or a pooled buffer otherwise, so no
-    /// strings are allocated. When the name occurs more than once, the last occurrence wins.
+    /// strings are allocated. When the key occurs more than once, the last occurrence wins.
     /// </remarks>
-    /// <exception cref="ArgumentNullException"><paramref name="name"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="key"/> is <see langword="null"/>.</exception>
     /// <exception cref="NbtException">
     /// The document slot is not a compound, or a wire name is not valid modified UTF-8.
     /// </exception>
     /// <exception cref="ObjectDisposedException">The owning document has been disposed.</exception>
-    public bool TryGetMember(string name, out NbtElement value)
+    public bool TryGetValue(string key, out NbtElement value)
     {
-        ArgumentNullException.ThrowIfNull(name);
+        ArgumentNullException.ThrowIfNull(key);
         var document = Document;
         ref readonly var slot = ref ExpectSlot();
 
-        var query = name.AsSpan();
-        var child = _slotIndex + 1;
+        var query = key.AsSpan();
+        var child = SlotIndex + 1;
         var lastMatch = -1;
         for (var i = 0; i < slot.ChildCount; i++)
         {
@@ -112,20 +117,16 @@ public readonly struct NbtCompoundElement
     public Enumerator GetEnumerator()
     {
         _ = ExpectSlot();
-        return new Enumerator(Document, _slotIndex);
+        return new Enumerator(Document, SlotIndex);
     }
 
-    /// <summary>Gets an enumerator over the members in wire order.</summary>
-    /// <returns>The enumerator.</returns>
-    public Enumerator EnumerateMembers() => GetEnumerator();
-
-    private NbtDocument Document => _owner ?? throw new InvalidOperationException(
+    private NbtDocument Document => Owner ?? throw new InvalidOperationException(
         "The operation is not valid for a default-initialized NbtCompoundElement.");
 
     private ref readonly NbtDocumentSlot ExpectSlot()
     {
         var document = Document;
-        ref readonly var slot = ref document.GetSlot(_slotIndex);
+        ref readonly var slot = ref document.GetSlot(SlotIndex);
         if (slot.TagType != NbtTagType.Compound)
         {
             throw new NbtException(

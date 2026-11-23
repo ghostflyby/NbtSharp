@@ -215,12 +215,12 @@ public sealed class NbtResolverChainTests
                 SourceGenerationContext.Default,
                 new NbtReflectionTypeInfoResolver(c =>
                 {
-                    if (c.GetMember("Id") is { } id)
+                    if (c.TryGetValue("Id", out var id))
                     {
                         id.NbtName = "renamed_id";
                     }
 
-                    if (c.GetMember("Name") is { } name)
+                    if (c.TryGetValue("Name", out var name))
                     {
                         name.NbtName = "renamed_name";
                     }

@@ -13,7 +13,6 @@ namespace NbtSharp;
 public readonly struct NbtByteArrayElement
 {
     private readonly ReadOnlyMemory<byte> _raw;
-    private readonly NbtDocument? _owner;
 
     /// <summary>Initializes a byte-array view over raw bytes.</summary>
     /// <param name="raw">The array payload bytes.</param>
@@ -25,7 +24,7 @@ public readonly struct NbtByteArrayElement
     internal NbtByteArrayElement(ReadOnlyMemory<byte> raw, NbtDocument? owner)
     {
         _raw = raw;
-        _owner = owner;
+        Owner = owner;
     }
 
     /// <summary>Gets the number of elements.</summary>
@@ -101,7 +100,7 @@ public readonly struct NbtByteArrayElement
     }
 
     /// <summary>Gets the owning document, when the view was created by one.</summary>
-    internal NbtDocument? Owner => _owner;
+    internal NbtDocument? Owner { get; }
 
-    private void ThrowIfOwnerDisposed() => _owner?.ThrowIfDisposed();
+    private void ThrowIfOwnerDisposed() => Owner?.ThrowIfDisposed();
 }

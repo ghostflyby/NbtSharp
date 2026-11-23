@@ -13,8 +13,6 @@ namespace NbtSharp;
 public readonly struct NbtStringElement
 {
     private readonly ReadOnlyMemory<byte> _raw;
-    private readonly long _bytePosition;
-    private readonly NbtDocument? _owner;
 
     /// <summary>Initializes a string view over modified UTF-8 bytes.</summary>
     /// <param name="raw">The modified UTF-8 bytes.</param>
@@ -27,8 +25,8 @@ public readonly struct NbtStringElement
     internal NbtStringElement(ReadOnlyMemory<byte> raw, long bytePosition, NbtDocument? owner)
     {
         _raw = raw;
-        _bytePosition = bytePosition;
-        _owner = owner;
+        BytePosition = bytePosition;
+        Owner = owner;
     }
 
     /// <summary>Gets the number of encoded bytes.</summary>
@@ -78,14 +76,14 @@ public readonly struct NbtStringElement
     public string GetString()
     {
         ThrowIfOwnerDisposed();
-        return NbtText.DecodeAt(_raw.Span, _bytePosition);
+        return NbtText.DecodeAt(_raw.Span, BytePosition);
     }
 
     /// <summary>Gets the byte position reported when decoding fails.</summary>
-    internal long BytePosition => _bytePosition;
+    internal long BytePosition { get; }
 
     /// <summary>Gets the owning document, when the view was created by one.</summary>
-    internal NbtDocument? Owner => _owner;
+    internal NbtDocument? Owner { get; }
 
-    private void ThrowIfOwnerDisposed() => _owner?.ThrowIfDisposed();
+    private void ThrowIfOwnerDisposed() => Owner?.ThrowIfDisposed();
 }

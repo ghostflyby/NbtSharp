@@ -36,7 +36,7 @@ public sealed class ContractValidationParityTests
         var value = new IgnoredRequiredDto { Name = "x", Value = 1 };
         Assert.Equal("x", value.Name);
         Assert.Equal(1, value.Value);
-        var options = ModifierOptions(static contract => contract.GetMember("Name")!.Ignore = true);
+        var options = ModifierOptions(static contract => contract["Name"].Ignore = true);
 
         var exception = Assert.Throws<NotSupportedException>(() =>
             NbtSerializer.Serialize(value, "root", options));
@@ -76,7 +76,7 @@ public sealed class ContractValidationParityTests
         var value = new BoundOnlyDto(1, 2);
         Assert.Equal(1, value.A);
         Assert.Equal(2, value.B);
-        var options = ModifierOptions(static contract => contract.GetMember("A")!.Ignore = true);
+        var options = ModifierOptions(static contract => contract["A"].Ignore = true);
 
         var exception = Assert.Throws<NotSupportedException>(() =>
             NbtSerializer.Serialize(value, "root", options));
@@ -111,7 +111,7 @@ public sealed class ContractValidationParityTests
         var value = new RenameDto { Name = "x", Health = 1 };
         Assert.Equal("x", value.Name);
         Assert.Equal(1, value.Health);
-        var options = ModifierOptions(static contract => contract.GetMember("Health")!.NbtName = "Name");
+        var options = ModifierOptions(static contract => contract["Health"].NbtName = "Name");
 
         var exception = Assert.Throws<NotSupportedException>(() =>
             NbtSerializer.Serialize(value, "root", options));
@@ -154,7 +154,7 @@ public sealed class ContractValidationParityTests
         var value = new PlainIntDto { Value = 5 };
         Assert.Equal(5, value.Value);
         var options = ModifierOptions(static contract =>
-            contract.GetMember("Value")!.Converter = new ParityStringConverter());
+            contract["Value"].Converter = new ParityStringConverter());
 
         var exception = Assert.Throws<NotSupportedException>(() =>
             NbtSerializer.Serialize(value, "root", options));

@@ -23,7 +23,6 @@ namespace NbtSharp;
 public sealed class NbtTypeInfoResolverChain : INbtTypeInfoResolver
 {
     private readonly INbtTypeInfoResolver[] _resolvers;
-    private readonly IReadOnlyList<INbtTypeInfoResolver> _resolverView;
 
     /// <summary>Initializes a resolver chain consulted in the given order.</summary>
     /// <param name="resolvers">The resolvers, from highest to lowest precedence.</param>
@@ -43,11 +42,11 @@ public sealed class NbtTypeInfoResolverChain : INbtTypeInfoResolver
             ArgumentNullException.ThrowIfNull(resolver);
         }
 
-        _resolverView = Array.AsReadOnly(_resolvers);
+        Resolvers = Array.AsReadOnly(_resolvers);
     }
 
     /// <summary>Gets a read-only view of the resolvers in precedence order.</summary>
-    public IReadOnlyList<INbtTypeInfoResolver> Resolvers => _resolverView;
+    public IReadOnlyList<INbtTypeInfoResolver> Resolvers { get; }
 
     /// <inheritdoc/>
     public NbtTypeInfo? GetTypeInfo(Type type, NbtSerializerOptions options)

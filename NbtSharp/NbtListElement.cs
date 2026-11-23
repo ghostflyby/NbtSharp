@@ -11,23 +11,24 @@ namespace NbtSharp;
 /// the view allocates nothing while navigating. The view stays valid only while its document is
 /// alive and undisposed.
 /// </para>
+/// <para>
+/// The view implements <see cref="IReadOnlyList{T}"/>; interface enumeration boxes the struct
+/// enumerator, while direct <see langword="foreach"/> over the view stays allocation-free.
+/// </para>
 /// </remarks>
-public readonly struct NbtListElement
+public readonly struct NbtListElement : IReadOnlyList<NbtElement>
 {
-    private readonly NbtDocument? _owner;
-    private readonly int _slotIndex;
-
     internal NbtListElement(NbtDocument owner, int slotIndex)
     {
-        _owner = owner;
-        _slotIndex = slotIndex;
+        Owner = owner;
+        SlotIndex = slotIndex;
     }
 
     /// <summary>Gets the owning document, when the view was created by one.</summary>
-    internal NbtDocument? Owner => _owner;
+    internal NbtDocument? Owner { get; }
 
     /// <summary>Gets the document slot index of this view.</summary>
-    internal int SlotIndex => _slotIndex;
+    internal int SlotIndex { get; }
 
     /// <summary>Gets the tag type declared by the list header.</summary>
     /// <exception cref="NbtException">The document slot is not a list.</exception>
@@ -65,32 +66,31 @@ public readonly struct NbtListElement
     /// </exception>
     /// <exception cref="NbtException">The document slot is not a list.</exception>
     /// <exception cref="ObjectDisposedException">The owning document has been disposed.</exception>
-    public NbtElement GetElementAt(int index)
+    public NbtElement this[int index]
     {
-        var document = Document;
-        ref readonly var slot = ref ExpectSlot();
-        ArgumentOutOfRangeException.ThrowIfNegative(index);
-        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(index, slot.ChildCount);
-
-        var child = _slotIndex + 1;
-        if (slot.ElementType is not (NbtTagType.List or NbtTagType.Compound))
+        get
         {
-            // Scalar, string, and array elements occupy consecutive slots.
-            return document.CreateElement(child + index);
-        }
+            var document = Document;
+            ref readonly var slot = ref ExpectSlot();
+            ArgumentOutOfRangeException.ThrowIfNegative(index);
+            ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(index, slot.ChildCount);
 
-        for (var i = 0; i < index; i++)
-        {
-            child += 1 + document.GetSlot(child).DescendantCount;
-        }
+            var child = SlotIndex + 1;
+            if (slot.ElementType is not (NbtTagType.List or NbtTagType.Compound))
+            {
+                // Scalar, string, and array elements occupy consecutive slots.
+                return document.CreateElement(child + index);
+            }
 
-        return document.CreateElement(child);
+            for (var i = 0; i < index; i++)
+            {
+                child += 1 + document.GetSlot(child).DescendantCount;
+            }
+
+            return document.CreateElement(child);
+        }
     }
 
-    /// <summary>Gets the element at <paramref name="index"/>.</summary>
-    /// <param name="index">The zero-based element index.</param>
-    /// <returns>The element.</returns>
-    public NbtElement this[int index] => GetElementAt(index);
 
     /// <summary>Gets an enumerator over the elements in wire order.</summary>
     /// <returns>The enumerator.</returns>
@@ -99,20 +99,20 @@ public readonly struct NbtListElement
     public Enumerator GetEnumerator()
     {
         _ = ExpectSlot();
-        return new Enumerator(Document, _slotIndex);
+        return new Enumerator(Document, SlotIndex);
     }
 
-    /// <summary>Gets an enumerator over the elements in wire order.</summary>
-    /// <returns>The enumerator.</returns>
-    public Enumerator EnumerateElements() => GetEnumerator();
+    IEnumerator<NbtElement> IEnumerable<NbtElement>.GetEnumerator() => GetEnumerator();
 
-    private NbtDocument Document => _owner ?? throw new InvalidOperationException(
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+    private NbtDocument Document => Owner ?? throw new InvalidOperationException(
         "The operation is not valid for a default-initialized NbtListElement.");
 
     private ref readonly NbtDocumentSlot ExpectSlot()
     {
         var document = Document;
-        ref readonly var slot = ref document.GetSlot(_slotIndex);
+        ref readonly var slot = ref document.GetSlot(SlotIndex);
         if (slot.TagType != NbtTagType.List)
         {
             throw new NbtException(

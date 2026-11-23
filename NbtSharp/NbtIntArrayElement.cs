@@ -19,7 +19,6 @@ namespace NbtSharp;
 public readonly struct NbtIntArrayElement
 {
     private readonly ReadOnlyMemory<byte> _raw;
-    private readonly NbtDocument? _owner;
 
     /// <summary>Initializes an int-array view over raw big-endian bytes.</summary>
     /// <param name="raw">The payload bytes; the length must be a multiple of four.</param>
@@ -38,7 +37,7 @@ public readonly struct NbtIntArrayElement
         }
 
         _raw = raw;
-        _owner = owner;
+        Owner = owner;
     }
 
     /// <summary>Gets the number of elements.</summary>
@@ -99,7 +98,7 @@ public readonly struct NbtIntArrayElement
     }
 
     /// <summary>Gets the owning document, when the view was created by one.</summary>
-    internal NbtDocument? Owner => _owner;
+    internal NbtDocument? Owner { get; }
 
-    private void ThrowIfOwnerDisposed() => _owner?.ThrowIfDisposed();
+    private void ThrowIfOwnerDisposed() => Owner?.ThrowIfDisposed();
 }

@@ -761,8 +761,7 @@ internal static class CollectionPatterns
             IsSequenceConstructorParameter(constructor.Parameters[0].Type, elementType));
 
     private static bool IsSequenceConstructorParameter(ITypeSymbol parameterType, ITypeSymbol elementType) =>
-        parameterType is INamedTypeSymbol named &&
-        named.TypeArguments.Length == 1 &&
+        parameterType is INamedTypeSymbol { TypeArguments.Length: 1 } named &&
         SymbolEqualityComparer.Default.Equals(named.TypeArguments[0], elementType) &&
         named.OriginalDefinition.ContainingNamespace?.ToDisplayString() == GenericNamespace &&
         named.OriginalDefinition.Name is
@@ -841,8 +840,7 @@ internal static class CollectionPatterns
         named.OriginalDefinition.Name is "IComparer" or "IEqualityComparer";
 
     private static bool IsBlockingCollection(INamedTypeSymbol type) =>
-        type.Name == "BlockingCollection" &&
-        type.Arity == 1 &&
+        type is { Name: "BlockingCollection", Arity: 1 } &&
         type.ContainingNamespace?.ToDisplayString() == "System.Collections.Concurrent";
 
     private static string? MapInterface(INamedTypeSymbol type, ITypeSymbol valueType)

@@ -17,8 +17,6 @@ namespace NbtSharp;
 /// </remarks>
 public abstract class NbtSerializerContext : INbtTypeInfoResolver
 {
-    private NbtSerializerOptions? _options;
-
     /// <summary>Initializes the context with default options.</summary>
     protected NbtSerializerContext()
         : this(options: null)
@@ -31,14 +29,14 @@ public abstract class NbtSerializerContext : INbtTypeInfoResolver
     {
         if (options is not null)
         {
-            _options = options.WithTypeInfoResolver(this);
+            Options = options.WithTypeInfoResolver(this);
         }
     }
 
     /// <summary>Gets the options bound to this context.</summary>
     /// <remarks>Default options are created on first access when no explicit options were supplied.</remarks>
     public NbtSerializerOptions Options =>
-        LazyInitializer.EnsureInitialized(ref _options, CreateDefaultOptions);
+        LazyInitializer.EnsureInitialized(ref field, CreateDefaultOptions);
 
     /// <summary>Creates the options used when the constructor receives no explicit options.</summary>
     /// <returns>The default options bound to this context.</returns>
