@@ -860,11 +860,12 @@ public sealed class NbtDocumentTests
         using var document = NbtDocument.Parse(BuildSampleDocument());
         var numbers = document.RootElement.Compound["Numbers"].List;
 
-        IEnumerator enumerator = numbers.GetEnumerator();
+        using var enumerator = numbers.GetEnumerator();
+        IEnumerator boxed = enumerator;
         var values = new List<int>();
-        while (enumerator.MoveNext())
+        while (boxed.MoveNext())
         {
-            values.Add(((NbtElement)enumerator.Current!).Int32);
+            values.Add(((NbtElement)boxed.Current!).Int32);
         }
 
         Assert.Equal([1, 2, 3], values.ToArray());
