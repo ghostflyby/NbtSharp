@@ -9,17 +9,17 @@ namespace NbtSharp;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Myitian's decoder is a lenient superset: it accepts standard UTF-8 four-byte sequences and
-/// decodes them to surrogate pairs, accepts overlong forms and raw nulls, and reports invalid
-/// input with exceptions that carry no document position. This codec adds the rule NBT requires:
-/// lead bytes of 0xF0 or greater are rejected, and decoding failures surface as
-/// <see cref="NbtException"/>.
+/// Myitian's <see cref="ModifiedUTF8Encoding"/> accepts the Java <c>readUTF</c> forms, including
+/// raw nulls, overlong two- and three-byte encodings, and lone surrogates, and additionally
+/// accepts standard UTF-8 four-byte sequences. Invalid input surfaces as
+/// <see cref="DecoderFallbackException"/> with only the offset inside the supplied buffer.
 /// </para>
 /// <para>
-/// The policy lives in the standard <see cref="Encoding"/> entry points, so callers use
-/// <c>GetString</c>, <c>GetCharCount</c>, and <c>GetChars</c>; there is no bespoke decode method.
-/// <c>GetDecoder</c> and <c>GetEncoder</c> expose the underlying codec's stateful objects and do
-/// not apply the F0 rule.
+/// The string, char-count, and char-copy entry points restore the <c>readUTF</c> lead-byte rule:
+/// bytes of 0xF0 or greater are rejected, and decode failures are wrapped in
+/// <see cref="NbtException"/>. <c>GetDecoder</c> and <c>GetEncoder</c> expose Myitian's stateful
+/// objects, so those two paths apply neither the 0xF0 rule nor the <see cref="NbtException"/>
+/// wrapping.
 /// </para>
 /// </remarks>
 public sealed class NbtModifiedUtf8Encoding : Encoding

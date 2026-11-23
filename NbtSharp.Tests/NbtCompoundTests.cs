@@ -57,6 +57,6 @@ public sealed class NbtCompoundTests
         var root = new NbtCompound { ["Child"] = child };
 
         Assert.True(root["Child"] is NbtCompound);
-        Assert.True(child["Value"] is int value && value == 42);
+        Assert.True(child["Value"] is int and 42);
     }
 }

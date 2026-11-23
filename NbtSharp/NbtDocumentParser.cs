@@ -109,36 +109,19 @@ internal static class NbtDocumentParser
         return parser.ParseDocument();
     }
 
-    private ref struct Parser
+    private ref struct Parser(
+        ReadOnlySpan<byte> data,
+        NbtRootFormat rootFormat,
+        int maxDepth,
+        int maxCollectionLength,
+        long maxDocumentBytes)
     {
-        private readonly ReadOnlySpan<byte> _data;
-        private readonly NbtRootFormat _rootFormat;
-        private readonly int _maxDepth;
-        private readonly int _maxCollectionLength;
-        private readonly long _maxDocumentBytes;
+        private readonly ReadOnlySpan<byte> _data = data;
         private long _bytesConsumed;
-        private NbtDocumentSlot[] _slots;
-        private int _slotCount;
-        private ContainerFrame[] _frames;
-        private int _depth;
-
-        public Parser(
-            ReadOnlySpan<byte> data,
-            NbtRootFormat rootFormat,
-            int maxDepth,
-            int maxCollectionLength,
-            long maxDocumentBytes)
-        {
-            _data = data;
-            _rootFormat = rootFormat;
-            _maxDepth = maxDepth;
-            _maxCollectionLength = maxCollectionLength;
-            _maxDocumentBytes = maxDocumentBytes;
-            _slots = ArrayPool<NbtDocumentSlot>.Shared.Rent(InitialSlotCapacity);
-            _slotCount = 0;
-            _frames = new ContainerFrame[InitialFrameCapacity];
-            _depth = 0;
-        }
+        private NbtDocumentSlot[] _slots = ArrayPool<NbtDocumentSlot>.Shared.Rent(InitialSlotCapacity);
+        private int _slotCount = 0;
+        private ContainerFrame[] _frames = new ContainerFrame[InitialFrameCapacity];
+        private int _depth = 0;
 
         public NbtDocumentSlot[] ParseDocument()
         {
@@ -201,7 +184,7 @@ internal static class NbtDocumentParser
                 };
             }
 
-            var name = _rootFormat == NbtRootFormat.Named ? ReadName() : NameInfo.Unnamed;
+            var name = rootFormat == NbtRootFormat.Named ? ReadName() : NameInfo.Unnamed;
             BeginValue(tagType, tagPosition, name);
         }
 
@@ -276,9 +259,9 @@ internal static class NbtDocumentParser
 
         private void EnterContainer()
         {
-            if (_depth >= _maxDepth)
+            if (_depth >= maxDepth)
             {
-                throw new NbtException($"The NBT nesting depth exceeds the limit of {_maxDepth}.")
+                throw new NbtException($"The NBT nesting depth exceeds the limit of {maxDepth}.")
                 {
                     BytePosition = _bytesConsumed,
                 };
@@ -308,10 +291,10 @@ internal static class NbtDocumentParser
                 };
             }
 
-            if (count > _maxCollectionLength)
+            if (count > maxCollectionLength)
             {
                 throw new NbtException(
-                    $"The NBT list length {count} exceeds the configured limit of {_maxCollectionLength}.")
+                    $"The NBT list length {count} exceeds the configured limit of {maxCollectionLength}.")
                 {
                     BytePosition = position,
                 };
@@ -440,10 +423,10 @@ internal static class NbtDocumentParser
         {
             var position = _bytesConsumed;
             var length = ReadInt32();
-            if (length < 0 || length > _maxCollectionLength)
+            if (length < 0 || length > maxCollectionLength)
             {
                 throw new NbtException(
-                    $"Invalid NBT array length {length} (limit {_maxCollectionLength}).")
+                    $"Invalid NBT array length {length} (limit {maxCollectionLength}).")
                 {
                     BytePosition = position,
                 };
@@ -528,10 +511,10 @@ internal static class NbtDocumentParser
 
         private void EnsureDocumentSize(long count)
         {
-            if (_maxDocumentBytes > 0 && count > _maxDocumentBytes - _bytesConsumed)
+            if (maxDocumentBytes > 0 && count > maxDocumentBytes - _bytesConsumed)
             {
                 throw new NbtException(
-                    $"The NBT document exceeds the configured limit of {_maxDocumentBytes} bytes.")
+                    $"The NBT document exceeds the configured limit of {maxDocumentBytes} bytes.")
                 {
                     BytePosition = _bytesConsumed,
                 };

@@ -23,39 +23,35 @@ namespace NbtSharp;
 /// </remarks>
 public sealed class NbtMemberInfo
 {
-    private readonly PropertyInfo? _property;
-    private readonly FieldInfo? _field;
     private string _nbtName;
-    private bool _ignore;
-    private NbtConverter? _converter;
     private int _order;
     private bool _frozen;
 
     internal NbtMemberInfo(string nbtName, PropertyInfo property, int order)
     {
         _nbtName = nbtName;
-        _property = property;
+        Property = property;
         _order = order;
     }
 
     internal NbtMemberInfo(string nbtName, FieldInfo field, int order)
     {
         _nbtName = nbtName;
-        _field = field;
+        Field = field;
         _order = order;
     }
 
     /// <summary>Gets the CLR name of the property or field, independent of any renaming.</summary>
-    public string ClrName => _property?.Name ?? _field!.Name;
+    public string ClrName => Property?.Name ?? Field!.Name;
 
     /// <summary>Gets the CLR type of the property or field.</summary>
-    public Type Type => _property?.PropertyType ?? _field!.FieldType;
+    public Type Type => Property?.PropertyType ?? Field!.FieldType;
 
     /// <summary>
     /// Gets whether the member can be assigned after construction. Ignored members that a
     /// constructor does not bind are skipped on read.
     /// </summary>
-    public bool CanWrite => _property?.CanWrite == true || _field is { IsInitOnly: false, IsLiteral: false };
+    public bool CanWrite => Property?.CanWrite == true || Field is { IsInitOnly: false, IsLiteral: false };
 
     /// <summary>
     /// Gets or sets the NBT name of the member, already reflecting
@@ -86,11 +82,11 @@ public sealed class NbtMemberInfo
     /// <exception cref="InvalidOperationException">The contract is frozen.</exception>
     public bool Ignore
     {
-        get => _ignore;
+        get;
         set
         {
             ThrowIfFrozen();
-            _ignore = value;
+            field = value;
         }
     }
 
@@ -112,11 +108,11 @@ public sealed class NbtMemberInfo
     /// <exception cref="InvalidOperationException">The contract is frozen.</exception>
     public NbtConverter? Converter
     {
-        get => _converter;
+        get;
         set
         {
             ThrowIfFrozen();
-            _converter = value;
+            field = value;
         }
     }
 
@@ -135,13 +131,13 @@ public sealed class NbtMemberInfo
         }
     }
 
-    internal PropertyInfo? Property => _property;
+    internal PropertyInfo? Property { get; }
 
-    internal FieldInfo? Field => _field;
+    internal FieldInfo? Field { get; }
 
-    internal int MetadataToken => _property?.MetadataToken ?? _field!.MetadataToken;
+    internal int MetadataToken => Property?.MetadataToken ?? Field!.MetadataToken;
 
-    internal bool IsField => _field is not null;
+    internal bool IsField => Field is not null;
 
     internal NbtUseConverterAttribute? UseConverter { get; init; }
 

@@ -340,8 +340,8 @@ pooled buffers, so the recommended shape is `using`:
 ```csharp
 using var document = NbtDocument.Parse(data);
 
-int health = document.RootElement.Compound.GetMember("Health").Int32;
-foreach (var element in document.RootElement.Compound.GetMember("Numbers").List)
+int health = document.RootElement.Compound["Health"].Int32;
+foreach (var element in document.RootElement.Compound["Numbers"].List)
 {
     Console.WriteLine(element.Int32);
 }
@@ -363,14 +363,14 @@ copied buffer to their pools. Documents are bounded by `int.MaxValue` bytes — 
 limit). A document is safe to read from multiple threads concurrently, but `Dispose` must not
 race with reads; elements of a disposed document throw `ObjectDisposedException`.
 
-Access costs are deterministic: `MemberCount`/`ElementCount`/`ElementType` are O(1); member and
-element enumeration follows wire order; `GetElementAt` is O(1) on lists of scalars, strings, and
-arrays, and O(index) on lists of compounds or nested lists; `GetMember`/`TryGetMember` walk the
-members, with duplicated names resolving to the last occurrence. Typed getters can be called
-repeatedly — unlike the reader, they do not consume anything. `GetMember`/`TryGetMember` compare
-names by decoded value, decoding wire names into stack buffers or pooled buffers for long names;
-`NbtStringElement.GetString` decodes the payload on every access, and invalid bytes throw at that
-point rather than at parse time. Lists, compounds, strings, and arrays are zero-allocation views
+Access costs are deterministic: `Count`/`ElementType` are O(1); member and element enumeration follows
+wire order; the list indexer is O(1) on lists of scalars, strings, and arrays, and O(index) on lists
+of compounds or nested lists; the compound indexer and `TryGetValue` walk the members, with
+duplicated names resolving to the last occurrence. Typed getters can be called repeatedly — unlike
+the reader, they do not consume anything. Compound lookup compares names by decoded value, decoding
+wire names into stack buffers or pooled buffers for long names; `NbtStringElement.GetString` decodes
+the payload on every access, and invalid bytes throw at that point rather than at parse time. Lists,
+compounds, strings, and arrays are zero-allocation views
 over the slot index; `ToArray` and `GetString` materialize only when called.
 
 ## Converters

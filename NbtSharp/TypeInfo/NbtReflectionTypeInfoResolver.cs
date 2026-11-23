@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 
@@ -56,7 +57,7 @@ namespace NbtSharp;
 [RequiresDynamicCode("Reflection-based object mapping may require runtime code generation.")]
 public sealed class NbtReflectionTypeInfoResolver : INbtTypeInfoResolver
 {
-    private static readonly HashSet<Type> UnsupportedTypes =
+    private static readonly ImmutableHashSet<Type> UnsupportedTypes =
     [
         typeof(object),
         typeof(NbtRoot),

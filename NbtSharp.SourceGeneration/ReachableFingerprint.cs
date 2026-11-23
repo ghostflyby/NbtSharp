@@ -193,7 +193,7 @@ internal static class ReachableFingerprint
 
             switch (member)
             {
-                case IPropertySymbol property when !property.IsStatic:
+                case IPropertySymbol { IsStatic: false } property:
                     hash.Add(property.IsRequired);
                     hash.Add(property.IsIndexer);
                     hash.Add(property.IsOverride);
@@ -210,7 +210,7 @@ internal static class ReachableFingerprint
                     pending.Push(property.Type);
                     AddExplicitConverterType(property, pending);
                     break;
-                case IFieldSymbol field when !field.IsStatic:
+                case IFieldSymbol { IsStatic: false } field:
                     hash.Add(field.IsRequired);
                     hash.Add(field.IsReadOnly);
                     hash.Add(field.IsConst);

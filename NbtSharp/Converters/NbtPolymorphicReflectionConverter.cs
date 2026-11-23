@@ -29,7 +29,7 @@ internal sealed class NbtPolymorphicReflectionConverter : NbtConverter
                 $"The polymorphic base type '{baseType}' must be a class or interface.");
         }
 
-        if (!baseType.IsAbstract && !baseType.IsInterface)
+        if (baseType is { IsAbstract: false, IsInterface: false })
         {
             throw new NotSupportedException(
                 $"The polymorphic base type '{baseType}' must be abstract or an interface.");

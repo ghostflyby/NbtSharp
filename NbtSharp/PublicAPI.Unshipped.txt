@@ -1,1 +1,10 @@
 #nullable enable
+*REMOVED*NbtSharp.NbtCompoundElement.EnumerateMembers() -> NbtSharp.NbtCompoundElement.Enumerator
+*REMOVED*NbtSharp.NbtListElement.EnumerateElements() -> NbtSharp.NbtListElement.Enumerator
+*REMOVED*NbtSharp.NbtCompoundElement.MemberCount.get -> int
+*REMOVED*NbtSharp.NbtCompoundElement.GetMember(string! name) -> NbtSharp.NbtElement
+*REMOVED*NbtSharp.NbtCompoundElement.TryGetMember(string! name, out NbtSharp.NbtElement value) -> bool
+*REMOVED*NbtSharp.NbtListElement.GetElementAt(int index) -> NbtSharp.NbtElement
+NbtSharp.NbtCompoundElement.Count.get -> int
+NbtSharp.NbtCompoundElement.this[string! name].get -> NbtSharp.NbtElement
+NbtSharp.NbtCompoundElement.TryGetValue(string! name, out NbtSharp.NbtElement value) -> bool

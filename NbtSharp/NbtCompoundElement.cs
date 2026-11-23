@@ -11,28 +11,29 @@ namespace NbtSharp;
 /// the view allocates nothing while navigating. The view stays valid only while its document is
 /// alive and undisposed.
 /// </para>
+/// <para>
+/// The view implements <see cref="IReadOnlyDictionary{TKey,TValue}"/>; the interface path
+/// materializes member names as strings, while direct struct enumeration keeps them lazy.
+/// </para>
 /// </remarks>
-public readonly struct NbtCompoundElement
+public readonly struct NbtCompoundElement : IReadOnlyDictionary<string, NbtElement>
 {
-    private readonly NbtDocument? _owner;
-    private readonly int _slotIndex;
-
     internal NbtCompoundElement(NbtDocument owner, int slotIndex)
     {
-        _owner = owner;
-        _slotIndex = slotIndex;
+        Owner = owner;
+        SlotIndex = slotIndex;
     }
 
     /// <summary>Gets the owning document, when the view was created by one.</summary>
-    internal NbtDocument? Owner => _owner;
+    internal NbtDocument? Owner { get; }
 
     /// <summary>Gets the document slot index of this view.</summary>
-    internal int SlotIndex => _slotIndex;
+    internal int SlotIndex { get; }
 
     /// <summary>Gets the number of members.</summary>
     /// <exception cref="NbtException">The document slot is not a compound.</exception>
     /// <exception cref="ObjectDisposedException">The owning document has been disposed.</exception>
-    public int MemberCount
+    public int Count
     {
         get
         {
@@ -49,15 +50,18 @@ public readonly struct NbtCompoundElement
     /// <exception cref="KeyNotFoundException">No member has the specified name.</exception>
     /// <exception cref="NbtException">The document slot is not a compound.</exception>
     /// <exception cref="ObjectDisposedException">The owning document has been disposed.</exception>
-    public NbtElement GetMember(string name)
+    public NbtElement this[string name]
     {
-        ArgumentNullException.ThrowIfNull(name);
-        if (!TryGetMember(name, out var value))
+        get
         {
-            throw new KeyNotFoundException($"The given key '{name}' was not present in the dictionary.");
-        }
+            ArgumentNullException.ThrowIfNull(name);
+            if (!TryGetValue(name, out var value))
+            {
+                throw new KeyNotFoundException($"The given key '{name}' was not present in the dictionary.");
+            }
 
-        return value;
+            return value;
+        }
     }
 
     /// <summary>Gets the member with the specified name, when present.</summary>
@@ -74,14 +78,14 @@ public readonly struct NbtCompoundElement
     /// The document slot is not a compound, or a wire name is not valid modified UTF-8.
     /// </exception>
     /// <exception cref="ObjectDisposedException">The owning document has been disposed.</exception>
-    public bool TryGetMember(string name, out NbtElement value)
+    public bool TryGetValue(string name, out NbtElement value)
     {
         ArgumentNullException.ThrowIfNull(name);
         var document = Document;
         ref readonly var slot = ref ExpectSlot();
 
         var query = name.AsSpan();
-        var child = _slotIndex + 1;
+        var child = SlotIndex + 1;
         var lastMatch = -1;
         for (var i = 0; i < slot.ChildCount; i++)
         {
@@ -112,20 +116,56 @@ public readonly struct NbtCompoundElement
     public Enumerator GetEnumerator()
     {
         _ = ExpectSlot();
-        return new Enumerator(Document, _slotIndex);
+        return new Enumerator(Document, SlotIndex);
     }
 
-    /// <summary>Gets an enumerator over the members in wire order.</summary>
-    /// <returns>The enumerator.</returns>
-    public Enumerator EnumerateMembers() => GetEnumerator();
+    IEnumerable<string> IReadOnlyDictionary<string, NbtElement>.Keys => EnumerateNames();
 
-    private NbtDocument Document => _owner ?? throw new InvalidOperationException(
+    IEnumerable<NbtElement> IReadOnlyDictionary<string, NbtElement>.Values => EnumerateValues();
+
+    bool IReadOnlyDictionary<string, NbtElement>.ContainsKey(string key) =>
+        TryGetValue(key, out _);
+
+    IEnumerator<KeyValuePair<string, NbtElement>> IEnumerable<KeyValuePair<string, NbtElement>>.GetEnumerator() =>
+        EnumeratePairs().GetEnumerator();
+
+    IEnumerator IEnumerable.GetEnumerator() =>
+        ((IEnumerable<KeyValuePair<string, NbtElement>>)this).GetEnumerator();
+
+    private IEnumerable<string> EnumerateNames()
+    {
+        using var enumerator = GetEnumerator();
+        while (enumerator.MoveNext())
+        {
+            yield return enumerator.Name;
+        }
+    }
+
+    private IEnumerable<NbtElement> EnumerateValues()
+    {
+        using var enumerator = GetEnumerator();
+        while (enumerator.MoveNext())
+        {
+            yield return enumerator.Current;
+        }
+    }
+
+    private IEnumerable<KeyValuePair<string, NbtElement>> EnumeratePairs()
+    {
+        using var enumerator = GetEnumerator();
+        while (enumerator.MoveNext())
+        {
+            yield return new KeyValuePair<string, NbtElement>(enumerator.Name, enumerator.Current);
+        }
+    }
+
+    private NbtDocument Document => Owner ?? throw new InvalidOperationException(
         "The operation is not valid for a default-initialized NbtCompoundElement.");
 
     private ref readonly NbtDocumentSlot ExpectSlot()
     {
         var document = Document;
-        ref readonly var slot = ref document.GetSlot(_slotIndex);
+        ref readonly var slot = ref document.GetSlot(SlotIndex);
         if (slot.TagType != NbtTagType.Compound)
         {
             throw new NbtException(

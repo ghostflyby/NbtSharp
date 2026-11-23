@@ -144,7 +144,7 @@ internal sealed partial class ContextEmitter
 
         foreach (var argument in attribute.NamedArguments)
         {
-            if (argument.Key == "NamingPolicy" && argument.Value.Value is int kind)
+            if (argument is { Key: "NamingPolicy", Value.Value: int kind })
             {
                 return NbtNamingPolicyConverter.Create(kind);
             }
@@ -245,9 +245,7 @@ internal sealed partial class ContextEmitter
         {
             foreach (var argument in generationOptions.NamedArguments)
             {
-                if (argument.Key == "NamingPolicy" &&
-                    argument.Value.Value is int kind &&
-                    kind is not (>= 0 and <= 5))
+                if (argument is { Key: "NamingPolicy", Value.Value: int and not (>= 0 and <= 5) })
                 {
                     Report(
                         Diagnostics.ContextInvalid,
@@ -257,9 +255,7 @@ internal sealed partial class ContextEmitter
                     return false;
                 }
 
-                if (argument.Key == "NullValueHandling" &&
-                    argument.Value.Value is int handling &&
-                    handling is not 0 and not 1)
+                if (argument is { Key: "NullValueHandling", Value.Value: int and not 0 and not 1 })
                 {
                     Report(
                         Diagnostics.ContextInvalid,
@@ -482,12 +478,12 @@ internal sealed partial class ContextEmitter
                 _writer.WriteLine();
                 EmitObjectConverter(entry, entry.Object);
             }
-            else if (entry.Kind == TypeEntryKind.Enum && entry.EnumMapping is not null)
+            else if (entry is { Kind: TypeEntryKind.Enum, EnumMapping: not null })
             {
                 _writer.WriteLine();
                 EmitEnumConverter(entry);
             }
-            else if (entry.Kind == TypeEntryKind.Polymorphic && entry.Polymorphic is not null)
+            else if (entry is { Kind: TypeEntryKind.Polymorphic, Polymorphic: not null })
             {
                 _writer.WriteLine();
                 EmitPolymorphicConverter(entry, entry.Polymorphic);
@@ -921,8 +917,7 @@ internal sealed partial class ContextEmitter
     }
 
     private TypeSpec? GetStaticConverterEntry(MemberSpec member) =>
-        member.ConverterMode == ConverterMode.Generated &&
-        member.ScalarKind == ScalarKind.None &&
+        member is { ConverterMode: ConverterMode.Generated, ScalarKind: ScalarKind.None } &&
         _entriesByTypeName.TryGetValue(member.TypeName, out var entry)
             ? entry
             : null;
@@ -1047,7 +1042,7 @@ internal sealed partial class ContextEmitter
             _writer.WriteLine();
         }
 
-        if (model.UseConstructorAccessor && model.Constructor is not null)
+        if (model is { UseConstructorAccessor: true, Constructor: not null })
         {
             if (model.IsGenericType)
             {
@@ -1553,7 +1548,7 @@ internal sealed partial class ContextEmitter
                 _writer.WriteLine($"var __m{member.Index} = value.{member.EscapedClrName};");
             }
 
-            if (member.IsRequired && member.CanBeNull)
+            if (member is { IsRequired: true, CanBeNull: true })
             {
                 _writer.WriteLine($"if ({value} is null)");
                 _writer.WriteLine("{");
@@ -1921,9 +1916,8 @@ internal sealed partial class ContextEmitter
 
         if (type is INamedTypeSymbol
             {
-                OriginalDefinition.SpecialType: SpecialType.System_Nullable_T,
-            } nullable &&
-            nullable.TypeArguments.Length == 1)
+                OriginalDefinition.SpecialType: SpecialType.System_Nullable_T, TypeArguments.Length: 1,
+            } nullable)
         {
             return GetNonNullableScalarKind(nullable.TypeArguments[0].SpecialType) switch
             {
@@ -2117,9 +2111,7 @@ internal sealed partial class ContextEmitter
                 parts.Add(Fq(constraint));
             }
 
-            if (parameter.HasConstructorConstraint &&
-                !parameter.HasValueTypeConstraint &&
-                !parameter.HasUnmanagedTypeConstraint)
+            if (parameter is { HasConstructorConstraint: true, HasValueTypeConstraint: false, HasUnmanagedTypeConstraint: false })
             {
                 parts.Add("new()");
             }

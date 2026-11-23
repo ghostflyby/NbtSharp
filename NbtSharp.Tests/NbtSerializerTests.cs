@@ -25,7 +25,7 @@ public sealed class NbtSerializerTests
         var actual = RoundTrip(root);
 
         Assert.Equal("value", actual.Name);
-        Assert.True(actual.Value is int value && value == 42);
+        Assert.True(actual.Value is int and 42);
     }
 
     [Fact]
@@ -214,7 +214,7 @@ public sealed class NbtSerializerTests
 
         var inventory = inner["Inventory"] is NbtList items ? items : default;
         Assert.Equal(1, inventory.Count);
-        Assert.True(((List<NbtCompound>)inventory.Value!)[0]["Count"] is sbyte count && count == 64);
+        Assert.True(((List<NbtCompound>)inventory.Value!)[0]["Count"] is sbyte and 64);
     }
 
     [Fact]

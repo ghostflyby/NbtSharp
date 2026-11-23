@@ -22,13 +22,12 @@ namespace NbtSharp;
 public sealed class NbtContractInfo
 {
     private readonly NbtMemberInfo[] _members;
-    private readonly IReadOnlyList<NbtMemberInfo> _memberView;
 
     internal NbtContractInfo(Type type, NbtMemberInfo[] members)
     {
         Type = type;
         _members = members;
-        _memberView = Array.AsReadOnly(members);
+        Members = Array.AsReadOnly(members);
     }
 
     /// <summary>Gets the CLR type this contract maps.</summary>
@@ -38,7 +37,7 @@ public sealed class NbtContractInfo
     /// Gets the mapped members in declaration order. The list is read-only; adding, removing, or
     /// replacing entries throws <see cref="NotSupportedException"/>.
     /// </summary>
-    public IReadOnlyList<NbtMemberInfo> Members => _memberView;
+    public IReadOnlyList<NbtMemberInfo> Members { get; }
 
     /// <summary>
     /// Gets the member whose <see cref="NbtMemberInfo.ClrName"/> equals

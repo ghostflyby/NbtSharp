@@ -91,7 +91,7 @@ public sealed class JavaStringTests
     {
         using var stream = new MemoryStream(BuildRootString([0x00]));
 
-        Assert.True(NbtSerializer.Deserialize(stream).Value is string zero && zero == "\0");
+        Assert.True(NbtSerializer.Deserialize(stream).Value is string and "\0");
     }
 
     [Theory]

@@ -563,8 +563,7 @@ internal sealed class TypeGraph
             string? discriminator = null;
             foreach (var argument in attribute.NamedArguments)
             {
-                if (argument.Key == "TypeDiscriminator" &&
-                    argument.Value.Value is string explicitDiscriminator)
+                if (argument is { Key: "TypeDiscriminator", Value.Value: string explicitDiscriminator })
                 {
                     discriminator = explicitDiscriminator;
                 }
@@ -1256,8 +1255,7 @@ internal sealed class TypeGraph
         for (var current = type as INamedTypeSymbol; current is not null; current = current.BaseType)
         {
             var definition = current.OriginalDefinition;
-            if (definition.Name == "NbtConverter" &&
-                definition.Arity == 1 &&
+            if (definition is { Name: "NbtConverter", Arity: 1 } &&
                 definition.ContainingNamespace?.ToDisplayString() == "NbtSharp")
             {
                 return current;
@@ -1470,16 +1468,15 @@ internal sealed class TypeGraph
             return true;
         }
 
-        if (type is IArrayTypeSymbol { Rank: 1 } array)
-        {
-            if (array.ElementType.SpecialType is
-                SpecialType.System_Byte or
+        if (type is IArrayTypeSymbol
+            {
+                Rank: 1, ElementType.SpecialType: SpecialType.System_Byte or
                 SpecialType.System_SByte or
                 SpecialType.System_Int32 or
-                SpecialType.System_Int64)
-            {
-                return true;
-            }
+                SpecialType.System_Int64
+            })
+        {
+            return true;
         }
 
         var name = type.ToDisplayString(FullyQualified);
@@ -1535,7 +1532,7 @@ internal sealed class TypeGraph
             return true;
         }
 
-        if (type is INamedTypeSymbol named && named.IsAbstract)
+        if (type is INamedTypeSymbol { IsAbstract: true })
         {
             reason = "is abstract";
             return true;

@@ -149,8 +149,7 @@ internal sealed class NbtReflectionMapConverter<TCollection, TValue> :
                     property.SetMethod is not null);
             var add = collectionType.GetMethods(BindingFlags.Public | BindingFlags.Instance)
                 .FirstOrDefault(method =>
-                    method.Name == "Add" &&
-                    !method.IsStatic &&
+                    method is { Name: "Add", IsStatic: false } &&
                     method.GetParameters() is
                         [{ ParameterType: var keyType }, { ParameterType: var valueParameterType }] &&
                     keyType == typeof(string) &&

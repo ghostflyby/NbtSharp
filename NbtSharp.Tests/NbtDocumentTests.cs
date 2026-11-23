@@ -49,7 +49,7 @@ public sealed class NbtDocumentTests
 
         Assert.Equal("root", document.RootName);
         Assert.Equal(NbtTagType.Compound, document.RootElement.TagType);
-        Assert.Equal(20, document.RootElement.Compound.GetMember("Health").Int32);
+        Assert.Equal(20, document.RootElement.Compound["Health"].Int32);
     }
 
     [Fact]
@@ -59,9 +59,9 @@ public sealed class NbtDocumentTests
         using var document = NbtDocument.Parse(data);
 
         var root = document.RootElement.Compound;
-        Assert.True(root.TryGetMember("Health", out var health));
+        Assert.True(root.TryGetValue("Health", out var health));
         Assert.Equal(20, health.Int32);
-        Assert.Equal("a long string value", root.GetMember("Name").String.GetString());
+        Assert.Equal("a long string value", root["Name"].String.GetString());
     }
 
     [Fact]
@@ -72,7 +72,7 @@ public sealed class NbtDocumentTests
 
         using var document = NbtDocument.Parse(sequence);
 
-        Assert.Equal(20, document.RootElement.Compound.GetMember("Health").Int32);
+        Assert.Equal(20, document.RootElement.Compound["Health"].Int32);
     }
 
     [Theory]
@@ -102,7 +102,7 @@ public sealed class NbtDocumentTests
 
         using var document = NbtDocument.Parse(stream);
 
-        Assert.Equal(20, document.RootElement.Compound.GetMember("Health").Int32);
+        Assert.Equal(20, document.RootElement.Compound["Health"].Int32);
     }
 
     [Fact]
@@ -131,7 +131,7 @@ public sealed class NbtDocumentTests
         Assert.Null(unnamed.RootName);
         Assert.Equal(NbtTagType.Compound, emptyNamed.RootElement.TagType);
         Assert.Equal(NbtTagType.Compound, unnamed.RootElement.TagType);
-        Assert.Equal(7, unnamed.RootElement.Compound.GetMember("Value").Int32);
+        Assert.Equal(7, unnamed.RootElement.Compound["Value"].Int32);
     }
 
     [Fact]
@@ -256,7 +256,7 @@ public sealed class NbtDocumentTests
         var list = root.List;
         Assert.Equal(NbtTagType.Int, list.ElementType);
         Assert.Equal(3, list.Count);
-        Assert.Equal(1, list.GetElementAt(0).Int32);
+        Assert.Equal(1, list[0].Int32);
         Assert.Equal(2, list[1].Int32);
         Assert.Equal(3, list[2].Int32);
         Assert.Equal([1, 2, 3], ReadIntElements(list));
@@ -268,11 +268,11 @@ public sealed class NbtDocumentTests
         using var document = NbtDocument.Parse(BuildSampleDocument());
         var root = document.RootElement.Compound;
 
-        Assert.Equal(4, root.MemberCount);
-        Assert.Equal(20, root.GetMember("Health").Int32);
-        Assert.Equal(-3.5, root.GetMember("Temperature").Double);
-        Assert.Equal("a long string value", root.GetMember("Name").String.GetString());
-        var numbers = root.GetMember("Numbers").List;
+        Assert.Equal(4, root.Count);
+        Assert.Equal(20, root["Health"].Int32);
+        Assert.Equal(-3.5, root["Temperature"].Double);
+        Assert.Equal("a long string value", root["Name"].String.GetString());
+        var numbers = root["Numbers"].List;
         Assert.Equal(NbtTagType.Int, numbers.ElementType);
         Assert.Equal(3, numbers.Count);
         Assert.Equal([1, 2, 3], ReadIntElements(numbers));
@@ -288,7 +288,7 @@ public sealed class NbtDocumentTests
         using var document = NbtDocument.Parse(BuildAllTagsDocument());
         var root = document.RootElement.Compound;
 
-        Assert.Equal(12, root.MemberCount);
+        Assert.Equal(12, root.Count);
 
         Assert.Equal(-5, RequireMember(root, "Byte").SByte);
         Assert.Equal((short)12345, RequireMember(root, "Short").Int16);
@@ -320,8 +320,8 @@ public sealed class NbtDocumentTests
         Assert.Equal("b", list[1].String.GetString());
 
         var compound = RequireMember(root, "Compound").Compound;
-        Assert.Equal(1, compound.MemberCount);
-        Assert.Equal(1, compound.GetMember("Nested").Int32);
+        Assert.Single(compound);
+        Assert.Equal(1, compound["Nested"].Int32);
     }
 
     [Fact]
@@ -329,9 +329,9 @@ public sealed class NbtDocumentTests
     {
         using var document = NbtDocument.Parse(BuildAllTagsDocument());
         var root = document.RootElement.Compound;
-        var intMember = root.GetMember("Int");
-        var stringMember = root.GetMember("String");
-        var arrayMember = root.GetMember("ByteArray");
+        var intMember = root["Int"];
+        var stringMember = root["String"];
+        var arrayMember = root["ByteArray"];
 
         Assert.Equal(-123456789, intMember.Int32);
         Assert.Equal(-123456789, intMember.Int32);
@@ -458,18 +458,18 @@ public sealed class NbtDocumentTests
         using var document = NbtDocument.Parse(BuildAllTagsDocument());
         var root = document.RootElement.Compound;
 
-        Assert.IsType<sbyte>(root.GetMember("Byte").Value);
-        Assert.IsType<short>(root.GetMember("Short").Value);
-        Assert.IsType<int>(root.GetMember("Int").Value);
-        Assert.IsType<long>(root.GetMember("Long").Value);
-        Assert.IsType<float>(root.GetMember("Float").Value);
-        Assert.IsType<double>(root.GetMember("Double").Value);
-        Assert.IsType<NbtStringElement>(root.GetMember("String").Value);
-        Assert.IsType<NbtByteArrayElement>(root.GetMember("ByteArray").Value);
-        Assert.IsType<NbtIntArrayElement>(root.GetMember("IntArray").Value);
-        Assert.IsType<NbtLongArrayElement>(root.GetMember("LongArray").Value);
-        Assert.IsType<NbtListElement>(root.GetMember("List").Value);
-        Assert.IsType<NbtCompoundElement>(root.GetMember("Compound").Value);
+        Assert.IsType<sbyte>(root["Byte"].Value);
+        Assert.IsType<short>(root["Short"].Value);
+        Assert.IsType<int>(root["Int"].Value);
+        Assert.IsType<long>(root["Long"].Value);
+        Assert.IsType<float>(root["Float"].Value);
+        Assert.IsType<double>(root["Double"].Value);
+        Assert.IsType<NbtStringElement>(root["String"].Value);
+        Assert.IsType<NbtByteArrayElement>(root["ByteArray"].Value);
+        Assert.IsType<NbtIntArrayElement>(root["IntArray"].Value);
+        Assert.IsType<NbtLongArrayElement>(root["LongArray"].Value);
+        Assert.IsType<NbtListElement>(root["List"].Value);
+        Assert.IsType<NbtCompoundElement>(root["Compound"].Value);
     }
 
     [Fact]
@@ -490,10 +490,10 @@ public sealed class NbtDocumentTests
         using var document = NbtDocument.Parse(buffer.WrittenSpan.ToArray());
         var root = document.RootElement.Compound;
 
-        Assert.Equal(memberCount, root.MemberCount);
+        Assert.Equal(memberCount, root.Count);
         for (var i = 0; i < memberCount; i++)
         {
-            Assert.Equal(i, root.GetMember($"m{i}").Int32);
+            Assert.Equal(i, root[$"m{i}"].Int32);
         }
     }
 
@@ -660,14 +660,14 @@ public sealed class NbtDocumentTests
     // --------------------------------------------------------------------------------------------
 
     [Fact]
-    public void TryGetMemberFindsAndMissesMembers()
+    public void TryGetValueFindsAndMissesMembers()
     {
         using var document = NbtDocument.Parse(BuildSampleDocument());
         var root = document.RootElement.Compound;
 
-        Assert.True(root.TryGetMember("Health", out var health));
+        Assert.True(root.TryGetValue("Health", out var health));
         Assert.Equal(20, health.Int32);
-        Assert.False(root.TryGetMember("Missing", out var missing));
+        Assert.False(root.TryGetValue("Missing", out var missing));
         Assert.Throws<NbtException>(() => missing.Int32);
     }
 
@@ -676,7 +676,7 @@ public sealed class NbtDocumentTests
     {
         using var document = NbtDocument.Parse(BuildSampleDocument());
 
-        var exception = Assert.Throws<KeyNotFoundException>(() => document.RootElement.Compound.GetMember("Missing"));
+        var exception = Assert.Throws<KeyNotFoundException>(() => document.RootElement.Compound["Missing"]);
         Assert.Contains("Missing", exception.Message, StringComparison.Ordinal);
     }
 
@@ -686,11 +686,11 @@ public sealed class NbtDocumentTests
         using var document = NbtDocument.Parse(BuildDuplicateMemberDocument());
         var root = document.RootElement.Compound;
 
-        Assert.Equal(3, root.MemberCount);
-        Assert.Equal(2, root.GetMember("Dup").Int32);
-        Assert.True(root.TryGetMember("Dup", out var duplicate));
+        Assert.Equal(3, root.Count);
+        Assert.Equal(2, root["Dup"].Int32);
+        Assert.True(root.TryGetValue("Dup", out var duplicate));
         Assert.Equal(2, duplicate.Int32);
-        Assert.Equal(3, root.GetMember("Other").Int32);
+        Assert.Equal(3, root["Other"].Int32);
     }
 
     [Fact]
@@ -719,29 +719,29 @@ public sealed class NbtDocumentTests
         using var document = NbtDocument.Parse(BuildDocumentWithByteMemberName(wireName));
         var root = document.RootElement.Compound;
 
-        Assert.True(root.TryGetMember(lookupName, out var member));
+        Assert.True(root.TryGetValue(lookupName, out var member));
         Assert.Equal(7, member.SByte);
 
-        Assert.Equal(expected, root.TryGetMember(queryName, out var queried));
+        Assert.Equal(expected, root.TryGetValue(queryName, out var queried));
         if (expected)
         {
             Assert.Equal(7, queried.SByte);
         }
 
-        Assert.False(root.TryGetMember("B", out _));
+        Assert.False(root.TryGetValue("B", out _));
     }
 
     [Fact]
-    public void TryGetMemberEncodesLongNamesThroughThePool()
+    public void TryGetValueEncodesLongNamesThroughThePool()
     {
         var longName = new string('a', 300);
         using var document = NbtDocument.Parse(BuildLongMemberNameDocument(longName));
         var root = document.RootElement.Compound;
 
-        Assert.True(root.TryGetMember(longName, out var member));
+        Assert.True(root.TryGetValue(longName, out var member));
         Assert.Equal(7, member.Int32);
-        Assert.False(root.TryGetMember(new string('a', 299), out _));
-        Assert.False(root.TryGetMember(new string('a', 301), out _));
+        Assert.False(root.TryGetValue(new string('a', 299), out _));
+        Assert.False(root.TryGetValue(new string('a', 301), out _));
     }
 
     [Fact]
@@ -750,9 +750,9 @@ public sealed class NbtDocumentTests
         using var document = NbtDocument.Parse(BuildSampleDocument());
         var root = document.RootElement.Compound;
 
-        var names = new List<string>(root.MemberCount);
-        var types = new List<NbtTagType>(root.MemberCount);
-        using var enumerator = root.EnumerateMembers();
+        var names = new List<string>(root.Count);
+        var types = new List<NbtTagType>(root.Count);
+        using var enumerator = root.GetEnumerator();
         while (enumerator.MoveNext())
         {
             names.Add(enumerator.Name);
@@ -775,14 +775,14 @@ public sealed class NbtDocumentTests
         using var document = NbtDocument.Parse(BuildLayoutDocument());
         var root = document.RootElement.Compound;
 
-        Assert.Equal(3, root.MemberCount);
+        Assert.Equal(3, root.Count);
         Assert.Equal(["A", "Items", "B"], ReadMemberNames(root));
 
-        var nested = root.GetMember("A").Compound;
-        Assert.Equal(1, nested.MemberCount);
+        var nested = root["A"].Compound;
+        Assert.Single(nested);
         Assert.Equal(["x"], ReadMemberNames(nested));
-        Assert.Equal(1, nested.GetMember("x").Int32);
-        Assert.Equal(9, root.GetMember("B").Int32);
+        Assert.Equal(1, nested["x"].Int32);
+        Assert.Equal(9, root["B"].Int32);
     }
 
     // --------------------------------------------------------------------------------------------
@@ -793,24 +793,24 @@ public sealed class NbtDocumentTests
     public void ListViewReportsTypeCountAndOrder()
     {
         using var document = NbtDocument.Parse(BuildSampleDocument());
-        var numbers = document.RootElement.Compound.GetMember("Numbers").List;
+        var numbers = document.RootElement.Compound["Numbers"].List;
 
         Assert.Equal(NbtTagType.Int, numbers.ElementType);
         Assert.Equal(3, numbers.Count);
-        Assert.Equal(1, numbers.GetElementAt(0).Int32);
-        Assert.Equal(2, numbers.GetElementAt(1).Int32);
+        Assert.Equal(1, numbers[0].Int32);
+        Assert.Equal(2, numbers[1].Int32);
         Assert.Equal(3, numbers[2].Int32);
         Assert.Equal([1, 2, 3], ReadIntElements(numbers));
     }
 
     [Fact]
-    public void GetElementAtThrowsForOutOfRangeIndices()
+    public void IndexerThrowsForOutOfRangeIndices()
     {
         using var document = NbtDocument.Parse(BuildSampleDocument());
-        var numbers = document.RootElement.Compound.GetMember("Numbers").List;
+        var numbers = document.RootElement.Compound["Numbers"].List;
 
-        Assert.Throws<ArgumentOutOfRangeException>(() => numbers.GetElementAt(-1));
-        Assert.Throws<ArgumentOutOfRangeException>(() => numbers.GetElementAt(3));
+        Assert.Throws<ArgumentOutOfRangeException>(() => numbers[-1]);
+        Assert.Throws<ArgumentOutOfRangeException>(() => numbers[3]);
         Assert.Throws<ArgumentOutOfRangeException>(() => _ = numbers[3]);
     }
 
@@ -820,16 +820,16 @@ public sealed class NbtDocumentTests
         using var document = NbtDocument.Parse(BuildEmptyListDocument());
         var root = document.RootElement.Compound;
 
-        var emptyEnd = root.GetMember("EmptyEnd").List;
+        var emptyEnd = root["EmptyEnd"].List;
         Assert.Equal(NbtTagType.End, emptyEnd.ElementType);
-        Assert.Equal(0, emptyEnd.Count);
+        Assert.Empty(emptyEnd);
         using var endEnumerator = emptyEnd.GetEnumerator();
         Assert.False(endEnumerator.MoveNext());
 
 
-        var emptyInts = root.GetMember("EmptyInts").List;
+        var emptyInts = root["EmptyInts"].List;
         Assert.Equal(NbtTagType.Int, emptyInts.ElementType);
-        Assert.Equal(0, emptyInts.Count);
+        Assert.Empty(emptyInts);
         using var intEnumerator = emptyInts.GetEnumerator();
         Assert.False(intEnumerator.MoveNext());
     }
@@ -838,9 +838,9 @@ public sealed class NbtDocumentTests
     public void ListEnumeratorResetsAndTerminates()
     {
         using var document = NbtDocument.Parse(BuildSampleDocument());
-        var numbers = document.RootElement.Compound.GetMember("Numbers").List;
+        var numbers = document.RootElement.Compound["Numbers"].List;
 
-        using var enumerator = numbers.EnumerateElements();
+        using var enumerator = numbers.GetEnumerator();
         Assert.True(enumerator.MoveNext());
         Assert.Equal(1, enumerator.Current.Int32);
         enumerator.Reset();
@@ -858,9 +858,9 @@ public sealed class NbtDocumentTests
     public void ListEnumeratorSupportsIEnumeratorUse()
     {
         using var document = NbtDocument.Parse(BuildSampleDocument());
-        var numbers = document.RootElement.Compound.GetMember("Numbers").List;
+        var numbers = document.RootElement.Compound["Numbers"].List;
 
-        IEnumerator enumerator = numbers.EnumerateElements();
+        IEnumerator enumerator = numbers.GetEnumerator();
         var values = new List<int>();
         while (enumerator.MoveNext())
         {
@@ -880,18 +880,18 @@ public sealed class NbtDocumentTests
         using var document = NbtDocument.Parse(BuildLayoutDocument());
         var root = document.RootElement.Compound;
 
-        Assert.Equal(1, root.GetMember("A").Compound.GetMember("x").Int32);
-        Assert.Equal(9, root.GetMember("B").Int32);
+        Assert.Equal(1, root["A"].Compound["x"].Int32);
+        Assert.Equal(9, root["B"].Int32);
 
-        var items = root.GetMember("Items").List;
+        var items = root["Items"].List;
         Assert.Equal(NbtTagType.Compound, items.ElementType);
         Assert.Equal(3, items.Count);
 
         var first = items[0].Compound;
-        Assert.Equal(1, first.MemberCount);
-        Assert.Equal(10, first.GetMember("x").Int32);
-        Assert.Equal(20, items[1].Compound.GetMember("y").Int32);
-        Assert.Equal(30, items.GetElementAt(2).Compound.GetMember("x").Int32);
+        Assert.Single(first);
+        Assert.Equal(10, first["x"].Int32);
+        Assert.Equal(20, items[1].Compound["y"].Int32);
+        Assert.Equal(30, items[2].Compound["x"].Int32);
 
         Assert.Equal(["x", "y", "x"], ReadNestedMemberNames(items));
     }
@@ -975,12 +975,12 @@ public sealed class NbtDocumentTests
     public void ListElementAccessAndEnumeration()
     {
         using var document = NbtDocument.Parse(BuildSampleDocument());
-        var numbers = document.RootElement.Compound.GetMember("Numbers").List;
+        var numbers = document.RootElement.Compound["Numbers"].List;
 
         var sum = 0;
         for (var i = 0; i < 1_000; i++)
         {
-            sum += numbers.GetElementAt(i % numbers.Count).Int32;
+            sum += numbers[i % numbers.Count].Int32;
             foreach (var element in numbers)
             {
                 sum += element.Int32;
@@ -1010,7 +1010,7 @@ public sealed class NbtDocumentTests
             nameLength += enumerator.Name.Length;
         }
 
-        Assert.Equal(root.MemberCount, count);
+        Assert.Equal(root.Count, count);
         Assert.Equal(28, nameLength);
     }
 
@@ -1373,7 +1373,7 @@ public sealed class NbtDocumentTests
         using var document = NbtDocument.Parse(stream);
 
         var root = document.RootElement.Compound;
-        Assert.Equal(100_000, root.GetMember("Data").ByteArray.Length);
+        Assert.Equal(100_000, root["Data"].ByteArray.Length);
     }
 
     [Fact]
@@ -1384,7 +1384,7 @@ public sealed class NbtDocumentTests
 
         using var document = NbtDocument.Parse(stream, new NbtReaderOptions { MaxDocumentBytes = 10_000 });
 
-        Assert.Equal(20, document.RootElement.Compound.GetMember("Health").Int32);
+        Assert.Equal(20, document.RootElement.Compound["Health"].Int32);
     }
 
     [Fact]
@@ -1415,7 +1415,7 @@ public sealed class NbtDocumentTests
     public void StringViewThrowsAfterDispose()
     {
         var document = NbtDocument.Parse(BuildSampleDocument());
-        var view = document.RootElement.Compound.GetMember("Name").String;
+        var view = document.RootElement.Compound["Name"].String;
         document.Dispose();
 
         Assert.Throws<ObjectDisposedException>(() => _ = view.ByteLength);
@@ -1430,9 +1430,9 @@ public sealed class NbtDocumentTests
     {
         var document = NbtDocument.Parse(BuildAllTagsDocument());
         var root = document.RootElement.Compound;
-        var bytes = root.GetMember("ByteArray").ByteArray;
-        var ints = root.GetMember("IntArray").IntArray;
-        var longs = root.GetMember("LongArray").LongArray;
+        var bytes = root["ByteArray"].ByteArray;
+        var ints = root["IntArray"].IntArray;
+        var longs = root["LongArray"].LongArray;
         document.Dispose();
 
         Assert.Throws<ObjectDisposedException>(() => _ = bytes.Length);
@@ -1450,13 +1450,13 @@ public sealed class NbtDocumentTests
     public void ListViewThrowsAfterDispose()
     {
         var document = NbtDocument.Parse(BuildSampleDocument());
-        var list = document.RootElement.Compound.GetMember("Numbers").List;
+        var list = document.RootElement.Compound["Numbers"].List;
         using var enumerator = list.GetEnumerator();
         document.Dispose();
 
         Assert.Throws<ObjectDisposedException>(() => _ = list.Count);
         Assert.Throws<ObjectDisposedException>(() => _ = list.ElementType);
-        Assert.Throws<ObjectDisposedException>(() => list.GetElementAt(0));
+        Assert.Throws<ObjectDisposedException>(() => list[0]);
         Assert.Throws<ObjectDisposedException>(() => _ = list[0]);
         Assert.Throws<ObjectDisposedException>(() => list.GetEnumerator());
         Assert.Throws<ObjectDisposedException>(() => enumerator.MoveNext());
@@ -1470,9 +1470,9 @@ public sealed class NbtDocumentTests
         using var enumerator = compound.GetEnumerator();
         document.Dispose();
 
-        Assert.Throws<ObjectDisposedException>(() => _ = compound.MemberCount);
-        Assert.Throws<ObjectDisposedException>(() => compound.TryGetMember("Health", out _));
-        Assert.Throws<ObjectDisposedException>(() => compound.GetMember("Health"));
+        Assert.Throws<ObjectDisposedException>(() => _ = compound.Count);
+        Assert.Throws<ObjectDisposedException>(() => compound.TryGetValue("Health", out _));
+        Assert.Throws<ObjectDisposedException>(() => compound["Health"]);
         Assert.Throws<ObjectDisposedException>(() => compound.GetEnumerator());
         Assert.Throws<ObjectDisposedException>(() => enumerator.MoveNext());
         Assert.Throws<ObjectDisposedException>(() => _ = enumerator.Name);
@@ -1483,7 +1483,7 @@ public sealed class NbtDocumentTests
     {
         var document = NbtDocument.Parse(BuildSampleDocument());
         var root = document.RootElement;
-        var health = root.Compound.GetMember("Health");
+        var health = root.Compound["Health"];
         document.Dispose();
 
         // TagType is inline metadata and a numeric value is self-contained; neither touches the
@@ -1534,7 +1534,7 @@ public sealed class NbtDocumentTests
 
     private static NbtElement RequireMember(NbtCompoundElement compound, string name)
     {
-        Assert.True(compound.TryGetMember(name, out var value), $"The compound has no member '{name}'.");
+        Assert.True(compound.TryGetValue(name, out var value), $"The compound has no member '{name}'.");
         return value;
     }
 
@@ -1552,9 +1552,9 @@ public sealed class NbtDocumentTests
 
     private static string[] ReadMemberNames(NbtCompoundElement compound)
     {
-        var names = new string[compound.MemberCount];
+        var names = new string[compound.Count];
         var index = 0;
-        using var enumerator = compound.EnumerateMembers();
+        using var enumerator = compound.GetEnumerator();
         while (enumerator.MoveNext())
         {
             names[index++] = enumerator.Name;
@@ -1568,7 +1568,7 @@ public sealed class NbtDocumentTests
         var names = new List<string>();
         foreach (var element in list)
         {
-            using var enumerator = element.Compound.EnumerateMembers();
+            using var enumerator = element.Compound.GetEnumerator();
             while (enumerator.MoveNext())
             {
                 names.Add(enumerator.Name);
