@@ -414,16 +414,17 @@ public sealed class NbtDocumentTests
     }
 
     [Fact]
-    public void DefaultElementThrowsNbtExceptionOnEveryAccess()
+    public void DefaultElementHasNoCase()
     {
         var element = default(NbtElement);
+
+        Assert.Null(element.Value);
+        Assert.False(element is int);
 
         var tagException = Assert.Throws<NbtException>(() => element.TagType);
         Assert.Null(tagException.ExpectedTagType);
         Assert.Null(tagException.ActualTagType);
         Assert.Contains("uninitialized", tagException.Message, StringComparison.Ordinal);
-
-        Assert.Throws<NbtException>(() => element.Value);
 
         AssertDefaultCaseFailure(() => element.SByte, NbtTagType.Byte);
         AssertDefaultCaseFailure(() => element.Int16, NbtTagType.Short);
@@ -437,6 +438,18 @@ public sealed class NbtDocumentTests
         AssertDefaultCaseFailure(() => element.LongArray, NbtTagType.LongArray);
         AssertDefaultCaseFailure(() => element.List, NbtTagType.List);
         AssertDefaultCaseFailure(() => element.Compound, NbtTagType.Compound);
+    }
+
+    [Fact]
+    public void ElementValueAndPatternMatchingExposeTheUnionCase()
+    {
+        using var document = ParseUnnamedRootDocument(
+            static (ref writer) => writer.WriteInt32("ignored", 42),
+            out var root);
+
+        Assert.Equal(42, Assert.IsType<int>(root.Value));
+        Assert.True(root is int);
+        Assert.Equal(42, root.Int32);
     }
 
     // --------------------------------------------------------------------------------------------

@@ -457,7 +457,7 @@ NbtSharp.NbtElement.SByte.get -> sbyte
 NbtSharp.NbtElement.Single.get -> float
 NbtSharp.NbtElement.String.get -> NbtSharp.NbtStringElement
 NbtSharp.NbtElement.TagType.get -> NbtSharp.NbtTagType
-NbtSharp.NbtElement.Value.get -> object!
+NbtSharp.NbtElement.Value.get -> object?
 NbtSharp.NbtIntArrayElement
 NbtSharp.NbtIntArrayElement.CopyTo(System.Span<int> destination) -> void
 NbtSharp.NbtIntArrayElement.Length.get -> int

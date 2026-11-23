@@ -26,8 +26,9 @@ namespace NbtSharp;
 /// self-contained.
 /// </para>
 /// <para>
-/// A default-initialized value has no case; <see cref="TagType"/> throws
-/// <see cref="NbtException"/> for it, matching <see cref="NbtValue"/>.
+/// A default-initialized value has no case: <see cref="TagType"/> throws
+/// <see cref="NbtException"/> and <see cref="Value"/> is <see langword="null"/>, matching
+/// <see cref="NbtValue"/>.
 /// </para>
 /// </remarks>
 [Union]
@@ -196,9 +197,11 @@ public readonly struct NbtElement
         ? throw new NbtException("The NBT element is uninitialized.")
         : _tag;
 
-    /// <summary>Gets the boxed case value. This is the slow, allocating path used by the union machinery.</summary>
-    /// <exception cref="NbtException">The value is uninitialized.</exception>
-    public object Value => _tag switch
+    /// <summary>
+    /// Gets the boxed case value, or <see langword="null"/> when the value is uninitialized.
+    /// This is the slow, allocating path used by the union machinery.
+    /// </summary>
+    public object? Value => _tag switch
     {
         NbtTagType.Byte => (sbyte)_bits,
         NbtTagType.Short => (short)_bits,
@@ -212,7 +215,7 @@ public readonly struct NbtElement
         NbtTagType.LongArray => new NbtLongArrayElement(_raw, _owner),
         NbtTagType.List => new NbtListElement(Owner!, _slotIndex),
         NbtTagType.Compound => new NbtCompoundElement(Owner!, _slotIndex),
-        _ => throw new NbtException("The NBT element is uninitialized."),
+        _ => null,
     };
 
     /// <summary>Gets a <c>TAG_Byte</c> value.</summary>

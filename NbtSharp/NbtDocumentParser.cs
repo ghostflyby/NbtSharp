@@ -222,7 +222,7 @@ internal static class NbtDocumentParser
                 // the wrong exception type. The document-size cap makes this unreachable in
                 // practice, so simply refuse cleanly.
                 var doubled = (long)_slots.Length * 2;
-                var newLength = doubled > int.MaxValue ? int.MaxValue : _slots.Length + 1;
+                var newLength = doubled > int.MaxValue ? int.MaxValue : (int)doubled;
                 if (newLength <= _slots.Length)
                 {
                     throw new NbtException("The NBT document has too many values to index.");
