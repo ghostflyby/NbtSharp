@@ -541,3 +541,19 @@ override NbtSharp.NbtModifiedUtf8Encoding.GetMaxCharCount(int byteCount) -> int
 override NbtSharp.NbtModifiedUtf8Encoding.GetString(byte[]! bytes) -> string!
 override NbtSharp.NbtModifiedUtf8Encoding.GetString(byte[]! bytes, int index, int count) -> string!
 static NbtSharp.NbtModifiedUtf8Encoding.Validate(System.ReadOnlySpan<byte> bytes, int offset = 0) -> void
+NbtSharp.NbtNameComparer
+NbtSharp.NbtNameComparer.NbtNameComparer() -> void
+NbtSharp.NbtNameComparer.Create(System.ReadOnlySpan<char> alternate) -> string!
+NbtSharp.NbtNameComparer.Equals(string? x, string? y) -> bool
+NbtSharp.NbtNameComparer.Equals(System.ReadOnlySpan<char> alternate, string! other) -> bool
+NbtSharp.NbtNameComparer.GetHashCode(string! obj) -> int
+NbtSharp.NbtNameComparer.GetHashCode(System.ReadOnlySpan<char> alternate) -> int
+static readonly NbtSharp.NbtNameComparer.Instance -> NbtSharp.NbtNameComparer
+NbtSharp.NbtUtf8NameComparer
+NbtSharp.NbtUtf8NameComparer.NbtUtf8NameComparer() -> void
+NbtSharp.NbtUtf8NameComparer.Create(System.ReadOnlySpan<byte> alternate) -> string!
+NbtSharp.NbtUtf8NameComparer.Equals(string? x, string? y) -> bool
+NbtSharp.NbtUtf8NameComparer.Equals(System.ReadOnlySpan<byte> alternate, string! other) -> bool
+NbtSharp.NbtUtf8NameComparer.GetHashCode(string! obj) -> int
+NbtSharp.NbtUtf8NameComparer.GetHashCode(System.ReadOnlySpan<byte> alternate) -> int
+static readonly NbtSharp.NbtUtf8NameComparer.Instance -> NbtSharp.NbtUtf8NameComparer

@@ -170,4 +170,32 @@ internal static class NbtText
             };
         }
     }
+
+    /// <summary>
+    /// Computes the ordinal string hash of a modified UTF-8 encoded name, decoding into a stack
+    /// buffer or a pooled buffer without allocating a string.
+    /// </summary>
+    /// <param name="bytes">The modified UTF-8 name bytes.</param>
+    /// <returns>The hash code of the decoded name.</returns>
+    public static int GetNameHashCode(ReadOnlySpan<byte> bytes)
+    {
+        var charCount = GetCharCount(bytes, 0);
+        char[]? rented = null;
+        Span<char> chars = charCount <= StackCharBufferLength
+            ? stackalloc char[charCount]
+            : (rented = ArrayPool<char>.Shared.Rent(charCount)).AsSpan(0, charCount);
+
+        try
+        {
+            GetChars(bytes, chars, 0);
+            return string.GetHashCode(chars);
+        }
+        finally
+        {
+            if (rented is not null)
+            {
+                ArrayPool<char>.Shared.Return(rented);
+            }
+        }
+    }
 }

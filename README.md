@@ -329,6 +329,12 @@ allocated. `Name` itself is decoded lazily and cached per token. The byte-name w
 overloads do not validate the name content as modified UTF-8; they can emit names the reader will
 reject, and validity is the caller's responsibility.
 
+`NbtUtf8NameComparer` and `NbtNameComparer` are string-keyed comparers that implement
+`IEqualityComparer<string>` and `IAlternateEqualityComparer<...>`, so a `Dictionary<string, T>` created
+with one of them can be probed through `GetAlternateLookup` by modified UTF-8 name bytes or by name
+characters. The byte comparer decodes both sides ordinally, so canonical and alternate encodings of
+the same name match, and hashes are computed from the decoded characters.
+
 ## Read-only DOM (NbtDocument)
 
 `NbtDocument` is for random access over a document you want to probe repeatedly without a
