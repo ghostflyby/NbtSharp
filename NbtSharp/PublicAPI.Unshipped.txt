@@ -6,5 +6,9 @@
 *REMOVED*NbtSharp.NbtCompoundElement.TryGetMember(string! name, out NbtSharp.NbtElement value) -> bool
 *REMOVED*NbtSharp.NbtListElement.GetElementAt(int index) -> NbtSharp.NbtElement
 NbtSharp.NbtCompoundElement.Count.get -> int
-NbtSharp.NbtCompoundElement.this[string! name].get -> NbtSharp.NbtElement
-NbtSharp.NbtCompoundElement.TryGetValue(string! name, out NbtSharp.NbtElement value) -> bool
+NbtSharp.NbtCompoundElement.this[string! key].get -> NbtSharp.NbtElement
+NbtSharp.NbtCompoundElement.TryGetValue(string! key, out NbtSharp.NbtElement value) -> bool
+*REMOVED*NbtSharp.NbtContractInfo.GetMember(string! clrName) -> NbtSharp.NbtMemberInfo?
+NbtSharp.NbtContractInfo.Count.get -> int
+NbtSharp.NbtContractInfo.this[string! key].get -> NbtSharp.NbtMemberInfo!
+NbtSharp.NbtContractInfo.TryGetValue(string! key, out NbtSharp.NbtMemberInfo! value) -> bool

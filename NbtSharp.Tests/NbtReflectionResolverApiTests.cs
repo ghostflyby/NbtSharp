@@ -13,12 +13,12 @@ public sealed class NbtReflectionResolverApiTests
         var first = new NbtReflectionTypeInfoResolver(contract =>
         {
             calls.Add("first");
-            contract.GetMember("Name")!.NbtName = "from-first";
+            contract["Name"].NbtName = "from-first";
         });
         var second = first.WithAddedModifier(contract =>
         {
-            calls.Add("second:" + contract.GetMember("Name")!.NbtName);
-            contract.GetMember("Name")!.NbtName = "from-second";
+            calls.Add("second:" + contract["Name"].NbtName);
+            contract["Name"].NbtName = "from-second";
         });
 
         var options = new NbtSerializerOptions { TypeInfoResolver = second };
@@ -33,11 +33,11 @@ public sealed class NbtReflectionResolverApiTests
     public void WithAddedModifierLeavesTheOriginalResolverCacheIntact()
     {
         var first = new NbtReflectionTypeInfoResolver(contract =>
-            contract.GetMember("Name")!.NbtName = "original-name");
+            contract["Name"].NbtName = "original-name");
         var options = new NbtSerializerOptions { TypeInfoResolver = first };
         var before = NbtSerializer.Serialize(new ResolverRenameDto { Name = "x" }, "root", options);
 
-        var derived = first.WithAddedModifier(contract => contract.GetMember("Name")!.NbtName = "derived-name");
+        var derived = first.WithAddedModifier(contract => contract["Name"].NbtName = "derived-name");
         var derivedOptions = new NbtSerializerOptions { TypeInfoResolver = derived };
         var derivedData = NbtSerializer.Serialize(new ResolverRenameDto { Name = "x" }, "root", derivedOptions);
 
@@ -53,7 +53,7 @@ public sealed class NbtReflectionResolverApiTests
     public void FrozenContractRejectsStashedMutationsAndKeepsSerializing()
     {
         NbtMemberInfo? stash = null;
-        var options = ModifierOptions(contract => stash = contract.GetMember("Name"));
+        var options = ModifierOptions(contract => stash = contract["Name"]);
         var value = new ResolverRenameDto { Name = "x", Health = 1 };
         var first = NbtSerializer.Serialize(value, "root", options);
 
@@ -210,10 +210,10 @@ public sealed class NbtReflectionResolverApiTests
         Assert.NotNull(contract);
         Assert.Equal(typeof(ResolverRenameDto), contract!.Type);
         Assert.Equal(2, contract.Members.Count);
-        Assert.NotNull(contract.GetMember("Name"));
-        Assert.Null(contract.GetMember("name"));
-        Assert.Equal(typeof(string), contract.GetMember("Name")!.Type);
-        Assert.True(contract.GetMember("Name")!.CanWrite);
+        Assert.True(contract.TryGetValue("Name", out _));
+        Assert.False(contract.TryGetValue("name", out _));
+        Assert.Equal(typeof(string), contract["Name"].Type);
+        Assert.True(contract["Name"].CanWrite);
         Assert.Throws<NotSupportedException>(() =>
             ((IList<NbtMemberInfo>)contract.Members)[0] = contract.Members[0]);
     }
@@ -221,7 +221,7 @@ public sealed class NbtReflectionResolverApiTests
     [Fact]
     public void NullNbtNameThrowsArgumentNull()
     {
-        var options = ModifierOptions(contract => contract.GetMember("Name")!.NbtName = null!);
+        var options = ModifierOptions(contract => contract["Name"].NbtName = null!);
 
         Assert.Throws<ArgumentNullException>(() =>
             NbtSerializer.Serialize(new ResolverRenameDto(), "root", options));
@@ -234,7 +234,7 @@ public sealed class NbtReflectionResolverApiTests
         Assert.Equal(0, empty.A);
         Assert.Equal(0, empty.B);
 
-        var options = ModifierOptions(contract => contract.GetMember("A")!.Ignore = true);
+        var options = ModifierOptions(contract => contract["A"].Ignore = true);
 
         var copy = NbtSerializer.Deserialize<ResolverBoundWithParameterlessDto>(
             NbtSerializer.Serialize(new ResolverBoundWithParameterlessDto(5, 7), "root", options),

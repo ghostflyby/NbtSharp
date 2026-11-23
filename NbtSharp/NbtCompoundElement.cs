@@ -12,11 +12,12 @@ namespace NbtSharp;
 /// alive and undisposed.
 /// </para>
 /// <para>
-/// The view implements <see cref="IReadOnlyDictionary{TKey,TValue}"/>; the interface path
-/// materializes member names as strings, while direct struct enumeration keeps them lazy.
+/// This is a wire-order view: duplicate member names are preserved by <see cref="Count"/> and
+/// enumeration, while the indexer and <see cref="TryGetValue"/> resolve the last occurrence. It
+/// therefore does not implement <see cref="IReadOnlyDictionary{TKey,TValue}"/>.
 /// </para>
 /// </remarks>
-public readonly struct NbtCompoundElement : IReadOnlyDictionary<string, NbtElement>
+public readonly struct NbtCompoundElement
 {
     internal NbtCompoundElement(NbtDocument owner, int slotIndex)
     {
@@ -42,49 +43,49 @@ public readonly struct NbtCompoundElement : IReadOnlyDictionary<string, NbtEleme
         }
     }
 
-    /// <summary>Gets the member with the specified name.</summary>
-    /// <param name="name">The member name.</param>
+    /// <summary>Gets the member with the specified key.</summary>
+    /// <param name="key">The member name.</param>
     /// <returns>The member.</returns>
-    /// <remarks>When the name occurs more than once, the last occurrence wins.</remarks>
-    /// <exception cref="ArgumentNullException"><paramref name="name"/> is <see langword="null"/>.</exception>
-    /// <exception cref="KeyNotFoundException">No member has the specified name.</exception>
+    /// <remarks>When the key occurs more than once, the last occurrence wins.</remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="key"/> is <see langword="null"/>.</exception>
+    /// <exception cref="KeyNotFoundException">No member has the specified key.</exception>
     /// <exception cref="NbtException">The document slot is not a compound.</exception>
     /// <exception cref="ObjectDisposedException">The owning document has been disposed.</exception>
-    public NbtElement this[string name]
+    public NbtElement this[string key]
     {
         get
         {
-            ArgumentNullException.ThrowIfNull(name);
-            if (!TryGetValue(name, out var value))
+            ArgumentNullException.ThrowIfNull(key);
+            if (!TryGetValue(key, out var value))
             {
-                throw new KeyNotFoundException($"The given key '{name}' was not present in the dictionary.");
+                throw new KeyNotFoundException($"The given key '{key}' was not present in the dictionary.");
             }
 
             return value;
         }
     }
 
-    /// <summary>Gets the member with the specified name, when present.</summary>
-    /// <param name="name">The member name.</param>
+    /// <summary>Gets the member with the specified key, when present.</summary>
+    /// <param name="key">The member name.</param>
     /// <param name="value">The member, or a default value when absent.</param>
     /// <returns><see langword="true"/> when the member was found.</returns>
     /// <remarks>
     /// The query string is compared with each member's wire name by decoded value. Wire names
     /// decode into a stack buffer when at most 256 chars, or a pooled buffer otherwise, so no
-    /// strings are allocated. When the name occurs more than once, the last occurrence wins.
+    /// strings are allocated. When the key occurs more than once, the last occurrence wins.
     /// </remarks>
-    /// <exception cref="ArgumentNullException"><paramref name="name"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="key"/> is <see langword="null"/>.</exception>
     /// <exception cref="NbtException">
     /// The document slot is not a compound, or a wire name is not valid modified UTF-8.
     /// </exception>
     /// <exception cref="ObjectDisposedException">The owning document has been disposed.</exception>
-    public bool TryGetValue(string name, out NbtElement value)
+    public bool TryGetValue(string key, out NbtElement value)
     {
-        ArgumentNullException.ThrowIfNull(name);
+        ArgumentNullException.ThrowIfNull(key);
         var document = Document;
         ref readonly var slot = ref ExpectSlot();
 
-        var query = name.AsSpan();
+        var query = key.AsSpan();
         var child = SlotIndex + 1;
         var lastMatch = -1;
         for (var i = 0; i < slot.ChildCount; i++)
@@ -117,46 +118,6 @@ public readonly struct NbtCompoundElement : IReadOnlyDictionary<string, NbtEleme
     {
         _ = ExpectSlot();
         return new Enumerator(Document, SlotIndex);
-    }
-
-    IEnumerable<string> IReadOnlyDictionary<string, NbtElement>.Keys => EnumerateNames();
-
-    IEnumerable<NbtElement> IReadOnlyDictionary<string, NbtElement>.Values => EnumerateValues();
-
-    bool IReadOnlyDictionary<string, NbtElement>.ContainsKey(string key) =>
-        TryGetValue(key, out _);
-
-    IEnumerator<KeyValuePair<string, NbtElement>> IEnumerable<KeyValuePair<string, NbtElement>>.GetEnumerator() =>
-        EnumeratePairs().GetEnumerator();
-
-    IEnumerator IEnumerable.GetEnumerator() =>
-        ((IEnumerable<KeyValuePair<string, NbtElement>>)this).GetEnumerator();
-
-    private IEnumerable<string> EnumerateNames()
-    {
-        using var enumerator = GetEnumerator();
-        while (enumerator.MoveNext())
-        {
-            yield return enumerator.Name;
-        }
-    }
-
-    private IEnumerable<NbtElement> EnumerateValues()
-    {
-        using var enumerator = GetEnumerator();
-        while (enumerator.MoveNext())
-        {
-            yield return enumerator.Current;
-        }
-    }
-
-    private IEnumerable<KeyValuePair<string, NbtElement>> EnumeratePairs()
-    {
-        using var enumerator = GetEnumerator();
-        while (enumerator.MoveNext())
-        {
-            yield return new KeyValuePair<string, NbtElement>(enumerator.Name, enumerator.Current);
-        }
     }
 
     private NbtDocument Document => Owner ?? throw new InvalidOperationException(

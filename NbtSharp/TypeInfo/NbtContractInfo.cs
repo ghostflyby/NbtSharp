@@ -1,3 +1,5 @@
+using System.Collections;
+
 // The public NbtSharp namespace is intentional; the folder groups internal implementation.
 // ReSharper disable once CheckNamespace
 namespace NbtSharp;
@@ -19,15 +21,21 @@ namespace NbtSharp;
 /// every member throws <see cref="InvalidOperationException"/>.
 /// </para>
 /// </remarks>
-public sealed class NbtContractInfo
+public sealed class NbtContractInfo : IReadOnlyDictionary<string, NbtMemberInfo>
 {
     private readonly NbtMemberInfo[] _members;
+    private readonly Dictionary<string, NbtMemberInfo> _byClrName;
 
     internal NbtContractInfo(Type type, NbtMemberInfo[] members)
     {
         Type = type;
         _members = members;
         Members = Array.AsReadOnly(members);
+        _byClrName = new Dictionary<string, NbtMemberInfo>(members.Length, StringComparer.Ordinal);
+        foreach (var member in members)
+        {
+            _byClrName.TryAdd(member.ClrName, member);
+        }
     }
 
     /// <summary>Gets the CLR type this contract maps.</summary>
@@ -39,25 +47,35 @@ public sealed class NbtContractInfo
     /// </summary>
     public IReadOnlyList<NbtMemberInfo> Members { get; }
 
-    /// <summary>
-    /// Gets the member whose <see cref="NbtMemberInfo.ClrName"/> equals
-    /// <paramref name="clrName"/> using an ordinal comparison.
-    /// </summary>
-    /// <param name="clrName">The CLR name of the property or field.</param>
-    /// <returns>The matching member, or <see langword="null"/> when the name is unknown.</returns>
-    public NbtMemberInfo? GetMember(string clrName)
-    {
-        ArgumentNullException.ThrowIfNull(clrName);
-        foreach (var member in _members)
-        {
-            if (string.Equals(member.ClrName, clrName, StringComparison.Ordinal))
-            {
-                return member;
-            }
-        }
+    /// <summary>Gets the number of distinct CLR member names.</summary>
+    public int Count => _byClrName.Count;
 
-        return null;
-    }
+    /// <summary>Gets the member with the specified CLR name.</summary>
+    /// <param name="key">The CLR name of the property or field.</param>
+    /// <returns>The matching member.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="key"/> is <see langword="null"/>.</exception>
+    /// <exception cref="KeyNotFoundException">No member has the specified CLR name.</exception>
+    public NbtMemberInfo this[string key] => _byClrName[key];
+
+    /// <summary>Gets the member with the specified CLR name, when present.</summary>
+    /// <param name="key">The CLR name of the property or field.</param>
+    /// <param name="value">The matching member, or a default value when absent.</param>
+    /// <returns><see langword="true"/> when the member was found.</returns>
+    public bool TryGetValue(string key, out NbtMemberInfo value) =>
+        _byClrName.TryGetValue(key, out value!);
+
+    IEnumerable<string> IReadOnlyDictionary<string, NbtMemberInfo>.Keys => _byClrName.Keys;
+
+    IEnumerable<NbtMemberInfo> IReadOnlyDictionary<string, NbtMemberInfo>.Values => _byClrName.Values;
+
+    bool IReadOnlyDictionary<string, NbtMemberInfo>.ContainsKey(string key) =>
+        _byClrName.ContainsKey(key);
+
+    IEnumerator<KeyValuePair<string, NbtMemberInfo>> IEnumerable<KeyValuePair<string, NbtMemberInfo>>.GetEnumerator() =>
+        _byClrName.GetEnumerator();
+
+    IEnumerator IEnumerable.GetEnumerator() =>
+        ((IEnumerable<KeyValuePair<string, NbtMemberInfo>>)this).GetEnumerator();
 
     internal void Freeze()
     {

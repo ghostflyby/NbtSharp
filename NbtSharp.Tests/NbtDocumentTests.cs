@@ -320,7 +320,7 @@ public sealed class NbtDocumentTests
         Assert.Equal("b", list[1].String.GetString());
 
         var compound = RequireMember(root, "Compound").Compound;
-        Assert.Single(compound);
+        Assert.Equal(1, compound.Count);
         Assert.Equal(1, compound["Nested"].Int32);
     }
 
@@ -779,7 +779,7 @@ public sealed class NbtDocumentTests
         Assert.Equal(["A", "Items", "B"], ReadMemberNames(root));
 
         var nested = root["A"].Compound;
-        Assert.Single(nested);
+        Assert.Equal(1, nested.Count);
         Assert.Equal(["x"], ReadMemberNames(nested));
         Assert.Equal(1, nested["x"].Int32);
         Assert.Equal(9, root["B"].Int32);
@@ -870,6 +870,17 @@ public sealed class NbtDocumentTests
         Assert.Equal([1, 2, 3], values.ToArray());
     }
 
+    [Fact]
+    public void ListElementImplementsIReadOnlyList()
+    {
+        using var document = NbtDocument.Parse(BuildSampleDocument());
+        IReadOnlyList<NbtElement> numbers = document.RootElement.Compound["Numbers"].List;
+
+        Assert.Equal(3, numbers.Count);
+        Assert.Equal(1, numbers[0].Int32);
+        Assert.Equal([1, 2, 3], numbers.Select(static element => element.Int32).ToArray());
+    }
+
     // --------------------------------------------------------------------------------------------
     // Nesting
     // --------------------------------------------------------------------------------------------
@@ -888,7 +899,7 @@ public sealed class NbtDocumentTests
         Assert.Equal(3, items.Count);
 
         var first = items[0].Compound;
-        Assert.Single(first);
+        Assert.Equal(1, first.Count);
         Assert.Equal(10, first["x"].Int32);
         Assert.Equal(20, items[1].Compound["y"].Int32);
         Assert.Equal(30, items[2].Compound["x"].Int32);

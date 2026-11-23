@@ -11,7 +11,7 @@ namespace NbtSharp;
 /// <typeparam name="TCollection">The declared collection type.</typeparam>
 /// <typeparam name="TElement">The element type.</typeparam>
 [EditorBrowsable(EditorBrowsableState.Never)]
-public interface INbtSequenceBuilder<out TCollection, in TElement>
+public interface INbtSequenceBuilder<TCollection, TElement>
     where TCollection : IEnumerable<TElement>
 {
     /// <summary>Initializes the builder for a list that declares <paramref name="count"/> elements.</summary>
@@ -36,7 +36,7 @@ public interface INbtSequenceBuilder<out TCollection, in TElement>
 /// <typeparam name="TCollection">The declared dictionary type.</typeparam>
 /// <typeparam name="TValue">The value type.</typeparam>
 [EditorBrowsable(EditorBrowsableState.Never)]
-public interface INbtMapBuilder<out TCollection, in TValue>
+public interface INbtMapBuilder<TCollection, TValue>
     where TCollection : IEnumerable<KeyValuePair<string, TValue>>
 {
     /// <summary>Initializes the builder.</summary>
