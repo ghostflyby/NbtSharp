@@ -3,83 +3,61 @@ using System.Collections.Generic;
 namespace NbtSharp;
 
 /// <summary>
-/// An ordinal name comparer for string-keyed dictionaries that also supports alternate lookup by
-/// decoded name characters.
+/// An equality comparer for modified UTF-8 name bytes.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The comparer implements both <see cref="IEqualityComparer{T}"/> over <see cref="string"/> and
-/// <see cref="IAlternateEqualityComparer{TAlternate,T}"/> over <see cref="ReadOnlySpan{T}"/> of
-/// characters, so a dictionary created with it accepts
-/// <c>GetAlternateLookup&lt;ReadOnlySpan&lt;char&gt;&gt;()</c>.
+/// Byte sequences are compared by the decoded name, so raw nulls, overlong forms, and canonical
+/// encodings of the same name are equal. The hash is computed from the decoded characters with
+/// <see cref="string.GetHashCode(ReadOnlySpan{char})"/>.
 /// </para>
 /// <para>
-/// Names are compared ordinally, and hashes use <see cref="string.GetHashCode(ReadOnlySpan{char})"/>
-/// so the string and span forms produce identical hash codes.
+/// Invalid modified UTF-8 throws <see cref="NbtException"/>.
 /// </para>
 /// </remarks>
-public readonly struct NbtNameComparer :
-    IEqualityComparer<string>,
-    IAlternateEqualityComparer<ReadOnlySpan<char>, string>
+public readonly struct NbtNameByteComparer : IEqualityComparer<ReadOnlySpan<byte>>
 {
     /// <summary>The shared comparer instance.</summary>
-    public static readonly NbtNameComparer Instance = default;
+    public static readonly NbtNameByteComparer Instance = default;
 
     /// <inheritdoc/>
-    public bool Equals(string? x, string? y) => string.Equals(x, y, StringComparison.Ordinal);
+    public bool Equals(ReadOnlySpan<byte> x, ReadOnlySpan<byte> y) => NbtText.NameEquals(x, y, 0);
 
     /// <inheritdoc/>
-    public int GetHashCode(string obj) => string.GetHashCode(obj.AsSpan());
+    public int GetHashCode(ReadOnlySpan<byte> obj) => NbtText.GetNameHashCode(obj);
+}
+
+/// <summary>
+/// An alternate equality comparer that compares decoded name characters with modified UTF-8 name
+/// bytes.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The alternate side is a character span; the key side is the wire name bytes. Both sides are
+/// compared by decoded value, and the character hash matches the byte hash because both use
+/// <see cref="string.GetHashCode(ReadOnlySpan{char})"/>.
+/// </para>
+/// <para>
+/// Invalid modified UTF-8 throws <see cref="NbtException"/>. A byte span cannot be created from a
+/// character span, so <see cref="Create(ReadOnlySpan{char})"/> throws
+/// <see cref="NotSupportedException"/>; this comparer is intended for lookups.
+/// </para>
+/// </remarks>
+public readonly struct NbtNameCharComparer :
+    IAlternateEqualityComparer<ReadOnlySpan<char>, ReadOnlySpan<byte>>
+{
+    /// <summary>The shared comparer instance.</summary>
+    public static readonly NbtNameCharComparer Instance = default;
 
     /// <inheritdoc/>
-    public bool Equals(ReadOnlySpan<char> alternate, string other) =>
-        alternate.SequenceEqual(other.AsSpan());
+    public bool Equals(ReadOnlySpan<char> alternate, ReadOnlySpan<byte> other) =>
+        NbtText.NameEquals(other, alternate, 0);
 
     /// <inheritdoc/>
     public int GetHashCode(ReadOnlySpan<char> alternate) => string.GetHashCode(alternate);
 
     /// <inheritdoc/>
-    public string Create(ReadOnlySpan<char> alternate) => new(alternate);
-}
-
-/// <summary>
-/// An ordinal name comparer for string-keyed dictionaries that also supports alternate lookup by
-/// modified UTF-8 name bytes.
-/// </summary>
-/// <remarks>
-/// <para>
-/// The comparer implements both <see cref="IEqualityComparer{T}"/> over <see cref="string"/> and
-/// <see cref="IAlternateEqualityComparer{TAlternate,T}"/> over <see cref="ReadOnlySpan{T}"/> of
-/// bytes, so a dictionary created with it accepts
-/// <c>GetAlternateLookup&lt;ReadOnlySpan&lt;byte&gt;&gt;()</c>. Alternate lookups compare the
-/// decoded name, so raw nulls, overlong forms, and canonical encodings of the same name match.
-/// </para>
-/// <para>
-/// Hashes are computed from the decoded characters with
-/// <see cref="string.GetHashCode(ReadOnlySpan{char})"/>, so the byte and string forms produce
-/// identical hash codes. Invalid modified UTF-8 throws <see cref="NbtException"/>.
-/// </para>
-/// </remarks>
-public readonly struct NbtUtf8NameComparer :
-    IEqualityComparer<string>,
-    IAlternateEqualityComparer<ReadOnlySpan<byte>, string>
-{
-    /// <summary>The shared comparer instance.</summary>
-    public static readonly NbtUtf8NameComparer Instance = default;
-
-    /// <inheritdoc/>
-    public bool Equals(string? x, string? y) => string.Equals(x, y, StringComparison.Ordinal);
-
-    /// <inheritdoc/>
-    public int GetHashCode(string obj) => string.GetHashCode(obj.AsSpan());
-
-    /// <inheritdoc/>
-    public bool Equals(ReadOnlySpan<byte> alternate, string other) =>
-        NbtText.NameEquals(alternate, other.AsSpan(), 0);
-
-    /// <inheritdoc/>
-    public int GetHashCode(ReadOnlySpan<byte> alternate) => NbtText.GetNameHashCode(alternate);
-
-    /// <inheritdoc/>
-    public string Create(ReadOnlySpan<byte> alternate) => NbtText.DecodeAt(alternate, 0);
+    public ReadOnlySpan<byte> Create(ReadOnlySpan<char> alternate) =>
+        throw new NotSupportedException(
+            "A modified UTF-8 byte span cannot be created from a character span.");
 }
