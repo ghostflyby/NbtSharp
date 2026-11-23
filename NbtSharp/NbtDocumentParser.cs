@@ -56,18 +56,12 @@ internal struct NbtDocumentSlot
     public int ChildCount;
 }
 
-/// <summary>The name and encoding flags recorded for a slot.</summary>
+/// <summary>The name flags recorded for a slot.</summary>
 [Flags]
 internal enum NbtDocumentSlotFlags : byte
 {
     /// <summary>The value carries a name: a compound member or a named root.</summary>
     HasName = 1,
-
-    /// <summary>
-    /// The name bytes use a non-canonical modified UTF-8 encoding, so byte-wise comparisons must
-    /// fall back to decoded string comparisons.
-    /// </summary>
-    NameNonCanonical = 2,
 }
 
 /// <summary>
@@ -224,15 +218,13 @@ internal static class NbtDocumentParser
 
             if (_slotCount == _slots.Length)
             {
-                // Grow with long math: past 2^30 slots a plain doubling overflows int and reports
-                // the wrong exception type. The document-size cap makes this unreachable in
-                // practice, so simply refuse cleanly.
                 var doubled = (long)_slots.Length * 2;
-                var newLength = doubled > int.MaxValue ? int.MaxValue : _slots.Length + 1;
-                if (newLength <= _slots.Length)
+                if (doubled > Array.MaxLength)
                 {
                     throw new NbtException("The NBT document has too many values to index.");
                 }
+
+                var newLength = (int)doubled;
 
                 var grown = ArrayPool<NbtDocumentSlot>.Shared.Rent(newLength);
                 _slots.AsSpan(0, _slotCount).CopyTo(grown);
@@ -249,10 +241,7 @@ internal static class NbtDocumentParser
             ref var slot = ref _slots[slotIndex];
             slot = default;
             slot.TagType = tagType;
-            slot.Flags = name.HasName
-                ? NbtDocumentSlotFlags.HasName |
-                    (name.NonCanonical ? NbtDocumentSlotFlags.NameNonCanonical : 0)
-                : 0;
+            slot.Flags = name.HasName ? NbtDocumentSlotFlags.HasName : 0;
             slot.NameOffset = name.Offset;
             slot.NameLength = name.Length;
             slot.PayloadOffset = (int)_bytesConsumed;
@@ -380,14 +369,14 @@ internal static class NbtDocumentParser
             var length = ReadUInt16();
             if (length == 0)
             {
-                return new NameInfo((int)_bytesConsumed, 0, true, false);
+                return new NameInfo((int)_bytesConsumed, 0, true);
             }
 
             EnsurePayloadFits(length);
             var offset = (int)_bytesConsumed;
-            ModifiedUtf8.Scan(_data.Slice(offset, length), position, out var nonCanonical);
+            NbtText.ValidateName(_data.Slice(offset, length), position);
             _bytesConsumed += length;
-            return new NameInfo(offset, length, true, nonCanonical);
+            return new NameInfo(offset, length, true);
         }
 
         private int ConsumePayload(NbtTagType tagType)
@@ -549,9 +538,9 @@ internal static class NbtDocumentParser
             }
         }
 
-        private readonly record struct NameInfo(int Offset, ushort Length, bool HasName, bool NonCanonical)
+        private readonly record struct NameInfo(int Offset, ushort Length, bool HasName)
         {
-            public static readonly NameInfo Unnamed = new(0, 0, false, false);
+            public static readonly NameInfo Unnamed = new(0, 0, false);
         }
 
         private struct ContainerFrame(int slotIndex, bool isList, NbtTagType elementType, int remaining)
