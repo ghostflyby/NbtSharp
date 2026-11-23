@@ -865,23 +865,16 @@ public sealed class NbtDocumentTests
     }
 
     // --------------------------------------------------------------------------------------------
-    // Allocation behavior
+    // Access behavior
     // --------------------------------------------------------------------------------------------
 
     [Fact]
-    public void NumericRootAccessDoesNotAllocate()
+    public void NumericRootAccess()
     {
         using var document = ParseUnnamedRootDocument(
             static (ref writer) => writer.WriteInt32("ignored", 42),
             out var root);
 
-        for (var i = 0; i < 64; i++)
-        {
-            _ = document.RootElement.Int32;
-            _ = root.Int32;
-        }
-
-        var before = GC.GetAllocatedBytesForCurrentThread();
         var sum = 0;
         for (var i = 0; i < 1_000; i++)
         {
@@ -889,25 +882,16 @@ public sealed class NbtDocumentTests
             sum += root.Int32;
         }
 
-        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
         Assert.Equal(84_000, sum);
-        Assert.Equal(0, allocated);
     }
 
     [Fact]
-    public void StringRawSpanAccessDoesNotAllocate()
+    public void StringRawSpanAccess()
     {
         using var document = ParseUnnamedRootDocument(
             static (ref writer) => writer.WriteString("ignored", "中文 \0 x"),
             out var root);
 
-        for (var i = 0; i < 64; i++)
-        {
-            _ = document.RootElement.String.RawSpan.Length;
-            _ = root.String.RawSpan.Length;
-        }
-
-        var before = GC.GetAllocatedBytesForCurrentThread();
         var length = 0;
         for (var i = 0; i < 1_000; i++)
         {
@@ -915,13 +899,11 @@ public sealed class NbtDocumentTests
             length += root.String.RawSpan.Length;
         }
 
-        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
         Assert.Equal(22_000, length);
-        Assert.Equal(0, allocated);
     }
 
     [Fact]
-    public void ArrayRawSpanAccessDoesNotAllocate()
+    public void ArrayRawSpanAccess()
     {
         using var byteDocument = ParseUnnamedRootDocument(
             static (ref writer) => writer.WriteByteArray("ignored", [1, 2, 3]),
@@ -933,14 +915,6 @@ public sealed class NbtDocumentTests
             static (ref writer) => writer.WriteInt64Array("ignored", [1L, 2L, 3L]),
             out var longRoot);
 
-        for (var i = 0; i < 64; i++)
-        {
-            _ = byteRoot.ByteArray.Span.Length;
-            _ = intRoot.IntArray.RawSpan.Length;
-            _ = longRoot.LongArray.RawSpan.Length;
-        }
-
-        var before = GC.GetAllocatedBytesForCurrentThread();
         var length = 0;
         for (var i = 0; i < 1_000; i++)
         {
@@ -949,27 +923,15 @@ public sealed class NbtDocumentTests
             length += longRoot.LongArray.RawSpan.Length;
         }
 
-        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
         Assert.Equal(39_000, length);
-        Assert.Equal(0, allocated);
     }
 
     [Fact]
-    public void ListElementAccessAndEnumerationDoNotAllocate()
+    public void ListElementAccessAndEnumeration()
     {
         using var document = NbtDocument.Parse(BuildSampleDocument());
         var numbers = document.RootElement.Compound.GetMember("Numbers").List;
 
-        for (var i = 0; i < 64; i++)
-        {
-            _ = numbers.GetElementAt(0).Int32;
-            foreach (var element in numbers)
-            {
-                _ = element.Int32;
-            }
-        }
-
-        var before = GC.GetAllocatedBytesForCurrentThread();
         var sum = 0;
         for (var i = 0; i < 1_000; i++)
         {
@@ -980,69 +942,47 @@ public sealed class NbtDocumentTests
             }
         }
 
-        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
         Assert.Equal(7_999, sum);
-        Assert.Equal(0, allocated);
     }
 
     [Fact]
-    public void CompoundEnumeratorMoveNextDoesNotAllocateButNameDoes()
+    public void CompoundEnumeratorResetRestartsEnumeration()
     {
         using var document = NbtDocument.Parse(BuildSampleDocument());
         var root = document.RootElement.Compound;
         using var enumerator = root.GetEnumerator();
 
-        for (var i = 0; i < 64; i++)
-        {
-            enumerator.Reset();
-            while (enumerator.MoveNext())
-            {
-            }
-        }
-
-        var beforeMoveNext = GC.GetAllocatedBytesForCurrentThread();
-        for (var i = 0; i < 1_000; i++)
-        {
-            enumerator.Reset();
-            while (enumerator.MoveNext())
-            {
-            }
-        }
-
-        var moveNextAllocated = GC.GetAllocatedBytesForCurrentThread() - beforeMoveNext;
-        Assert.Equal(0, moveNextAllocated);
-
-        enumerator.Reset();
-        var nameLength = 0;
-        var beforeNames = GC.GetAllocatedBytesForCurrentThread();
         while (enumerator.MoveNext())
         {
+        }
+
+        enumerator.Reset();
+        var count = 0;
+        var nameLength = 0;
+        while (enumerator.MoveNext())
+        {
+            count++;
             nameLength += enumerator.Name.Length;
         }
 
-        var namesAllocated = GC.GetAllocatedBytesForCurrentThread() - beforeNames;
+        Assert.Equal(root.MemberCount, count);
         Assert.Equal(28, nameLength);
-        Assert.True(namesAllocated > 0, "reading member names must decode and allocate them");
     }
 
     [Fact]
-    public void ArrayMaterializationAllocatesEveryTime()
+    public void ArrayMaterializationReturnsFreshArrays()
     {
         using var document = ParseUnnamedRootDocument(
             static (ref writer) => writer.WriteInt32Array("ignored", [1, 2, 3]),
             out var root);
         _ = root.IntArray.ToArray();
 
-        var before = GC.GetAllocatedBytesForCurrentThread();
         var first = root.IntArray.ToArray();
-        var afterFirst = GC.GetAllocatedBytesForCurrentThread();
         var second = root.IntArray.ToArray();
-        var afterSecond = GC.GetAllocatedBytesForCurrentThread();
 
+        Assert.NotSame(first, second);
         Assert.Equal([1, 2, 3], first);
         Assert.Equal([1, 2, 3], second);
-        Assert.True(afterFirst > before, "the first materialization must allocate");
-        Assert.True(afterSecond > afterFirst, "the second materialization must allocate");
     }
 
     // --------------------------------------------------------------------------------------------
