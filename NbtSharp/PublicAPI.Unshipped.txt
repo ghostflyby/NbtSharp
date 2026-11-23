@@ -212,6 +212,7 @@ NbtSharp.NbtReader.GetString() -> string!
 NbtSharp.NbtReader.ListElementType.get -> NbtSharp.NbtTagType
 NbtSharp.NbtReader.Name.get -> string?
 NbtSharp.NbtReader.NameEquals(System.ReadOnlySpan<byte> name) -> bool
+NbtSharp.NbtReader.NameEquals(System.ReadOnlySpan<char> name) -> bool
 NbtSharp.NbtReader.Read() -> bool
 NbtSharp.NbtReader.Skip() -> void
 NbtSharp.NbtReader.TagType.get -> NbtSharp.NbtTagType
@@ -418,36 +419,125 @@ static NbtSharp.NbtDocument.Parse(System.IO.Stream! stream, NbtSharp.NbtReaderOp
 static NbtSharp.NbtDocument.Parse(System.ReadOnlyMemory<byte> data, NbtSharp.NbtReaderOptions options = default(NbtSharp.NbtReaderOptions)) -> NbtSharp.NbtDocument!
 NbtSharp.NbtDocument.RootElement.get -> NbtSharp.NbtElement
 NbtSharp.NbtDocument.RootName.get -> string?
+NbtSharp.NbtByteArrayElement
+NbtSharp.NbtByteArrayElement.CopyTo(System.Span<byte> destination) -> void
+NbtSharp.NbtByteArrayElement.CopyTo(System.Span<sbyte> destination) -> void
+NbtSharp.NbtByteArrayElement.Length.get -> int
+NbtSharp.NbtByteArrayElement.Memory.get -> System.ReadOnlyMemory<byte>
+NbtSharp.NbtByteArrayElement.NbtByteArrayElement() -> void
+NbtSharp.NbtByteArrayElement.NbtByteArrayElement(System.ReadOnlyMemory<byte> raw) -> void
+NbtSharp.NbtByteArrayElement.SByteSpan.get -> System.ReadOnlySpan<sbyte>
+NbtSharp.NbtByteArrayElement.Span.get -> System.ReadOnlySpan<byte>
+NbtSharp.NbtByteArrayElement.ToArray() -> byte[]!
+NbtSharp.NbtByteArrayElement.ToSByteArray() -> sbyte[]!
 NbtSharp.NbtElement
-NbtSharp.NbtElement.ElementCount.get -> int
-NbtSharp.NbtElement.ElementType.get -> NbtSharp.NbtTagType
-NbtSharp.NbtElement.EnumerateElements() -> NbtSharp.NbtElement.Enumerator
-NbtSharp.NbtElement.EnumerateMembers() -> NbtSharp.NbtElement.Enumerator
-NbtSharp.NbtElement.Enumerator
-NbtSharp.NbtElement.Enumerator.Current.get -> NbtSharp.NbtElement
-NbtSharp.NbtElement.Enumerator.Dispose() -> void
-NbtSharp.NbtElement.Enumerator.Enumerator() -> void
-NbtSharp.NbtElement.Enumerator.GetEnumerator() -> NbtSharp.NbtElement.Enumerator
-NbtSharp.NbtElement.Enumerator.MoveNext() -> bool
-NbtSharp.NbtElement.Enumerator.Reset() -> void
-NbtSharp.NbtElement.GetByteArray() -> byte[]!
-NbtSharp.NbtElement.GetDouble() -> double
-NbtSharp.NbtElement.GetElementAt(int index) -> NbtSharp.NbtElement
-NbtSharp.NbtElement.GetInt16() -> short
-NbtSharp.NbtElement.GetInt32() -> int
-NbtSharp.NbtElement.GetInt32Array() -> int[]!
-NbtSharp.NbtElement.GetInt64() -> long
-NbtSharp.NbtElement.GetInt64Array() -> long[]!
-NbtSharp.NbtElement.GetMember(string! name) -> NbtSharp.NbtElement
-NbtSharp.NbtElement.GetSByte() -> sbyte
-NbtSharp.NbtElement.GetSByteArray() -> sbyte[]!
-NbtSharp.NbtElement.GetSingle() -> float
-NbtSharp.NbtElement.GetString() -> string!
-NbtSharp.NbtElement.MemberCount.get -> int
-NbtSharp.NbtElement.Name.get -> string?
-NbtSharp.NbtElement.NameEquals(System.ReadOnlySpan<byte> name) -> bool
+NbtSharp.NbtElement.ByteArray.get -> NbtSharp.NbtByteArrayElement
+NbtSharp.NbtElement.Compound.get -> NbtSharp.NbtCompoundElement
+NbtSharp.NbtElement.Double.get -> double
+NbtSharp.NbtElement.Int16.get -> short
+NbtSharp.NbtElement.Int32.get -> int
+NbtSharp.NbtElement.Int64.get -> long
+NbtSharp.NbtElement.IntArray.get -> NbtSharp.NbtIntArrayElement
+NbtSharp.NbtElement.List.get -> NbtSharp.NbtListElement
+NbtSharp.NbtElement.LongArray.get -> NbtSharp.NbtLongArrayElement
 NbtSharp.NbtElement.NbtElement() -> void
+NbtSharp.NbtElement.NbtElement(NbtSharp.NbtByteArrayElement value) -> void
+NbtSharp.NbtElement.NbtElement(NbtSharp.NbtCompoundElement value) -> void
+NbtSharp.NbtElement.NbtElement(NbtSharp.NbtIntArrayElement value) -> void
+NbtSharp.NbtElement.NbtElement(NbtSharp.NbtListElement value) -> void
+NbtSharp.NbtElement.NbtElement(NbtSharp.NbtLongArrayElement value) -> void
+NbtSharp.NbtElement.NbtElement(NbtSharp.NbtStringElement value) -> void
+NbtSharp.NbtElement.NbtElement(double value) -> void
+NbtSharp.NbtElement.NbtElement(float value) -> void
+NbtSharp.NbtElement.NbtElement(int value) -> void
+NbtSharp.NbtElement.NbtElement(long value) -> void
+NbtSharp.NbtElement.NbtElement(sbyte value) -> void
+NbtSharp.NbtElement.NbtElement(short value) -> void
+NbtSharp.NbtElement.SByte.get -> sbyte
+NbtSharp.NbtElement.Single.get -> float
+NbtSharp.NbtElement.String.get -> NbtSharp.NbtStringElement
 NbtSharp.NbtElement.TagType.get -> NbtSharp.NbtTagType
-NbtSharp.NbtElement.ToNbtValue() -> NbtSharp.NbtValue
-NbtSharp.NbtElement.TryGetMember(string! name, out NbtSharp.NbtElement value) -> bool
-NbtSharp.NbtElement.this[int index].get -> NbtSharp.NbtElement
+NbtSharp.NbtElement.Value.get -> object!
+NbtSharp.NbtIntArrayElement
+NbtSharp.NbtIntArrayElement.CopyTo(System.Span<int> destination) -> void
+NbtSharp.NbtIntArrayElement.Length.get -> int
+NbtSharp.NbtIntArrayElement.NbtIntArrayElement() -> void
+NbtSharp.NbtIntArrayElement.NbtIntArrayElement(System.ReadOnlyMemory<byte> raw) -> void
+NbtSharp.NbtIntArrayElement.RawMemory.get -> System.ReadOnlyMemory<byte>
+NbtSharp.NbtIntArrayElement.RawSpan.get -> System.ReadOnlySpan<byte>
+NbtSharp.NbtIntArrayElement.ToArray() -> int[]!
+NbtSharp.NbtLongArrayElement
+NbtSharp.NbtLongArrayElement.CopyTo(System.Span<long> destination) -> void
+NbtSharp.NbtLongArrayElement.Length.get -> int
+NbtSharp.NbtLongArrayElement.NbtLongArrayElement() -> void
+NbtSharp.NbtLongArrayElement.NbtLongArrayElement(System.ReadOnlyMemory<byte> raw) -> void
+NbtSharp.NbtLongArrayElement.RawMemory.get -> System.ReadOnlyMemory<byte>
+NbtSharp.NbtLongArrayElement.RawSpan.get -> System.ReadOnlySpan<byte>
+NbtSharp.NbtLongArrayElement.ToArray() -> long[]!
+NbtSharp.NbtStringElement
+NbtSharp.NbtStringElement.ByteLength.get -> int
+NbtSharp.NbtStringElement.GetString() -> string!
+NbtSharp.NbtStringElement.IsEmpty.get -> bool
+NbtSharp.NbtStringElement.NbtStringElement() -> void
+NbtSharp.NbtStringElement.NbtStringElement(System.ReadOnlyMemory<byte> raw, long bytePosition = 0) -> void
+NbtSharp.NbtStringElement.RawMemory.get -> System.ReadOnlyMemory<byte>
+NbtSharp.NbtStringElement.RawSpan.get -> System.ReadOnlySpan<byte>
+static NbtSharp.NbtElement.implicit operator NbtSharp.NbtElement(sbyte value) -> NbtSharp.NbtElement
+static NbtSharp.NbtElement.implicit operator NbtSharp.NbtElement(short value) -> NbtSharp.NbtElement
+static NbtSharp.NbtElement.implicit operator NbtSharp.NbtElement(int value) -> NbtSharp.NbtElement
+static NbtSharp.NbtElement.implicit operator NbtSharp.NbtElement(long value) -> NbtSharp.NbtElement
+static NbtSharp.NbtElement.implicit operator NbtSharp.NbtElement(float value) -> NbtSharp.NbtElement
+static NbtSharp.NbtElement.implicit operator NbtSharp.NbtElement(double value) -> NbtSharp.NbtElement
+static NbtSharp.NbtElement.implicit operator NbtSharp.NbtElement(NbtSharp.NbtStringElement value) -> NbtSharp.NbtElement
+static NbtSharp.NbtElement.implicit operator NbtSharp.NbtElement(NbtSharp.NbtByteArrayElement value) -> NbtSharp.NbtElement
+static NbtSharp.NbtElement.implicit operator NbtSharp.NbtElement(NbtSharp.NbtIntArrayElement value) -> NbtSharp.NbtElement
+static NbtSharp.NbtElement.implicit operator NbtSharp.NbtElement(NbtSharp.NbtLongArrayElement value) -> NbtSharp.NbtElement
+static NbtSharp.NbtElement.implicit operator NbtSharp.NbtElement(NbtSharp.NbtListElement value) -> NbtSharp.NbtElement
+static NbtSharp.NbtElement.implicit operator NbtSharp.NbtElement(NbtSharp.NbtCompoundElement value) -> NbtSharp.NbtElement
+NbtSharp.NbtCompoundElement
+NbtSharp.NbtCompoundElement.EnumerateMembers() -> NbtSharp.NbtCompoundElement.Enumerator
+NbtSharp.NbtCompoundElement.Enumerator
+NbtSharp.NbtCompoundElement.Enumerator.Current.get -> NbtSharp.NbtElement
+NbtSharp.NbtCompoundElement.Enumerator.Dispose() -> void
+NbtSharp.NbtCompoundElement.Enumerator.Enumerator() -> void
+NbtSharp.NbtCompoundElement.Enumerator.GetEnumerator() -> NbtSharp.NbtCompoundElement.Enumerator
+NbtSharp.NbtCompoundElement.Enumerator.MoveNext() -> bool
+NbtSharp.NbtCompoundElement.Enumerator.Name.get -> string!
+NbtSharp.NbtCompoundElement.Enumerator.Reset() -> void
+NbtSharp.NbtCompoundElement.GetEnumerator() -> NbtSharp.NbtCompoundElement.Enumerator
+NbtSharp.NbtCompoundElement.GetMember(string! name) -> NbtSharp.NbtElement
+NbtSharp.NbtCompoundElement.MemberCount.get -> int
+NbtSharp.NbtCompoundElement.NbtCompoundElement() -> void
+NbtSharp.NbtCompoundElement.TryGetMember(string! name, out NbtSharp.NbtElement value) -> bool
+NbtSharp.NbtListElement
+NbtSharp.NbtListElement.Count.get -> int
+NbtSharp.NbtListElement.ElementType.get -> NbtSharp.NbtTagType
+NbtSharp.NbtListElement.EnumerateElements() -> NbtSharp.NbtListElement.Enumerator
+NbtSharp.NbtListElement.Enumerator
+NbtSharp.NbtListElement.Enumerator.Current.get -> NbtSharp.NbtElement
+NbtSharp.NbtListElement.Enumerator.Dispose() -> void
+NbtSharp.NbtListElement.Enumerator.Enumerator() -> void
+NbtSharp.NbtListElement.Enumerator.GetEnumerator() -> NbtSharp.NbtListElement.Enumerator
+NbtSharp.NbtListElement.Enumerator.MoveNext() -> bool
+NbtSharp.NbtListElement.Enumerator.Reset() -> void
+NbtSharp.NbtListElement.GetElementAt(int index) -> NbtSharp.NbtElement
+NbtSharp.NbtListElement.GetEnumerator() -> NbtSharp.NbtListElement.Enumerator
+NbtSharp.NbtListElement.NbtListElement() -> void
+NbtSharp.NbtListElement.this[int index].get -> NbtSharp.NbtElement
+NbtSharp.NbtModifiedUtf8Encoding
+static readonly NbtSharp.NbtModifiedUtf8Encoding.Instance -> NbtSharp.NbtModifiedUtf8Encoding!
+override NbtSharp.NbtModifiedUtf8Encoding.GetByteCount(char[]! chars, int index, int count) -> int
+override NbtSharp.NbtModifiedUtf8Encoding.GetByteCount(System.ReadOnlySpan<char> chars) -> int
+override NbtSharp.NbtModifiedUtf8Encoding.GetBytes(char[]! chars, int charIndex, int charCount, byte[]! bytes, int byteIndex) -> int
+override NbtSharp.NbtModifiedUtf8Encoding.GetBytes(System.ReadOnlySpan<char> chars, System.Span<byte> bytes) -> int
+override NbtSharp.NbtModifiedUtf8Encoding.GetCharCount(byte[]! bytes, int index, int count) -> int
+override NbtSharp.NbtModifiedUtf8Encoding.GetCharCount(System.ReadOnlySpan<byte> bytes) -> int
+override NbtSharp.NbtModifiedUtf8Encoding.GetChars(byte[]! bytes, int byteIndex, int byteCount, char[]! chars, int charIndex) -> int
+override NbtSharp.NbtModifiedUtf8Encoding.GetChars(System.ReadOnlySpan<byte> bytes, System.Span<char> chars) -> int
+override NbtSharp.NbtModifiedUtf8Encoding.GetDecoder() -> System.Text.Decoder!
+override NbtSharp.NbtModifiedUtf8Encoding.GetEncoder() -> System.Text.Encoder!
+override NbtSharp.NbtModifiedUtf8Encoding.GetMaxByteCount(int charCount) -> int
+override NbtSharp.NbtModifiedUtf8Encoding.GetMaxCharCount(int byteCount) -> int
+override NbtSharp.NbtModifiedUtf8Encoding.GetString(byte[]! bytes) -> string!
+override NbtSharp.NbtModifiedUtf8Encoding.GetString(byte[]! bytes, int index, int count) -> string!
+static NbtSharp.NbtModifiedUtf8Encoding.Validate(System.ReadOnlySpan<byte> bytes, int offset = 0) -> void

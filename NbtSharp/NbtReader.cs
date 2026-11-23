@@ -55,7 +55,6 @@ public ref struct NbtReader
     private byte[]? _nameCopy;
     private long _nameBytePosition;
     private string? _nameCached;
-    private bool _nameNonCanonical;
 
     /// <summary>Initializes a reader over a contiguous span of NBT bytes.</summary>
     /// <param name="data">The complete NBT document.</param>
@@ -139,7 +138,8 @@ public ref struct NbtReader
     /// <para>
     /// The name is decoded lazily on the first access and cached until the reader advances, so
     /// members that are matched through <see cref="NameEquals(ReadOnlySpan{byte})"/> or skipped
-    /// never allocate a decoded name string. An empty name is returned as <see cref="string.Empty"/>.
+    /// never produce a decoded name string. An empty name is returned as
+    /// <see cref="string.Empty"/>.
     /// </para>
     /// <para>
     /// Because decoding is deferred, deep name validation failures (truncated or otherwise invalid
@@ -158,7 +158,7 @@ public ref struct NbtReader
                 return null;
             }
 
-            return _nameCached ??= ModifiedUtf8.Decode(_nameSpan, _nameBytePosition);
+            return _nameCached ??= NbtText.DecodeAt(_nameSpan, _nameBytePosition);
         }
     }
 
@@ -168,25 +168,21 @@ public ref struct NbtReader
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Names are compared by their decoded value; the byte comparison is a fast path that applies
-    /// only when the wire name is canonically encoded. Wire names that use a non-canonical
-    /// encoding (a raw 0x00 byte, or an overlong two- or three-byte form) fall back to decoding
-    /// both names and comparing the decoded strings ordinally, so they match the input bytes of
-    /// the equivalent canonical encoding.
+    /// Both names are decoded to char spans and compared ordinally, so any two encodings of the
+    /// same name match. Decoded names of at most 256 chars use stack buffers; longer names use
+    /// pooled buffers. No strings are allocated.
     /// </para>
     /// <para>
     /// The result is valid only while the reader is positioned on the current token and the input
     /// buffer is kept alive and unchanged. Input <paramref name="name"/> bytes that are not valid
-    /// modified UTF-8 throw <see cref="NbtException"/> when the decoded comparison is reached.
+    /// modified UTF-8 throw <see cref="NbtException"/>.
     /// </para>
     /// </remarks>
     /// <param name="name">The name bytes, encoded as Java modified UTF-8.</param>
     /// <returns>
-    /// <see langword="true"/> when the recorded name bytes match <paramref name="name"/> exactly,
-    /// or when the recorded name is non-canonically encoded and its decoded value equals the
-    /// decoded value of <paramref name="name"/>; the comparison is not symmetric in the encoding
-    /// of <paramref name="name"/>. <see langword="false"/> for list elements, container-end
-    /// tokens, unnamed roots, and different names.
+    /// <see langword="true"/> when the decoded name equals the decoded value of
+    /// <paramref name="name"/>; <see langword="false"/> for list elements, container-end tokens,
+    /// unnamed roots, and different names.
     /// </returns>
     public bool NameEquals(ReadOnlySpan<byte> name)
     {
@@ -195,21 +191,37 @@ public ref struct NbtReader
             return false;
         }
 
-        var recorded = _nameSpan;
-        if (recorded.SequenceEqual(name))
-        {
-            return true;
-        }
+        return NbtText.NameEquals(_nameSpan, name, _nameBytePosition);
+    }
 
-        if (!_nameNonCanonical)
+    /// <summary>
+    /// Compares the name of the current compound member or root tag with decoded name characters.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The wire name is decoded into a stack buffer when it is at most 256 chars, or a pooled
+    /// buffer otherwise, and compared with <paramref name="name"/> ordinally. No strings are
+    /// allocated.
+    /// </para>
+    /// <para>
+    /// The result is valid only while the reader is positioned on the current token and the input
+    /// buffer is kept alive and unchanged.
+    /// </para>
+    /// </remarks>
+    /// <param name="name">The decoded name.</param>
+    /// <returns>
+    /// <see langword="true"/> when the decoded wire name equals <paramref name="name"/>;
+    /// <see langword="false"/> for list elements, container-end tokens, unnamed roots, and
+    /// different names.
+    /// </returns>
+    public bool NameEquals(ReadOnlySpan<char> name)
+    {
+        if (!_hasName)
         {
             return false;
         }
 
-        return string.Equals(
-            ModifiedUtf8.Decode(recorded, _nameBytePosition),
-            ModifiedUtf8.Decode(name, _nameBytePosition),
-            StringComparison.Ordinal);
+        return NbtText.NameEquals(_nameSpan, name, _nameBytePosition);
     }
 
     /// <summary>Gets the number of bytes consumed from the start of the document.</summary>
@@ -719,7 +731,6 @@ public ref struct NbtReader
         _hasName = false;
         _nameSpan = default;
         _nameCached = null;
-        _nameNonCanonical = false;
     }
 
     private NbtTagType ReadTagType()
@@ -916,7 +927,7 @@ public ref struct NbtReader
         if (_span.Length >= length)
         {
             var bytes = _span[..length];
-            var value = ModifiedUtf8.Decode(bytes, position);
+            var value = NbtText.DecodeAt(bytes, position);
             _span = _span[length..];
             BytesConsumed += length;
             return value;
@@ -925,7 +936,7 @@ public ref struct NbtReader
 
         var buffer = new byte[length];
         ReadExactly(buffer);
-        return ModifiedUtf8.Decode(buffer, position);
+        return NbtText.DecodeAt(buffer, position);
     }
 
     // Reads a compound member or root name without decoding it. The recorded bytes are addressed
@@ -941,7 +952,6 @@ public ref struct NbtReader
         _hasName = false;
         _nameSpan = default;
         _nameCached = null;
-        _nameNonCanonical = false;
         _nameBytePosition = BytesConsumed;
         var length = ReadUInt16();
         if (length == 0)
@@ -954,7 +964,7 @@ public ref struct NbtReader
         if (_stream is null && _span.Length >= length)
         {
             var bytes = _span[..length];
-            ModifiedUtf8.Scan(bytes, _nameBytePosition, out _nameNonCanonical);
+            NbtText.ValidateName(bytes, _nameBytePosition);
             _nameSpan = bytes;
             _span = _span[length..];
             BytesConsumed += length;
@@ -970,7 +980,7 @@ public ref struct NbtReader
 
         var destination = _nameCopy.AsSpan(0, length);
         ReadExactly(destination);
-        ModifiedUtf8.Scan(destination, _nameBytePosition, out _nameNonCanonical);
+        NbtText.ValidateName(destination, _nameBytePosition);
         _nameSpan = destination;
         _hasName = true;
     }

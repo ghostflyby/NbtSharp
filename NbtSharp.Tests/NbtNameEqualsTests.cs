@@ -41,7 +41,8 @@ public sealed class NbtNameEqualsTests
 
         Assert.True(reader.Read()); // the empty-named member
         Assert.Equal(string.Empty, reader.Name);
-        Assert.True(reader.NameEquals([]));
+        Assert.True(reader.NameEquals(ReadOnlySpan<byte>.Empty));
+        Assert.True(reader.NameEquals(ReadOnlySpan<char>.Empty));
         Assert.False(reader.NameEquals("x"u8));
     }
 
@@ -68,7 +69,7 @@ public sealed class NbtNameEqualsTests
 
         Assert.True(reader.Read()); // EndCompound
         Assert.False(reader.NameEquals("root"u8));
-        Assert.False(reader.NameEquals([]));
+        Assert.False(reader.NameEquals(ReadOnlySpan<byte>.Empty));
         Assert.False(reader.Read());
     }
 
@@ -105,13 +106,13 @@ public sealed class NbtNameEqualsTests
     }
 
     [Theory]
-    [InlineData(new byte[] { 0x00 }, new byte[] { 0xC0, 0x80 })] // wire raw null vs canonical input
-    [InlineData(new byte[] { 0xC0, 0x80 }, new byte[] { 0xC0, 0x80 })] // byte fast path
-    [InlineData(new byte[] { 0xC0, 0x80 }, new byte[] { 0x00 })] // wire two-byte null vs raw null input
+    [InlineData(new byte[] { 0x00 }, new byte[] { 0xC0, 0x80 })] // raw null vs two-byte null
+    [InlineData(new byte[] { 0xC0, 0x80 }, new byte[] { 0xC0, 0x80 })] // identical bytes
+    [InlineData(new byte[] { 0xC0, 0x80 }, new byte[] { 0x00 })] // two-byte null vs raw null
     [InlineData(new byte[] { 0xE0, 0x81, 0x81 }, new byte[] { 0x41 })] // overlong three-byte vs 'A'
     [InlineData(new byte[] { 0xC1, 0x81 }, new byte[] { 0x41 })] // overlong two-byte vs 'A'
-    [InlineData(new byte[] { 0xE0, 0x81, 0x81 }, new byte[] { 0xC1, 0x81 })] // both non-canonical
-    public void NonCanonicalWireNamesMatchByDecodedValue(byte[] wireName, byte[] inputName)
+    [InlineData(new byte[] { 0xE0, 0x81, 0x81 }, new byte[] { 0xC1, 0x81 })] // two overlong forms of 'A'
+    public void WireNamesMatchByDecodedValue(byte[] wireName, byte[] inputName)
     {
         var data = BuildDocument(wireName);
         var reader = new NbtReader(data);
@@ -125,7 +126,7 @@ public sealed class NbtNameEqualsTests
     [InlineData(new byte[] { 0xC0, 0x80 })]
     [InlineData(new byte[] { 0xE0, 0x81, 0x81 })]
     [InlineData(new byte[] { 0xC1, 0x81 })]
-    public void NonCanonicalWireNamesDontMatchADifferentName(byte[] wireName)
+    public void WireNamesDontMatchADifferentName(byte[] wireName)
     {
         var data = BuildDocument(wireName);
         var reader = new NbtReader(data);
@@ -135,35 +136,43 @@ public sealed class NbtNameEqualsTests
     }
 
     [Fact]
-    public void CanonicalWireNamesDoNotDecodeOnMismatch()
+    public void InvalidWireNamesThrowOnComparison()
     {
-        // E1 followed by an ASCII byte is a truncated multi-byte sequence; it carries no
-        // non-canonical marker, so a mismatching comparison must return false without decoding
-        // (decoding would throw).
+        // E1 followed by an ASCII byte is a truncated multi-byte sequence; comparing decodes the
+        // name and throws.
         var data = BuildDocument(new byte[] { 0xE1, 0x42 });
         var reader = new NbtReader(data);
         Assert.True(reader.Read());
         Assert.True(reader.Read());
-        Assert.False(reader.NameEquals("A"u8));
+        NbtException? thrown = null;
+        try
+        {
+            _ = reader.NameEquals("A"u8);
+        }
+        catch (NbtException exception)
+        {
+            thrown = exception;
+        }
+
+        Assert.NotNull(thrown);
+        reader.Dispose();
     }
 
     [Fact]
-    public void CanonicalWireNamesDoNotFallBackForNonCanonicalInput()
+    public void WireNamesMatchByDecodedValueRegardlessOfInputEncoding()
     {
-        // The decoded fallback is keyed on the wire name's encoding: a canonical wire name that
-        // mismatches simply returns false, even when the input would decode to the same value.
         var data = BuildDocument(new byte[] { 0x41 });
         var reader = new NbtReader(data);
         Assert.True(reader.Read());
         Assert.True(reader.Read());
-        Assert.False(reader.NameEquals(new byte[] { 0xE0, 0x81, 0x81 }));
-        Assert.False(reader.NameEquals(new byte[] { 0x00 }));
+        Assert.True(reader.NameEquals(new byte[] { 0xE0, 0x81, 0x81 })); // overlong 'A'
+        Assert.False(reader.NameEquals(new byte[] { 0x00 })); // U+0000
     }
 
     [Fact]
-    public void InvalidInputNameBytesThrowOnTheDecodedComparison()
+    public void InvalidInputNameBytesThrow()
     {
-        var data = BuildDocument(new byte[] { 0x00, 0x41 }); // wire raw "\0A" is non-canonical
+        var data = BuildDocument(new byte[] { 0x00, 0x41 }); // wire raw "\0A"
         var reader = new NbtReader(data);
         Assert.True(reader.Read());
         Assert.True(reader.Read());
@@ -325,10 +334,9 @@ public sealed class NbtNameEqualsTests
     }
 
     [Fact]
-    public void TruncatedNameSequenceThrowsOnTheDecodedComparison()
+    public void TruncatedNameSequenceThrowsOnComparison()
     {
-        // The same truncated wire name is non-canonical (overlong three-byte lead), so the
-        // NameEquals fallback decodes it and throws.
+        // Comparing decodes the truncated wire name and throws.
         var data = new byte[]
         {
             0x0A, 0x00, 0x04, (byte)'r', (byte)'o', (byte)'o', (byte)'t',
@@ -377,8 +385,11 @@ public sealed class NbtNameEqualsTests
         Assert.True(reader.Read());
         Assert.Equal(NbtTokenType.StartCompound, reader.TokenType);
         Assert.True(reader.NameEquals("root"u8));
+        Assert.True(reader.NameEquals("root".AsSpan()));
         Assert.False(reader.NameEquals("roo"u8));
         Assert.False(reader.NameEquals("roots"u8));
+        Assert.False(reader.NameEquals("roo".AsSpan()));
+        Assert.False(reader.NameEquals("roots".AsSpan()));
 
         foreach (var name in NameMatrix)
         {
@@ -386,11 +397,13 @@ public sealed class NbtNameEqualsTests
             Assert.Equal(NbtTokenType.Value, reader.TokenType);
             var encoded = Encode(name);
             Assert.True(reader.NameEquals(encoded), name);
+            Assert.True(reader.NameEquals(name.AsSpan()), name);
             foreach (var other in NameMatrix)
             {
                 if (!ReferenceEquals(other, name))
                 {
                     Assert.False(reader.NameEquals(Encode(other)), $"{name} vs {other}");
+                    Assert.False(reader.NameEquals(other.AsSpan()), $"{name} vs {other}");
                 }
             }
 
@@ -401,6 +414,7 @@ public sealed class NbtNameEqualsTests
         Assert.True(reader.Read());
         Assert.Equal(NbtTokenType.EndCompound, reader.TokenType);
         Assert.False(reader.NameEquals("root"u8));
+        Assert.False(reader.NameEquals("root".AsSpan()));
         Assert.False(reader.Read());
         reader.Dispose();
     }

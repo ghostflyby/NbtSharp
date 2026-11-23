@@ -319,11 +319,13 @@ element has the declared type and that exactly the declared number of elements w
 allocation-free path and is used by the built-in string converter.
 
 Names can also travel as bytes. `NbtReader.NameEquals(ReadOnlySpan<byte>)` compares the current name
-against pre-encoded modified UTF-8 bytes without decoding it (`Name` itself is decoded lazily and
-cached per token), and the writer accepts pre-encoded names — `WriteInt32(ReadOnlySpan<byte>, int)`
-and the other scalar overloads, plus `WriteMemberHeader(NbtTagType, ReadOnlySpan<byte>)` — producing
-byte-identical output to the string overloads. Names are compared by decoded value, so
-non-canonically encoded wire names still match their canonical equivalents. The byte-name write
+against pre-encoded modified UTF-8 bytes, and the writer accepts pre-encoded names —
+`WriteInt32(ReadOnlySpan<byte>, int)` and the other scalar overloads, plus
+`WriteMemberHeader(NbtTagType, ReadOnlySpan<byte>)` — producing byte-identical output to the string
+overloads. Names are compared by decoded value, so any two valid encodings of the same name match; a
+`ReadOnlySpan<char>` overload compares against an already-decoded name. Comparisons decode into
+stack buffers for names of at most 256 chars and pooled buffers for longer names, so no strings are
+allocated. `Name` itself is decoded lazily and cached per token. The byte-name write
 overloads do not validate the name content as modified UTF-8; they can emit names the reader will
 reject, and validity is the caller's responsibility.
 
@@ -338,10 +340,10 @@ pooled buffers, so the recommended shape is `using`:
 ```csharp
 using var document = NbtDocument.Parse(data);
 
-int health = document.RootElement.GetMember("Health").GetInt32();
-foreach (var element in document.RootElement.GetMember("Numbers").EnumerateElements())
+int health = document.RootElement.Compound.GetMember("Health").Int32;
+foreach (var element in document.RootElement.Compound.GetMember("Numbers").List)
 {
-    Console.WriteLine(element.GetInt32());
+    Console.WriteLine(element.Int32);
 }
 ```
 
@@ -365,10 +367,11 @@ Access costs are deterministic: `MemberCount`/`ElementCount`/`ElementType` are O
 element enumeration follows wire order; `GetElementAt` is O(1) on lists of scalars, strings, and
 arrays, and O(index) on lists of compounds or nested lists; `GetMember`/`TryGetMember` walk the
 members, with duplicated names resolving to the last occurrence. Typed getters can be called
-repeatedly — unlike the reader, they do not consume anything. `Name` and `GetString` decode
-modified UTF-8 on every access (invalid payload bytes throw at that point, not at parse time);
-`NameEquals(ReadOnlySpan<byte>)` compares encoded bytes on the fast path. `ToNbtValue()`
-materializes an element into the boxed `NbtValue` DOM when you need writable data.
+repeatedly — unlike the reader, they do not consume anything. `GetMember`/`TryGetMember` compare
+names by decoded value, decoding wire names into stack buffers or pooled buffers for long names;
+`NbtStringElement.GetString` decodes the payload on every access, and invalid bytes throw at that
+point rather than at parse time. Lists, compounds, strings, and arrays are zero-allocation views
+over the slot index; `ToArray` and `GetString` materialize only when called.
 
 ## Converters
 

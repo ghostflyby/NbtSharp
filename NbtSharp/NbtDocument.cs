@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Buffers.Binary;
 
 namespace NbtSharp;
 
@@ -30,9 +31,8 @@ public sealed class NbtDocument : IDisposable
     private ReadOnlyMemory<byte> _data;
     private byte[]? _leasedBuffer;
     private NbtDocumentSlot[]? _slots;
-    private int _rootSlot;
+    private readonly int _rootSlot;
     private int _state;
-    private string? _rootName;
 
     private NbtDocument(
         ReadOnlyMemory<byte> data,
@@ -283,7 +283,7 @@ public sealed class NbtDocument : IDisposable
         get
         {
             ThrowIfDisposed();
-            return new NbtElement(this, _rootSlot);
+            return Translate(_rootSlot);
         }
     }
 
@@ -311,7 +311,7 @@ public sealed class NbtDocument : IDisposable
                 return null;
             }
 
-            return _rootName ??= ModifiedUtf8.Decode(
+            return field ??= NbtText.DecodeAt(
                 _data.Span.Slice(root.NameOffset, root.NameLength),
                 // Report decoding errors at the name's length prefix, like NbtReader.
                 root.NameOffset - sizeof(ushort));
@@ -358,15 +358,57 @@ public sealed class NbtDocument : IDisposable
         return ref _slots![index];
     }
 
-    internal NbtElement CreateElement(int slotIndex) => new(this, slotIndex);
+    internal NbtElement CreateElement(int slotIndex) => Translate(slotIndex);
+
+    /// <summary>Decodes the recorded wire name of a slot.</summary>
+    /// <param name="slotIndex">The slot index.</param>
+    /// <returns>The decoded name.</returns>
+    internal string NameAt(int slotIndex)
+    {
+        ref readonly var slot = ref GetSlot(slotIndex);
+        return NbtText.DecodeAt(
+            _data.Span.Slice(slot.NameOffset, slot.NameLength),
+            slot.NameOffset - sizeof(ushort));
+    }
 
     internal void ThrowIfDisposed()
     {
-        if (_state != StateAlive)
-        {
-            throw new ObjectDisposedException(nameof(NbtDocument));
-        }
+        if (_state == StateAlive) return;
+        throw new ObjectDisposedException(nameof(NbtDocument));
     }
+
+    private NbtElement Translate(int slotIndex)
+    {
+        ref readonly var slot = ref GetSlot(slotIndex);
+        return slot.TagType switch
+        {
+            NbtTagType.Byte => (sbyte)_data.Span[slot.PayloadOffset],
+            NbtTagType.Short => BinaryPrimitives.ReadInt16BigEndian(
+                _data.Span.Slice(slot.PayloadOffset, sizeof(short))),
+            NbtTagType.Int => BinaryPrimitives.ReadInt32BigEndian(
+                _data.Span.Slice(slot.PayloadOffset, sizeof(int))),
+            NbtTagType.Long => BinaryPrimitives.ReadInt64BigEndian(
+                _data.Span.Slice(slot.PayloadOffset, sizeof(long))),
+            NbtTagType.Float => BinaryPrimitives.ReadSingleBigEndian(
+                _data.Span.Slice(slot.PayloadOffset, sizeof(float))),
+            NbtTagType.Double => BinaryPrimitives.ReadDoubleBigEndian(
+                _data.Span.Slice(slot.PayloadOffset, sizeof(double))),
+            NbtTagType.String => new NbtElement(
+                new NbtStringElement(StringPayload(in slot), slot.PayloadOffset, this)),
+            NbtTagType.ByteArray => new NbtElement(new NbtByteArrayElement(ArrayPayload(in slot), this)),
+            NbtTagType.IntArray => new NbtElement(new NbtIntArrayElement(ArrayPayload(in slot), this)),
+            NbtTagType.LongArray => new NbtElement(new NbtLongArrayElement(ArrayPayload(in slot), this)),
+            NbtTagType.List => new NbtElement(new NbtListElement(this, slotIndex)),
+            NbtTagType.Compound => new NbtElement(new NbtCompoundElement(this, slotIndex)),
+            _ => throw new NbtException("Unexpected TAG_End value."),
+        };
+    }
+
+    private ReadOnlyMemory<byte> StringPayload(ref readonly NbtDocumentSlot slot) =>
+        _data.Slice(slot.PayloadOffset + sizeof(ushort), slot.PayloadLength - sizeof(ushort));
+
+    private ReadOnlyMemory<byte> ArrayPayload(ref readonly NbtDocumentSlot slot) =>
+        _data.Slice(slot.PayloadOffset + sizeof(int), slot.PayloadLength - sizeof(int));
 
     private static NbtException CreateMaxDocumentLengthException() =>
         new(

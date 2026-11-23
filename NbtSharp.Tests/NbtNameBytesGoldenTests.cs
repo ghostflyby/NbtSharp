@@ -2,20 +2,20 @@ using System.Buffers;
 
 namespace NbtSharp.Tests;
 
-[NbtSerializable(typeof(NonCanonicalNamesDto))]
-internal partial class NonCanonicalNameContext : NbtSerializerContext
+[NbtSerializable(typeof(AlternateNameBytesDto))]
+internal partial class AlternateNameBytesContext : NbtSerializerContext
 {
-    public NonCanonicalNameContext()
+    public AlternateNameBytesContext()
     {
     }
 
-    public NonCanonicalNameContext(NbtSerializerOptions options)
+    public AlternateNameBytesContext(NbtSerializerOptions options)
         : base(options)
     {
     }
 }
 
-internal sealed class NonCanonicalNamesDto
+internal sealed class AlternateNameBytesDto
 {
     [NbtPropertyName("\0A")]
     public int NullPrefixed { get; set; }
@@ -30,36 +30,36 @@ internal sealed class NonCanonicalNamesDto
 public sealed class NbtNameBytesGoldenTests
 {
     [Fact]
-    public void NonCanonicalNamesBindOnTheGeneratedFastPath()
+    public void AlternateNameBytesBindOnTheGeneratedFastPath()
     {
         var actual = NbtSerializer.Deserialize(
-            BuildNonCanonicalDocument(),
-            NonCanonicalNameContext.Default.NonCanonicalNamesDto);
+            BuildAlternateNameBytesDocument(),
+            AlternateNameBytesContext.Default.AlternateNameBytesDto);
 
         AssertDto(actual);
     }
 
     [Fact]
-    public void NonCanonicalNamesBindOnTheGeneratedSlowPath()
+    public void AlternateNameBytesBindOnTheGeneratedSlowPath()
     {
         var options = new NbtSerializerOptions();
         options.Converters.Add(new MarkerConverter());
-        var context = new NonCanonicalNameContext(options);
+        var context = new AlternateNameBytesContext(options);
 
-        var actual = NbtSerializer.Deserialize(BuildNonCanonicalDocument(), context.NonCanonicalNamesDto);
+        var actual = NbtSerializer.Deserialize(BuildAlternateNameBytesDocument(), context.AlternateNameBytesDto);
 
         AssertDto(actual);
     }
 
     [Fact]
-    public void NonCanonicalNamesBindThroughReflection()
+    public void AlternateNameBytesBindThroughReflection()
     {
         var options = new NbtSerializerOptions
         {
             TypeInfoResolver = new NbtReflectionTypeInfoResolver(),
         };
 
-        var actual = NbtSerializer.Deserialize<NonCanonicalNamesDto>(BuildNonCanonicalDocument(), options);
+        var actual = NbtSerializer.Deserialize<AlternateNameBytesDto>(BuildAlternateNameBytesDocument(), options);
 
         AssertDto(actual);
     }
@@ -67,10 +67,10 @@ public sealed class NbtNameBytesGoldenTests
     [Fact]
     public void GeneratedFastPathOutputMatchesReflectionByteForByte()
     {
-        var value = new NonCanonicalNamesDto { NullPrefixed = 1, Overlong = 2, Weird = "\0é\U0001F600" };
+        var value = new AlternateNameBytesDto { NullPrefixed = 1, Overlong = 2, Weird = "\0é\U0001F600" };
         var generated = NbtSerializer.Serialize(
             value,
-            NonCanonicalNameContext.Default.NonCanonicalNamesDto,
+            AlternateNameBytesContext.Default.AlternateNameBytesDto,
             "root");
         var reflectionOptions = new NbtSerializerOptions
         {
@@ -80,23 +80,23 @@ public sealed class NbtNameBytesGoldenTests
 
         Assert.Equal(reflected, generated);
 
-        var roundTripped = NbtSerializer.Deserialize(generated, NonCanonicalNameContext.Default.NonCanonicalNamesDto);
+        var roundTripped = NbtSerializer.Deserialize(generated, AlternateNameBytesContext.Default.AlternateNameBytesDto);
         Assert.Equal(value.NullPrefixed, roundTripped.NullPrefixed);
         Assert.Equal(value.Overlong, roundTripped.Overlong);
         Assert.Equal(value.Weird, roundTripped.Weird);
     }
 
-    private static void AssertDto(NonCanonicalNamesDto actual)
+    private static void AssertDto(AlternateNameBytesDto actual)
     {
         Assert.Equal(7, actual.NullPrefixed);
         Assert.Equal(11, actual.Overlong);
         Assert.Equal("bound", actual.Weird);
     }
 
-    // A compound whose member names use non-canonical modified UTF-8 encodings: a raw 0x00 for
+    // A compound whose member names use alternate modified UTF-8 encodings: a raw 0x00 for
     // "\0A", the overlong three-byte form of "A", and a raw 0x00 prefix on "\0a\U0001F600z". Each
-    // must bind to the DTO member whose declared name is the canonical encoding of the same value.
-    private static byte[] BuildNonCanonicalDocument()
+    // must bind to the DTO member whose declared name has the same decoded value.
+    private static byte[] BuildAlternateNameBytesDocument()
     {
         var buffer = new ArrayBufferWriter<byte>();
         var writer = new NbtWriter(buffer);

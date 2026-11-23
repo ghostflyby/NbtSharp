@@ -1,10 +1,42 @@
 using System.Buffers;
+using System.Buffers.Binary;
 using System.Collections;
 
 namespace NbtSharp.Tests;
 
 public sealed class NbtDocumentTests
 {
+    private static readonly NbtReaderOptions UnnamedOptions = new()
+    {
+        RootFormat = NbtRootFormat.Unnamed,
+    };
+
+    private static readonly NbtTagType[] AllTags =
+    [
+        NbtTagType.Byte,
+        NbtTagType.Short,
+        NbtTagType.Int,
+        NbtTagType.Long,
+        NbtTagType.Float,
+        NbtTagType.Double,
+        NbtTagType.ByteArray,
+        NbtTagType.String,
+        NbtTagType.List,
+        NbtTagType.Compound,
+        NbtTagType.IntArray,
+        NbtTagType.LongArray,
+    ];
+
+    private static readonly byte[] SampleDocument = BuildSampleDocument();
+
+    public static IEnumerable<object[]> CasePropertyPairs =>
+        AllTags.SelectMany(actual => AllTags.Select(property => new object[] { actual, property }));
+
+    public static IEnumerable<object[]> TruncationLengths =>
+        Enumerable.Range(0, SampleDocument.Length).Select(length => new object[] { length });
+
+    private delegate void RootWriter(ref NbtWriter writer);
+
     // --------------------------------------------------------------------------------------------
     // Parse overloads and the root surface
     // --------------------------------------------------------------------------------------------
@@ -13,10 +45,11 @@ public sealed class NbtDocumentTests
     public void ParsesFromMemory()
     {
         var data = BuildSampleDocument();
-        using var document = NbtDocument.Parse(data);
+        using var document = NbtDocument.Parse(data.AsMemory());
 
         Assert.Equal("root", document.RootName);
         Assert.Equal(NbtTagType.Compound, document.RootElement.TagType);
+        Assert.Equal(20, document.RootElement.Compound.GetMember("Health").Int32);
     }
 
     [Fact]
@@ -25,8 +58,10 @@ public sealed class NbtDocumentTests
         var data = BuildSampleDocument();
         using var document = NbtDocument.Parse(data);
 
-        Assert.Equal(20, document.RootElement.GetMember("Health").GetInt32());
-        Assert.Equal("a long string value", document.RootElement.GetMember("Name").GetString());
+        var root = document.RootElement.Compound;
+        Assert.True(root.TryGetMember("Health", out var health));
+        Assert.Equal(20, health.Int32);
+        Assert.Equal("a long string value", root.GetMember("Name").String.GetString());
     }
 
     [Fact]
@@ -37,7 +72,7 @@ public sealed class NbtDocumentTests
 
         using var document = NbtDocument.Parse(sequence);
 
-        Assert.Equal(20, document.RootElement.GetMember("Health").GetInt32());
+        Assert.Equal(20, document.RootElement.Compound.GetMember("Health").Int32);
     }
 
     [Theory]
@@ -53,13 +88,11 @@ public sealed class NbtDocumentTests
 
         using var document = NbtDocument.Parse(sequence);
 
-        var root = document.RootElement;
-        Assert.Equal(20, root.GetMember("Health").GetInt32());
-        Assert.Equal(-3.5, root.GetMember("Temperature").GetDouble());
-        Assert.Equal("a long string value", root.GetMember("Name").GetString());
-        Assert.Equal(
-            [1, 2, 3],
-            root.GetMember("Numbers").EnumerateElements().Select(element => element.GetInt32()).ToArray());
+        var root = document.RootElement.Compound;
+        Assert.Equal(20, RequireMember(root, "Health").Int32);
+        Assert.Equal(-3.5, RequireMember(root, "Temperature").Double);
+        Assert.Equal("a long string value", RequireMember(root, "Name").String.GetString());
+        Assert.Equal([1, 2, 3], ReadIntElements(RequireMember(root, "Numbers").List));
     }
 
     [Fact]
@@ -69,17 +102,21 @@ public sealed class NbtDocumentTests
 
         using var document = NbtDocument.Parse(stream);
 
-        Assert.Equal(20, document.RootElement.GetMember("Health").GetInt32());
+        Assert.Equal(20, document.RootElement.Compound.GetMember("Health").Int32);
     }
 
     [Fact]
     public void EmptyInputsAreTruncatedAtParse()
     {
-        Assert.Throws<NbtException>(() => NbtDocument.Parse(ReadOnlyMemory<byte>.Empty));
-        Assert.Throws<NbtException>(() =>
-            NbtDocument.Parse(ReadOnlySequence<byte>.Empty));
+        var memoryException = Assert.Throws<NbtException>(() => NbtDocument.Parse(ReadOnlyMemory<byte>.Empty));
+        Assert.True(memoryException.IsTruncated);
+
+        var sequenceException = Assert.Throws<NbtException>(() => NbtDocument.Parse(ReadOnlySequence<byte>.Empty));
+        Assert.True(sequenceException.IsTruncated);
+
         using var stream = new MemoryStream();
-        Assert.Throws<NbtException>(() => NbtDocument.Parse(stream));
+        var streamException = Assert.Throws<NbtException>(() => NbtDocument.Parse(stream));
+        Assert.True(streamException.IsTruncated);
     }
 
     [Fact]
@@ -87,97 +124,324 @@ public sealed class NbtDocumentTests
     {
         using var named = NbtDocument.Parse(BuildSampleDocument());
         using var emptyNamed = NbtDocument.Parse(BuildEmptyNamedRoot());
-        using var unnamed = NbtDocument.Parse(
-            BuildUnnamedDocument(),
-            new NbtReaderOptions { RootFormat = NbtRootFormat.Unnamed });
+        using var unnamed = NbtDocument.Parse(BuildUnnamedDocument(), UnnamedOptions);
 
         Assert.Equal("root", named.RootName);
         Assert.Equal(string.Empty, emptyNamed.RootName);
         Assert.Null(unnamed.RootName);
-        Assert.Equal(string.Empty, emptyNamed.RootElement.Name);
-        Assert.Null(unnamed.RootElement.Name);
+        Assert.Equal(NbtTagType.Compound, emptyNamed.RootElement.TagType);
+        Assert.Equal(NbtTagType.Compound, unnamed.RootElement.TagType);
+        Assert.Equal(7, unnamed.RootElement.Compound.GetMember("Value").Int32);
     }
 
     [Fact]
-    public void RootElementNameMatchesTheReaderRootTokenName()
+    public void RootNameIsDecodedOnceAndCached()
     {
-        var data = BuildSampleDocument();
-        using var document = NbtDocument.Parse(data);
+        using var document = NbtDocument.Parse(BuildSampleDocument());
 
-        Assert.Equal(document.RootName, document.RootElement.Name);
+        var first = document.RootName;
+        var second = document.RootName;
+
+        Assert.Equal("root", first);
+        Assert.Same(first, second);
     }
 
     // --------------------------------------------------------------------------------------------
-    // Scalar and array getters
+    // Root element cases
     // --------------------------------------------------------------------------------------------
 
     [Fact]
-    public void ReadsAllTwelveTagTypes()
+    public void NumericRootsExposeTheirInlineCase()
     {
-        var data = BuildAllTagsDocument();
-        using var document = NbtDocument.Parse(data);
-        var root = document.RootElement;
+        using var byteDocument = ParseUnnamedRootDocument(
+            static (ref writer) => writer.WriteSByte("ignored", -5),
+            out var byteRoot);
+        Assert.Equal(NbtTagType.Byte, byteRoot.TagType);
+        Assert.Equal(-5, byteRoot.SByte);
 
-        Assert.Equal(-5, root.GetMember("Byte").GetSByte());
-        Assert.Equal((short)12345, root.GetMember("Short").GetInt16());
-        Assert.Equal(-123456789, root.GetMember("Int").GetInt32());
-        Assert.Equal(1234567890123L, root.GetMember("Long").GetInt64());
-        Assert.Equal(0.5f, root.GetMember("Float").GetSingle());
-        Assert.Equal(-0.25, root.GetMember("Double").GetDouble());
-        Assert.Equal(new byte[] { 1, 2, 3 }, root.GetMember("ByteArray").GetByteArray());
-        Assert.Equal(new sbyte[] { 1, 2, 3 }, root.GetMember("ByteArray").GetSByteArray());
-        Assert.Equal("中文 \0 x", root.GetMember("String").GetString());
-        Assert.Equal(new[] { int.MinValue, -1, int.MaxValue }, root.GetMember("IntArray").GetInt32Array());
-        Assert.Equal(new[] { long.MinValue, long.MaxValue }, root.GetMember("LongArray").GetInt64Array());
-        Assert.Equal(NbtTagType.List, root.GetMember("List").TagType);
-        Assert.Equal(NbtTagType.Compound, root.GetMember("Compound").TagType);
+        using var shortDocument = ParseUnnamedRootDocument(
+            static (ref writer) => writer.WriteInt16("ignored", 12345),
+            out var shortRoot);
+        Assert.Equal(NbtTagType.Short, shortRoot.TagType);
+        Assert.Equal((short)12345, shortRoot.Int16);
+
+        using var intDocument = ParseUnnamedRootDocument(
+            static (ref writer) => writer.WriteInt32("ignored", -123456789),
+            out var intRoot);
+        Assert.Equal(NbtTagType.Int, intRoot.TagType);
+        Assert.Equal(-123456789, intRoot.Int32);
+
+        using var longDocument = ParseUnnamedRootDocument(
+            static (ref writer) => writer.WriteInt64("ignored", 1234567890123L),
+            out var longRoot);
+        Assert.Equal(NbtTagType.Long, longRoot.TagType);
+        Assert.Equal(1234567890123L, longRoot.Int64);
+
+        using var floatDocument = ParseUnnamedRootDocument(
+            static (ref writer) => writer.WriteSingle("ignored", 0.5f),
+            out var floatRoot);
+        Assert.Equal(NbtTagType.Float, floatRoot.TagType);
+        Assert.Equal(0.5f, floatRoot.Single);
+
+        using var doubleDocument = ParseUnnamedRootDocument(
+            static (ref writer) => writer.WriteDouble("ignored", -0.25),
+            out var doubleRoot);
+        Assert.Equal(NbtTagType.Double, doubleRoot.TagType);
+        Assert.Equal(-0.25, doubleRoot.Double);
     }
 
     [Fact]
-    public void TypeMismatchReportsExpectedActualAndPosition()
+    public void StringRootExposesTheEncodedView()
     {
-        var data = BuildSampleDocument();
-        using var document = NbtDocument.Parse(data);
-        var health = document.RootElement.GetMember("Health");
+        using var document = ParseUnnamedRootDocument(
+            static (ref writer) => writer.WriteString("ignored", "中文 \0 x"),
+            out var root);
 
-        var exception = Assert.Throws<NbtException>(() => health.GetString());
-        Assert.Equal(NbtTagType.String, exception.ExpectedTagType);
+        Assert.Equal(NbtTagType.String, root.TagType);
+        var view = root.String;
+        Assert.False(view.IsEmpty);
+        Assert.Equal("中文 \0 x", view.GetString());
+        Assert.Equal(11, view.ByteLength);
+        Assert.Equal(view.ByteLength, view.RawSpan.Length);
+        Assert.Equal(view.ByteLength, view.RawMemory.Length);
+        Assert.Equal(view.RawSpan.ToArray(), view.RawMemory.ToArray());
+    }
+
+    [Fact]
+    public void ArrayRootsExposeZeroCopyViews()
+    {
+        using var byteDocument = ParseUnnamedRootDocument(
+            static (ref writer) => writer.WriteByteArray("ignored", [1, 2, 3]),
+            out var byteRoot);
+        Assert.Equal(NbtTagType.ByteArray, byteRoot.TagType);
+        var byteArray = byteRoot.ByteArray;
+        Assert.Equal(3, byteArray.Length);
+        Assert.Equal([1, 2, 3], byteArray.ToArray());
+        Assert.Equal([1, 2, 3], byteArray.Memory.ToArray());
+
+        using var intDocument = ParseUnnamedRootDocument(
+            static (ref writer) => writer.WriteInt32Array("ignored", [1, -2, 3]),
+            out var intRoot);
+        Assert.Equal(NbtTagType.IntArray, intRoot.TagType);
+        var intArray = intRoot.IntArray;
+        Assert.Equal(3, intArray.Length);
+        Assert.Equal([1, -2, 3], intArray.ToArray());
+        Assert.Equal(intArray.Length * sizeof(int), intArray.RawSpan.Length);
+
+        using var longDocument = ParseUnnamedRootDocument(
+            static (ref writer) => writer.WriteInt64Array("ignored", [1L, -2L]),
+            out var longRoot);
+        Assert.Equal(NbtTagType.LongArray, longRoot.TagType);
+        var longArray = longRoot.LongArray;
+        Assert.Equal(2, longArray.Length);
+        Assert.Equal([1L, -2L], longArray.ToArray());
+        Assert.Equal(longArray.Length * sizeof(long), longArray.RawSpan.Length);
+    }
+
+    [Fact]
+    public void ListRootExposesTheViewInWireOrder()
+    {
+        using var document = ParseUnnamedRootDocument(
+            static (ref writer) =>
+            {
+                writer.WriteStartList("ignored", NbtTagType.Int, 3);
+                writer.WriteInt32(1);
+                writer.WriteInt32(2);
+                writer.WriteInt32(3);
+                writer.WriteEndList();
+            },
+            out var root);
+
+        Assert.Equal(NbtTagType.List, root.TagType);
+        var list = root.List;
+        Assert.Equal(NbtTagType.Int, list.ElementType);
+        Assert.Equal(3, list.Count);
+        Assert.Equal(1, list.GetElementAt(0).Int32);
+        Assert.Equal(2, list[1].Int32);
+        Assert.Equal(3, list[2].Int32);
+        Assert.Equal([1, 2, 3], ReadIntElements(list));
+    }
+
+    [Fact]
+    public void CompoundRootExposesMembersAndCount()
+    {
+        using var document = NbtDocument.Parse(BuildSampleDocument());
+        var root = document.RootElement.Compound;
+
+        Assert.Equal(4, root.MemberCount);
+        Assert.Equal(20, root.GetMember("Health").Int32);
+        Assert.Equal(-3.5, root.GetMember("Temperature").Double);
+        Assert.Equal("a long string value", root.GetMember("Name").String.GetString());
+        var numbers = root.GetMember("Numbers").List;
+        Assert.Equal(NbtTagType.Int, numbers.ElementType);
+        Assert.Equal(3, numbers.Count);
+        Assert.Equal([1, 2, 3], ReadIntElements(numbers));
+    }
+
+    // --------------------------------------------------------------------------------------------
+    // The twelve tag types
+    // --------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void ReadsAllTwelveTagTypesThroughCompoundMembers()
+    {
+        using var document = NbtDocument.Parse(BuildAllTagsDocument());
+        var root = document.RootElement.Compound;
+
+        Assert.Equal(12, root.MemberCount);
+
+        Assert.Equal(-5, RequireMember(root, "Byte").SByte);
+        Assert.Equal((short)12345, RequireMember(root, "Short").Int16);
+        Assert.Equal(-123456789, RequireMember(root, "Int").Int32);
+        Assert.Equal(1234567890123L, RequireMember(root, "Long").Int64);
+        Assert.Equal(0.5f, RequireMember(root, "Float").Single);
+        Assert.Equal(-0.25, RequireMember(root, "Double").Double);
+
+        var stringView = RequireMember(root, "String").String;
+        Assert.Equal("中文 \0 x", stringView.GetString());
+        Assert.Equal(11, stringView.ByteLength);
+
+        var byteArray = RequireMember(root, "ByteArray").ByteArray;
+        Assert.Equal(3, byteArray.Length);
+        Assert.Equal([1, 2, 3], byteArray.Span.ToArray());
+        Assert.Equal(new sbyte[] { 1, 2, 3 }, byteArray.ToSByteArray());
+
+        Assert.Equal(
+            [int.MinValue, -1, int.MaxValue],
+            RequireMember(root, "IntArray").IntArray.ToArray());
+        Assert.Equal(
+            [long.MinValue, long.MaxValue],
+            RequireMember(root, "LongArray").LongArray.ToArray());
+
+        var list = RequireMember(root, "List").List;
+        Assert.Equal(NbtTagType.String, list.ElementType);
+        Assert.Equal(2, list.Count);
+        Assert.Equal("a", list[0].String.GetString());
+        Assert.Equal("b", list[1].String.GetString());
+
+        var compound = RequireMember(root, "Compound").Compound;
+        Assert.Equal(1, compound.MemberCount);
+        Assert.Equal(1, compound.GetMember("Nested").Int32);
+    }
+
+    [Fact]
+    public void RepeatedAccessReturnsEqualValues()
+    {
+        using var document = NbtDocument.Parse(BuildAllTagsDocument());
+        var root = document.RootElement.Compound;
+        var intMember = root.GetMember("Int");
+        var stringMember = root.GetMember("String");
+        var arrayMember = root.GetMember("ByteArray");
+
+        Assert.Equal(-123456789, intMember.Int32);
+        Assert.Equal(-123456789, intMember.Int32);
+        Assert.Equal("中文 \0 x", stringMember.String.GetString());
+        Assert.Equal("中文 \0 x", stringMember.String.GetString());
+        Assert.Equal(new sbyte[] { 1, 2, 3 }, arrayMember.ByteArray.ToSByteArray());
+        Assert.Equal(new sbyte[] { 1, 2, 3 }, arrayMember.ByteArray.ToSByteArray());
+    }
+
+    [Theory]
+    [MemberData(nameof(CasePropertyPairs))]
+    public void TagTypeSelectsExactlyOneCaseProperty(NbtTagType actualTag, NbtTagType propertyTag)
+    {
+        using var document = NbtDocument.Parse(BuildUnnamedRoot(actualTag), UnnamedOptions);
+        var element = document.RootElement;
+
+        Assert.Equal(actualTag, element.TagType);
+
+        if (actualTag == propertyTag)
+        {
+            Assert.NotNull(ReadCaseProperty(element, propertyTag));
+            return;
+        }
+
+        var exception = Assert.Throws<NbtException>(() => ReadCaseProperty(element, propertyTag));
+        Assert.Equal(propertyTag, exception.ExpectedTagType);
+        Assert.Equal(actualTag, exception.ActualTagType);
+    }
+
+    // --------------------------------------------------------------------------------------------
+    // Union mismatch behavior
+    // --------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void MismatchedCasePropertyReportsExpectedAndActualTagTypes()
+    {
+        using var document = ParseUnnamedRootDocument(
+            static (ref writer) => writer.WriteInt32("ignored", 7),
+            out var root);
+
+        var exception = Assert.Throws<NbtException>(() => root.Double);
+        Assert.Equal(NbtTagType.Double, exception.ExpectedTagType);
         Assert.Equal(NbtTagType.Int, exception.ActualTagType);
-        Assert.NotNull(exception.BytePosition);
+        Assert.Contains("Expected a Double value", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("current value is Int", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void ContainerTypeMismatchReportsExpectedActualAndPosition()
+    public void ContainerCaseMismatchReportsExpectedAndActualTagTypes()
     {
-        var data = BuildSampleDocument();
-        using var document = NbtDocument.Parse(data);
+        using var compoundDocument = ParseUnnamedRootDocument(
+            static (ref writer) =>
+            {
+                writer.WriteStartCompound("ignored");
+                writer.WriteInt32("x", 1);
+                writer.WriteEndCompound();
+            },
+            out var compoundRoot);
 
-        var exception = Assert.Throws<NbtException>(() => document.RootElement.ElementCount);
-        Assert.Equal(NbtTagType.List, exception.ExpectedTagType);
-        Assert.Equal(NbtTagType.Compound, exception.ActualTagType);
-        Assert.NotNull(exception.BytePosition);
+        var listException = Assert.Throws<NbtException>(() => compoundRoot.List);
+        Assert.Equal(NbtTagType.List, listException.ExpectedTagType);
+        Assert.Equal(NbtTagType.Compound, listException.ActualTagType);
 
-        exception = Assert.Throws<NbtException>(() => document.RootElement.GetMember("Numbers").MemberCount);
-        Assert.Equal(NbtTagType.Compound, exception.ExpectedTagType);
-        Assert.Equal(NbtTagType.List, exception.ActualTagType);
-        Assert.NotNull(exception.BytePosition);
+        using var listDocument = ParseUnnamedRootDocument(
+            static (ref writer) =>
+            {
+                writer.WriteStartList("ignored", NbtTagType.Int, 0);
+                writer.WriteEndList();
+            },
+            out var listRoot);
+
+        var compoundException = Assert.Throws<NbtException>(() => listRoot.Compound);
+        Assert.Equal(NbtTagType.Compound, compoundException.ExpectedTagType);
+        Assert.Equal(NbtTagType.List, compoundException.ActualTagType);
+
+        // Access-time mismatches carry the two tag types but no byte position: the element was
+        // indexed successfully, and nothing was read to produce the failure.
+        Assert.Null(listException.BytePosition);
+        Assert.Null(compoundException.BytePosition);
     }
 
     [Fact]
-    public void GettersCanBeCalledRepeatedly()
+    public void DefaultElementThrowsNbtExceptionOnEveryAccess()
     {
-        var data = BuildAllTagsDocument();
-        using var document = NbtDocument.Parse(data);
-        var root = document.RootElement;
-        var member = root.GetMember("Int");
+        var element = default(NbtElement);
 
-        Assert.Equal(-123456789, member.GetInt32());
-        Assert.Equal(-123456789, member.GetInt32());
-        Assert.Equal("中文 \0 x", root.GetMember("String").GetString());
-        Assert.Equal("中文 \0 x", root.GetMember("String").GetString());
-        Assert.Equal(new byte[] { 1, 2, 3 }, root.GetMember("ByteArray").GetByteArray());
-        Assert.Equal(new byte[] { 1, 2, 3 }, root.GetMember("ByteArray").GetByteArray());
+        var tagException = Assert.Throws<NbtException>(() => element.TagType);
+        Assert.Null(tagException.ExpectedTagType);
+        Assert.Null(tagException.ActualTagType);
+        Assert.Contains("uninitialized", tagException.Message, StringComparison.Ordinal);
+
+        Assert.Throws<NbtException>(() => element.Value);
+
+        AssertDefaultCaseFailure(() => element.SByte, NbtTagType.Byte);
+        AssertDefaultCaseFailure(() => element.Int16, NbtTagType.Short);
+        AssertDefaultCaseFailure(() => element.Int32, NbtTagType.Int);
+        AssertDefaultCaseFailure(() => element.Int64, NbtTagType.Long);
+        AssertDefaultCaseFailure(() => element.Single, NbtTagType.Float);
+        AssertDefaultCaseFailure(() => element.Double, NbtTagType.Double);
+        AssertDefaultCaseFailure(() => element.String, NbtTagType.String);
+        AssertDefaultCaseFailure(() => element.ByteArray, NbtTagType.ByteArray);
+        AssertDefaultCaseFailure(() => element.IntArray, NbtTagType.IntArray);
+        AssertDefaultCaseFailure(() => element.LongArray, NbtTagType.LongArray);
+        AssertDefaultCaseFailure(() => element.List, NbtTagType.List);
+        AssertDefaultCaseFailure(() => element.Compound, NbtTagType.Compound);
     }
+
+    // --------------------------------------------------------------------------------------------
+    // Strings
+    // --------------------------------------------------------------------------------------------
 
     [Fact]
     public void GetStringDecodesModifiedUtf8AtAccessTime()
@@ -189,315 +453,583 @@ public sealed class NbtDocumentTests
     }
 
     [Fact]
-    public void GetStringRejectsF0LeadBytesAtAccessTimeWithThePayloadPosition()
+    public void StringCaseRejectsF0LeadBytesAtAccessTimeWithThePayloadPosition()
     {
         var data = new byte[] { 0x08, 0x00, 0x02, 0xF0, 0x41 };
-        using var document = NbtDocument.Parse(data, new NbtReaderOptions { RootFormat = NbtRootFormat.Unnamed });
+        using var document = NbtDocument.Parse(data, UnnamedOptions);
 
-        // The payload (length prefix included) starts right after the tag byte; indexing accepted
-        // the payload because it only checks the length prefix.
-        var exception = Assert.Throws<NbtException>(() => document.RootElement.GetString());
+        // Indexing accepted the payload because it only checks the length prefix; the lead byte is
+        // rejected when the view is decoded, reported at the payload's length prefix.
+        var view = document.RootElement.String;
+        Assert.Equal(2, view.ByteLength);
+        Assert.Equal(new byte[] { 0xF0, 0x41 }, view.RawSpan.ToArray());
+
+        var exception = Assert.Throws<NbtException>(() => view.GetString());
         Assert.Equal(1, exception.BytePosition);
     }
 
     [Fact]
-    public void GetRawBytesReturnsTheCompletePayload()
+    public void StringRawBytesExposeThePayloadWithoutTheLengthPrefix()
     {
         var data = new byte[] { 0x08, 0x00, 0x06, 0xED, 0xA0, 0xBD, 0xED, 0xB8, 0x80 };
-        using var document = NbtDocument.Parse(data, new NbtReaderOptions { RootFormat = NbtRootFormat.Unnamed });
+        using var document = NbtDocument.Parse(data, UnnamedOptions);
+        var view = document.RootElement.String;
 
-        Assert.Equal(
-            new byte[] { 0x00, 0x06, 0xED, 0xA0, 0xBD, 0xED, 0xB8, 0x80 },
-            document.RootElement.GetRawBytes());
+        Assert.Equal(6, view.ByteLength);
+        Assert.Equal(new byte[] { 0xED, 0xA0, 0xBD, 0xED, 0xB8, 0x80 }, view.RawSpan.ToArray());
+        Assert.Equal(new byte[] { 0xED, 0xA0, 0xBD, 0xED, 0xB8, 0x80 }, view.RawMemory.ToArray());
+        Assert.Equal("\U0001F600", view.GetString());
+    }
+
+    [Fact]
+    public void StringRoundTripsNullAndSupplementaryCharacters()
+    {
+        const string value = "a\0b\U0001F600c";
+        using var document = ParseUnnamedRootDocument(
+            static (ref writer) => writer.WriteString("ignored", value),
+            out var root);
+
+        Assert.Equal(value, root.String.GetString());
+    }
+
+    [Fact]
+    public void EmptyStringRootExposesAnEmptyView()
+    {
+        using var document = ParseUnnamedRootDocument(
+            static (ref writer) => writer.WriteString("ignored", string.Empty),
+            out var root);
+
+        var view = root.String;
+        Assert.True(view.IsEmpty);
+        Assert.Equal(0, view.ByteLength);
+        Assert.Empty(view.RawSpan.ToArray());
+        Assert.Equal(string.Empty, view.GetString());
     }
 
     // --------------------------------------------------------------------------------------------
-    // Names
+    // Arrays
     // --------------------------------------------------------------------------------------------
 
     [Fact]
-    public void NameIsOnlyPresentOnCompoundMembersAndNamedRoots()
+    public void ByteArrayViewMatchesTheWirePayload()
     {
-        var data = BuildSampleDocument();
-        using var document = NbtDocument.Parse(data);
-        var root = document.RootElement;
+        byte[] payload = [0x00, 0x7F, 0x80, 0xFF];
+        var data = new byte[1 + sizeof(int) + payload.Length];
+        data[0] = (byte)NbtTagType.ByteArray;
+        BinaryPrimitives.WriteInt32BigEndian(data.AsSpan(1, sizeof(int)), payload.Length);
+        payload.AsSpan().CopyTo(data.AsSpan(1 + sizeof(int)));
 
-        Assert.Equal("root", root.Name);
-        Assert.Equal("Health", root.GetMember("Health").Name);
-        foreach (var element in root.GetMember("Numbers").EnumerateElements())
+        using var document = NbtDocument.Parse(data, UnnamedOptions);
+        var view = document.RootElement.ByteArray;
+
+        Assert.Equal(4, view.Length);
+        Assert.Equal(payload, view.Span.ToArray());
+        Assert.Equal(payload, view.Memory.ToArray());
+        Assert.Equal(new sbyte[] { 0, 127, -128, -1 }, view.SByteSpan.ToArray());
+        Assert.Equal(new sbyte[] { 0, 127, -128, -1 }, view.ToSByteArray());
+
+        var bytes = new byte[view.Length];
+        view.CopyTo(bytes);
+        Assert.Equal(payload, bytes);
+
+        var signed = new sbyte[view.Length];
+        view.CopyTo(signed);
+        Assert.Equal(new sbyte[] { 0, 127, -128, -1 }, signed);
+    }
+
+    [Fact]
+    public void IntArrayViewMatchesTheWirePayloadAndConvertsToHostOrder()
+    {
+        int[] values = [1, -2, int.MaxValue, int.MinValue];
+        var payload = new byte[values.Length * sizeof(int)];
+        for (var i = 0; i < values.Length; i++)
         {
-            Assert.Null(element.Name);
+            BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(i * sizeof(int), sizeof(int)), values[i]);
         }
+
+        var data = new byte[1 + sizeof(int) + payload.Length];
+        data[0] = (byte)NbtTagType.IntArray;
+        BinaryPrimitives.WriteInt32BigEndian(data.AsSpan(1, sizeof(int)), values.Length);
+        payload.AsSpan().CopyTo(data.AsSpan(1 + sizeof(int)));
+
+        using var document = NbtDocument.Parse(data, UnnamedOptions);
+        var view = document.RootElement.IntArray;
+
+        Assert.Equal(values.Length, view.Length);
+        Assert.Equal(view.RawSpan.Length / sizeof(int), view.Length);
+        Assert.Equal(payload.Length / sizeof(int), view.Length);
+        Assert.Equal(payload, view.RawSpan.ToArray());
+        Assert.Equal(payload, view.RawMemory.ToArray());
+        Assert.Equal(values, view.ToArray());
+
+        var copied = new int[values.Length];
+        view.CopyTo(copied);
+        Assert.Equal(values, copied);
     }
 
     [Fact]
-    public void NameEqualsMatchesCanonicalBytes()
+    public void LongArrayViewMatchesTheWirePayloadAndConvertsToHostOrder()
     {
-        var data = BuildSampleDocument();
-        using var document = NbtDocument.Parse(data);
-        var root = document.RootElement;
+        long[] values = [1, -2, long.MaxValue, long.MinValue];
+        var payload = new byte[values.Length * sizeof(long)];
+        for (var i = 0; i < values.Length; i++)
+        {
+            BinaryPrimitives.WriteInt64BigEndian(payload.AsSpan(i * sizeof(long), sizeof(long)), values[i]);
+        }
 
-        Assert.True(root.NameEquals("root"u8));
-        Assert.True(root.GetMember("Health").NameEquals("Health"u8));
-        Assert.False(root.NameEquals("roo"u8)); // shorter
-        Assert.False(root.NameEquals("roots"u8)); // longer
-        Assert.False(root.NameEquals("health"u8));
-        Assert.False(root.GetMember("Numbers")[0].NameEquals("Numbers"u8));
-    }
+        var data = new byte[1 + sizeof(int) + payload.Length];
+        data[0] = (byte)NbtTagType.LongArray;
+        BinaryPrimitives.WriteInt32BigEndian(data.AsSpan(1, sizeof(int)), values.Length);
+        payload.AsSpan().CopyTo(data.AsSpan(1 + sizeof(int)));
 
-    [Theory]
-    [InlineData(new byte[] { 0x00 }, "\0", new byte[] { 0xC0, 0x80 }, true)] // wire raw null, canonical query
-    [InlineData(new byte[] { 0xC0, 0x80 }, "\0", new byte[] { 0xC0, 0x80 }, true)] // byte fast path
-    [InlineData(new byte[] { 0xC0, 0x80 }, "\0", new byte[] { 0x00 }, true)] // both encode U+0000
-    [InlineData(new byte[] { 0x41 }, "A", new byte[] { 0xE0, 0x81, 0x81 }, false)] // canonical wire never falls back
-    [InlineData(new byte[] { 0x41 }, "A", new byte[] { 0x41 }, true)]
-    [InlineData(new byte[] { 0xE0, 0x81, 0x81 }, "A", new byte[] { 0x41 }, true)] // overlong three-byte vs 'A'
-    [InlineData(new byte[] { 0xC1, 0x81 }, "A", new byte[] { 0x41 }, true)] // overlong two-byte vs 'A'
-    [InlineData(new byte[] { 0xE0, 0x81, 0x81 }, "A", new byte[] { 0xC1, 0x81 }, true)] // both non-canonical
-    [InlineData(new byte[] { 0x00 }, "\0", new byte[] { 0x41 }, false)] // decoded values differ
-    public void NameEqualsComparesNonCanonicalWireNamesByDecodedValue(
-        byte[] wireName,
-        string lookupName,
-        byte[] queryName,
-        bool expected)
-    {
-        var data = BuildDocumentWithByteMemberName(wireName);
-        using var document = NbtDocument.Parse(data);
+        using var document = NbtDocument.Parse(data, UnnamedOptions);
+        var view = document.RootElement.LongArray;
 
-        var member = document.RootElement.GetMember(lookupName);
+        Assert.Equal(values.Length, view.Length);
+        Assert.Equal(view.RawSpan.Length / sizeof(long), view.Length);
+        Assert.Equal(payload.Length / sizeof(long), view.Length);
+        Assert.Equal(payload, view.RawSpan.ToArray());
+        Assert.Equal(payload, view.RawMemory.ToArray());
+        Assert.Equal(values, view.ToArray());
 
-        Assert.Equal(expected, member.NameEquals(queryName));
-        Assert.False(member.NameEquals("B"u8));
-    }
-
-    [Fact]
-    public void NameIsDecodedEveryTimeWithoutCaching()
-    {
-        var data = BuildSampleDocument();
-        using var document = NbtDocument.Parse(data);
-        var member = document.RootElement.GetMember("Health");
-
-        Assert.Equal("Health", member.Name);
-        Assert.Equal("Health", member.Name);
+        var copied = new long[values.Length];
+        view.CopyTo(copied);
+        Assert.Equal(values, copied);
     }
 
     // --------------------------------------------------------------------------------------------
-    // Member lookup
+    // Compound members
     // --------------------------------------------------------------------------------------------
 
     [Fact]
     public void TryGetMemberFindsAndMissesMembers()
     {
-        var data = BuildSampleDocument();
-        using var document = NbtDocument.Parse(data);
-        var root = document.RootElement;
+        using var document = NbtDocument.Parse(BuildSampleDocument());
+        var root = document.RootElement.Compound;
 
         Assert.True(root.TryGetMember("Health", out var health));
-        Assert.Equal(20, health.GetInt32());
-        Assert.False(root.TryGetMember("Missing", out _));
-        Assert.Throws<NbtException>(() => root.GetMember("Numbers").TryGetMember("Health", out _));
+        Assert.Equal(20, health.Int32);
+        Assert.False(root.TryGetMember("Missing", out var missing));
+        Assert.Throws<NbtException>(() => missing.Int32);
+    }
+
+    [Fact]
+    public void MissingMemberThrowsKeyNotFound()
+    {
+        using var document = NbtDocument.Parse(BuildSampleDocument());
+
+        var exception = Assert.Throws<KeyNotFoundException>(() => document.RootElement.Compound.GetMember("Missing"));
+        Assert.Contains("Missing", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
     public void DuplicateMemberNamesResolveLastWins()
     {
-        var data = BuildDuplicateMemberDocument();
-        using var document = NbtDocument.Parse(data);
-        var root = document.RootElement;
+        using var document = NbtDocument.Parse(BuildDuplicateMemberDocument());
+        var root = document.RootElement.Compound;
 
         Assert.Equal(3, root.MemberCount);
-        Assert.Equal(2, root.GetMember("Dup").GetInt32());
-        Assert.True(root.TryGetMember("Dup", out var dup));
-        Assert.Equal(2, dup.GetInt32());
+        Assert.Equal(2, root.GetMember("Dup").Int32);
+        Assert.True(root.TryGetMember("Dup", out var duplicate));
+        Assert.Equal(2, duplicate.Int32);
+        Assert.Equal(3, root.GetMember("Other").Int32);
     }
 
     [Fact]
     public void EnumerationYieldsEveryDuplicateMember()
     {
-        var data = BuildDuplicateMemberDocument();
-        using var document = NbtDocument.Parse(data);
-        var root = document.RootElement;
+        using var document = NbtDocument.Parse(BuildDuplicateMemberDocument());
 
-        var names = root.EnumerateMembers().Select(member => member.Name).ToArray();
-        Assert.Equal(["Dup", "Dup", "Other"], names);
+        Assert.Equal(["Dup", "Dup", "Other"], ReadMemberNames(document.RootElement.Compound));
     }
 
-    [Fact]
-    public void GetMemberThrowsKeyNotFoundForAMissingName()
+    [Theory]
+    [InlineData(new byte[] { 0x00 }, "\0", "\0", true)] // wire raw null
+    [InlineData(new byte[] { 0xC0, 0x80 }, "\0", "\0", true)] // wire two-byte null
+    [InlineData(new byte[] { 0x41 }, "A", "A", true)] // wire single-byte 'A'
+    [InlineData(new byte[] { 0xE0, 0x81, 0x81 }, "A", "A", true)] // overlong three-byte wire name
+    [InlineData(new byte[] { 0xC1, 0x81 }, "A", "A", true)] // overlong two-byte wire name
+    [InlineData(new byte[] { 0x00 }, "\0", "A", false)] // decoded values differ
+    [InlineData(new byte[] { 0x41 }, "A", "\0", false)]
+    [InlineData(new byte[] { 0xE0, 0x81, 0x81 }, "A", "\0", false)]
+    public void WireNamesResolveByDecodedValue(
+        byte[] wireName,
+        string lookupName,
+        string queryName,
+        bool expected)
     {
-        var data = BuildSampleDocument();
-        using var document = NbtDocument.Parse(data);
+        using var document = NbtDocument.Parse(BuildDocumentWithByteMemberName(wireName));
+        var root = document.RootElement.Compound;
 
-        Assert.Throws<KeyNotFoundException>(() => document.RootElement.GetMember("Missing"));
+        Assert.True(root.TryGetMember(lookupName, out var member));
+        Assert.Equal(7, member.SByte);
+
+        Assert.Equal(expected, root.TryGetMember(queryName, out var queried));
+        if (expected)
+        {
+            Assert.Equal(7, queried.SByte);
+        }
+
+        Assert.False(root.TryGetMember("B", out _));
     }
 
     [Fact]
     public void TryGetMemberEncodesLongNamesThroughThePool()
     {
         var longName = new string('a', 300);
-        var data = BuildLongMemberNameDocument(longName);
-        using var document = NbtDocument.Parse(data);
+        using var document = NbtDocument.Parse(BuildLongMemberNameDocument(longName));
+        var root = document.RootElement.Compound;
 
-        Assert.True(document.RootElement.TryGetMember(longName, out var member));
-        Assert.Equal(7, member.GetInt32());
-        Assert.False(document.RootElement.TryGetMember(new string('a', 299), out _));
-        Assert.False(document.RootElement.TryGetMember(new string('a', 301), out _));
+        Assert.True(root.TryGetMember(longName, out var member));
+        Assert.Equal(7, member.Int32);
+        Assert.False(root.TryGetMember(new string('a', 299), out _));
+        Assert.False(root.TryGetMember(new string('a', 301), out _));
     }
 
-    // --------------------------------------------------------------------------------------------
-    // Containers, layout, and enumeration order
-    // --------------------------------------------------------------------------------------------
+    [Fact]
+    public void CompoundEnumeratorExposesNameAndCurrentPerMember()
+    {
+        using var document = NbtDocument.Parse(BuildSampleDocument());
+        var root = document.RootElement.Compound;
+
+        var names = new List<string>(root.MemberCount);
+        var types = new List<NbtTagType>(root.MemberCount);
+        using var enumerator = root.EnumerateMembers();
+        while (enumerator.MoveNext())
+        {
+            names.Add(enumerator.Name);
+            types.Add(enumerator.Current.TagType);
+        }
+
+        Assert.Equal(["Health", "Temperature", "Name", "Numbers"], names.ToArray());
+        Assert.Equal([NbtTagType.Int, NbtTagType.Double, NbtTagType.String, NbtTagType.List], types.ToArray());
+
+        enumerator.Reset();
+        Assert.True(enumerator.MoveNext());
+        Assert.Equal("Health", enumerator.Name);
+        Assert.Equal("Health", enumerator.Name);
+        Assert.Equal(NbtTagType.Int, enumerator.Current.TagType);
+    }
 
     [Fact]
     public void LayoutCounterexampleReportsCountsAndOrderCorrectly()
     {
-        // root { A: { x: Int }, B: Int } — the layout that a flat index could get wrong.
-        var buffer = new ArrayBufferWriter<byte>();
-        var writer = new NbtWriter(buffer);
-        writer.WriteStartCompound("root");
-        writer.WriteStartCompound("A");
-        writer.WriteInt32("x", 1);
-        writer.WriteEndCompound();
-        writer.WriteInt32("B", 9);
-        writer.WriteEndCompound();
-        writer.Complete();
+        using var document = NbtDocument.Parse(BuildLayoutDocument());
+        var root = document.RootElement.Compound;
 
-        using var document = NbtDocument.Parse(buffer.WrittenSpan.ToArray());
-        var root = document.RootElement;
+        Assert.Equal(3, root.MemberCount);
+        Assert.Equal(["A", "Items", "B"], ReadMemberNames(root));
 
-        Assert.Equal(2, root.MemberCount);
-        var a = root.GetMember("A");
-        Assert.Equal(NbtTagType.Compound, a.TagType);
-        Assert.Equal(1, a.MemberCount);
-        Assert.Equal(9, root.GetMember("B").GetInt32());
-
-        Assert.Equal(["A", "B"], root.EnumerateMembers().Select(member => member.Name).ToArray());
-        Assert.Equal(["x"], a.EnumerateMembers().Select(member => member.Name).ToArray());
-        Assert.Equal(1, a.GetMember("x").GetInt32());
+        var nested = root.GetMember("A").Compound;
+        Assert.Equal(1, nested.MemberCount);
+        Assert.Equal(["x"], ReadMemberNames(nested));
+        Assert.Equal(1, nested.GetMember("x").Int32);
+        Assert.Equal(9, root.GetMember("B").Int32);
     }
 
+    // --------------------------------------------------------------------------------------------
+    // Lists
+    // --------------------------------------------------------------------------------------------
+
     [Fact]
-    public void ListOfScalarsAddressesElementsInConstantTime()
+    public void ListViewReportsTypeCountAndOrder()
     {
-        var data = BuildSampleDocument();
-        using var document = NbtDocument.Parse(data);
-        var numbers = document.RootElement.GetMember("Numbers");
+        using var document = NbtDocument.Parse(BuildSampleDocument());
+        var numbers = document.RootElement.Compound.GetMember("Numbers").List;
 
         Assert.Equal(NbtTagType.Int, numbers.ElementType);
-        Assert.Equal(3, numbers.ElementCount);
-        Assert.Equal(1, numbers.GetElementAt(0).GetInt32());
-        Assert.Equal(2, numbers.GetElementAt(1).GetInt32());
-        Assert.Equal(3, numbers[2].GetInt32());
-    }
-
-    [Fact]
-    public void ListOfCompoundsWalksToTheRequestedIndex()
-    {
-        var data = BuildLayoutDocument();
-        using var document = NbtDocument.Parse(data);
-        var items = document.RootElement.GetMember("Items");
-
-        Assert.Equal(NbtTagType.Compound, items.ElementType);
-        Assert.Equal(3, items.ElementCount);
-        Assert.Equal(10, items.GetElementAt(0).GetMember("x").GetInt32());
-        Assert.Equal(20, items.GetElementAt(1).GetMember("y").GetInt32());
-        Assert.Equal(30, items.GetElementAt(2).GetMember("x").GetInt32());
-        Assert.Equal(20, items[1].GetMember("y").GetInt32());
+        Assert.Equal(3, numbers.Count);
+        Assert.Equal(1, numbers.GetElementAt(0).Int32);
+        Assert.Equal(2, numbers.GetElementAt(1).Int32);
+        Assert.Equal(3, numbers[2].Int32);
+        Assert.Equal([1, 2, 3], ReadIntElements(numbers));
     }
 
     [Fact]
     public void GetElementAtThrowsForOutOfRangeIndices()
     {
-        var data = BuildSampleDocument();
-        using var document = NbtDocument.Parse(data);
-        var numbers = document.RootElement.GetMember("Numbers");
+        using var document = NbtDocument.Parse(BuildSampleDocument());
+        var numbers = document.RootElement.Compound.GetMember("Numbers").List;
 
         Assert.Throws<ArgumentOutOfRangeException>(() => numbers.GetElementAt(-1));
         Assert.Throws<ArgumentOutOfRangeException>(() => numbers.GetElementAt(3));
+        Assert.Throws<ArgumentOutOfRangeException>(() => _ = numbers[3]);
     }
 
     [Fact]
-    public void NestedCompoundInListInCompoundEnumeratesInWireOrder()
+    public void EmptyListEncodingsKeepTheirElementType()
     {
-        var data = BuildLayoutDocument();
-        using var document = NbtDocument.Parse(data);
-        var root = document.RootElement;
+        using var document = NbtDocument.Parse(BuildEmptyListDocument());
+        var root = document.RootElement.Compound;
 
-        Assert.Equal(["A", "Items", "B"], root.EnumerateMembers().Select(member => member.Name).ToArray());
+        var emptyEnd = root.GetMember("EmptyEnd").List;
+        Assert.Equal(NbtTagType.End, emptyEnd.ElementType);
+        Assert.Equal(0, emptyEnd.Count);
+        using var endEnumerator = emptyEnd.GetEnumerator();
+        Assert.False(endEnumerator.MoveNext());
 
-        var items = root.GetMember("Items");
-        var names = new List<string>();
-        foreach (var item in items.EnumerateElements())
+
+        var emptyInts = root.GetMember("EmptyInts").List;
+        Assert.Equal(NbtTagType.Int, emptyInts.ElementType);
+        Assert.Equal(0, emptyInts.Count);
+        using var intEnumerator = emptyInts.GetEnumerator();
+        Assert.False(intEnumerator.MoveNext());
+    }
+
+    [Fact]
+    public void ListEnumeratorResetsAndTerminates()
+    {
+        using var document = NbtDocument.Parse(BuildSampleDocument());
+        var numbers = document.RootElement.Compound.GetMember("Numbers").List;
+
+        using var enumerator = numbers.EnumerateElements();
+        Assert.True(enumerator.MoveNext());
+        Assert.Equal(1, enumerator.Current.Int32);
+        enumerator.Reset();
+        Assert.True(enumerator.MoveNext());
+        Assert.Equal(1, enumerator.Current.Int32);
+        Assert.True(enumerator.MoveNext());
+        Assert.Equal(2, enumerator.Current.Int32);
+        Assert.True(enumerator.MoveNext());
+        Assert.Equal(3, enumerator.Current.Int32);
+        Assert.False(enumerator.MoveNext());
+        Assert.False(enumerator.MoveNext());
+    }
+
+    [Fact]
+    public void ListEnumeratorSupportsIEnumeratorUse()
+    {
+        using var document = NbtDocument.Parse(BuildSampleDocument());
+        var numbers = document.RootElement.Compound.GetMember("Numbers").List;
+
+        IEnumerator enumerator = numbers.EnumerateElements();
+        var values = new List<int>();
+        while (enumerator.MoveNext())
         {
-            foreach (var member in item.EnumerateMembers())
-            {
-                names.Add(member.Name!);
-            }
+            values.Add(((NbtElement)enumerator.Current!).Int32);
         }
 
-        Assert.Equal(["x", "y", "x"], names);
+        Assert.Equal([1, 2, 3], values.ToArray());
+    }
+
+    // --------------------------------------------------------------------------------------------
+    // Nesting
+    // --------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void NestedCompoundInListInCompoundNavigatesLayerByLayer()
+    {
+        using var document = NbtDocument.Parse(BuildLayoutDocument());
+        var root = document.RootElement.Compound;
+
+        Assert.Equal(1, root.GetMember("A").Compound.GetMember("x").Int32);
+        Assert.Equal(9, root.GetMember("B").Int32);
+
+        var items = root.GetMember("Items").List;
+        Assert.Equal(NbtTagType.Compound, items.ElementType);
+        Assert.Equal(3, items.Count);
+
+        var first = items[0].Compound;
+        Assert.Equal(1, first.MemberCount);
+        Assert.Equal(10, first.GetMember("x").Int32);
+        Assert.Equal(20, items[1].Compound.GetMember("y").Int32);
+        Assert.Equal(30, items.GetElementAt(2).Compound.GetMember("x").Int32);
+
+        Assert.Equal(["x", "y", "x"], ReadNestedMemberNames(items));
     }
 
     [Fact]
-    public void UnnamedListRootEnumeratesElements()
+    public void UnnamedListRootExposesElements()
     {
-        var data = BuildListDocument(2);
-        using var document = NbtDocument.Parse(
-            data,
-            new NbtReaderOptions { RootFormat = NbtRootFormat.Unnamed });
+        using var document = NbtDocument.Parse(BuildListDocument(2), UnnamedOptions);
 
         Assert.Null(document.RootName);
         Assert.Equal(NbtTagType.List, document.RootElement.TagType);
-        Assert.Equal([0, 1], document.RootElement.EnumerateElements()
-            .Select(element => element.GetInt32())
-            .ToArray());
+        var list = document.RootElement.List;
+        Assert.Equal(2, list.Count);
+        Assert.Equal(0, list[0].Int32);
+        Assert.Equal(1, list[1].Int32);
+    }
+
+    // --------------------------------------------------------------------------------------------
+    // Allocation behavior
+    // --------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void NumericRootAccessDoesNotAllocate()
+    {
+        using var document = ParseUnnamedRootDocument(
+            static (ref writer) => writer.WriteInt32("ignored", 42),
+            out var root);
+
+        for (var i = 0; i < 64; i++)
+        {
+            _ = document.RootElement.Int32;
+            _ = root.Int32;
+        }
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        var sum = 0;
+        for (var i = 0; i < 1_000; i++)
+        {
+            sum += document.RootElement.Int32;
+            sum += root.Int32;
+        }
+
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Assert.Equal(84_000, sum);
+        Assert.Equal(0, allocated);
     }
 
     [Fact]
-    public void EndTypedListReportsEndElementTypeAndZeroElements()
+    public void StringRawSpanAccessDoesNotAllocate()
     {
-        var data = BuildEmptyListDocument();
-        using var document = NbtDocument.Parse(data);
-        var endList = document.RootElement.GetMember("EmptyEnd");
+        using var document = ParseUnnamedRootDocument(
+            static (ref writer) => writer.WriteString("ignored", "中文 \0 x"),
+            out var root);
 
-        Assert.Equal(NbtTagType.End, endList.ElementType);
-        Assert.Equal(0, endList.ElementCount);
-        Assert.Empty(endList.EnumerateElements().ToArray());
+        for (var i = 0; i < 64; i++)
+        {
+            _ = document.RootElement.String.RawSpan.Length;
+            _ = root.String.RawSpan.Length;
+        }
 
-        var intList = document.RootElement.GetMember("EmptyInts");
-        Assert.Equal(NbtTagType.Int, intList.ElementType);
-        Assert.Equal(0, intList.ElementCount);
-        Assert.Empty(intList.EnumerateElements().ToArray());
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        var length = 0;
+        for (var i = 0; i < 1_000; i++)
+        {
+            length += document.RootElement.String.RawSpan.Length;
+            length += root.String.RawSpan.Length;
+        }
+
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Assert.Equal(22_000, length);
+        Assert.Equal(0, allocated);
     }
 
     [Fact]
-    public void EnumeratorResetsToTheFirstChild()
+    public void ArrayRawSpanAccessDoesNotAllocate()
     {
-        var data = BuildSampleDocument();
-        using var document = NbtDocument.Parse(data);
-        var numbers = document.RootElement.GetMember("Numbers");
+        using var byteDocument = ParseUnnamedRootDocument(
+            static (ref writer) => writer.WriteByteArray("ignored", [1, 2, 3]),
+            out var byteRoot);
+        using var intDocument = ParseUnnamedRootDocument(
+            static (ref writer) => writer.WriteInt32Array("ignored", [1, 2, 3]),
+            out var intRoot);
+        using var longDocument = ParseUnnamedRootDocument(
+            static (ref writer) => writer.WriteInt64Array("ignored", [1L, 2L, 3L]),
+            out var longRoot);
 
-        var enumerator = numbers.EnumerateElements();
-        Assert.True(enumerator.MoveNext());
-        Assert.Equal(1, enumerator.Current.GetInt32());
+        for (var i = 0; i < 64; i++)
+        {
+            _ = byteRoot.ByteArray.Span.Length;
+            _ = intRoot.IntArray.RawSpan.Length;
+            _ = longRoot.LongArray.RawSpan.Length;
+        }
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        var length = 0;
+        for (var i = 0; i < 1_000; i++)
+        {
+            length += byteRoot.ByteArray.Span.Length;
+            length += intRoot.IntArray.RawSpan.Length;
+            length += longRoot.LongArray.RawSpan.Length;
+        }
+
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Assert.Equal(39_000, length);
+        Assert.Equal(0, allocated);
+    }
+
+    [Fact]
+    public void ListElementAccessAndEnumerationDoNotAllocate()
+    {
+        using var document = NbtDocument.Parse(BuildSampleDocument());
+        var numbers = document.RootElement.Compound.GetMember("Numbers").List;
+
+        for (var i = 0; i < 64; i++)
+        {
+            _ = numbers.GetElementAt(0).Int32;
+            foreach (var element in numbers)
+            {
+                _ = element.Int32;
+            }
+        }
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        var sum = 0;
+        for (var i = 0; i < 1_000; i++)
+        {
+            sum += numbers.GetElementAt(i % numbers.Count).Int32;
+            foreach (var element in numbers)
+            {
+                sum += element.Int32;
+            }
+        }
+
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Assert.Equal(7_999, sum);
+        Assert.Equal(0, allocated);
+    }
+
+    [Fact]
+    public void CompoundEnumeratorMoveNextDoesNotAllocateButNameDoes()
+    {
+        using var document = NbtDocument.Parse(BuildSampleDocument());
+        var root = document.RootElement.Compound;
+        using var enumerator = root.GetEnumerator();
+
+        for (var i = 0; i < 64; i++)
+        {
+            enumerator.Reset();
+            while (enumerator.MoveNext())
+            {
+            }
+        }
+
+        var beforeMoveNext = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < 1_000; i++)
+        {
+            enumerator.Reset();
+            while (enumerator.MoveNext())
+            {
+            }
+        }
+
+        var moveNextAllocated = GC.GetAllocatedBytesForCurrentThread() - beforeMoveNext;
+        Assert.Equal(0, moveNextAllocated);
+
         enumerator.Reset();
-        Assert.True(enumerator.MoveNext());
-        Assert.Equal(1, enumerator.Current.GetInt32());
-        Assert.True(enumerator.MoveNext());
-        Assert.True(enumerator.MoveNext());
-        Assert.False(enumerator.MoveNext());
-        Assert.False(enumerator.MoveNext());
+        var nameLength = 0;
+        var beforeNames = GC.GetAllocatedBytesForCurrentThread();
+        while (enumerator.MoveNext())
+        {
+            nameLength += enumerator.Name.Length;
+        }
+
+        var namesAllocated = GC.GetAllocatedBytesForCurrentThread() - beforeNames;
+        Assert.Equal(28, nameLength);
+        Assert.True(namesAllocated > 0, "reading member names must decode and allocate them");
     }
 
     [Fact]
-    public void EnumeratorSupportsIEnumerableUse()
+    public void ArrayMaterializationAllocatesEveryTime()
     {
-        var data = BuildSampleDocument();
-        using var document = NbtDocument.Parse(data);
+        using var document = ParseUnnamedRootDocument(
+            static (ref writer) => writer.WriteInt32Array("ignored", [1, 2, 3]),
+            out var root);
+        _ = root.IntArray.ToArray();
 
-        IEnumerable elements = document.RootElement.GetMember("Numbers").EnumerateElements();
-        var values = elements.Cast<NbtElement>().Select(element => element.GetInt32()).ToArray();
-        Assert.Equal([1, 2, 3], values);
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        var first = root.IntArray.ToArray();
+        var afterFirst = GC.GetAllocatedBytesForCurrentThread();
+        var second = root.IntArray.ToArray();
+        var afterSecond = GC.GetAllocatedBytesForCurrentThread();
+
+        Assert.Equal([1, 2, 3], first);
+        Assert.Equal([1, 2, 3], second);
+        Assert.True(afterFirst > before, "the first materialization must allocate");
+        Assert.True(afterSecond > afterFirst, "the second materialization must allocate");
     }
 
     // --------------------------------------------------------------------------------------------
@@ -507,91 +1039,142 @@ public sealed class NbtDocumentTests
     [Fact]
     public void UnknownTagTypeThrowsAtParse()
     {
-        Assert.Throws<NbtException>(() => NbtDocument.Parse(new byte[] { 0x0D, 0x00, 0x00 }));
+        var exception = Assert.Throws<NbtException>(() => NbtDocument.Parse(new byte[] { 0x0D, 0x00, 0x00 }));
+
+        Assert.Contains("Unknown NBT tag type 13", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(0, exception.BytePosition);
+        Assert.False(exception.IsTruncated);
     }
 
     [Fact]
     public void RootTagEndThrowsAtParse()
     {
-        Assert.Throws<NbtException>(() => NbtDocument.Parse(new byte[] { 0x00 }));
+        var exception = Assert.Throws<NbtException>(() => NbtDocument.Parse(new byte[] { 0x00 }));
+
+        Assert.Contains("The root tag cannot be TAG_End", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(0, exception.BytePosition);
+        Assert.Equal(NbtTagType.End, exception.ActualTagType);
     }
 
     [Fact]
     public void NegativeListLengthThrowsAtParse()
     {
-        Assert.Throws<NbtException>(() => NbtDocument.Parse(
+        var exception = Assert.Throws<NbtException>(() => NbtDocument.Parse(
             new byte[] { 0x09, 0x03, 0xFF, 0xFF, 0xFF, 0xFF },
-            new NbtReaderOptions { RootFormat = NbtRootFormat.Unnamed }));
+            UnnamedOptions));
+
+        Assert.Contains("Invalid NBT list length -1", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(1, exception.BytePosition);
     }
 
     [Fact]
     public void ExcessiveListLengthThrowsAtParse()
     {
-        Assert.Throws<NbtException>(() => NbtDocument.Parse(
+        var exception = Assert.Throws<NbtException>(() => NbtDocument.Parse(
             BuildListDocument(3),
-            new NbtReaderOptions { MaxCollectionLength = 2 }));
+            new NbtReaderOptions { RootFormat = NbtRootFormat.Unnamed, MaxCollectionLength = 2 }));
+
+        Assert.Contains("exceeds the configured limit of 2", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(1, exception.BytePosition);
     }
 
-    [Fact]
-    public void NegativeArrayLengthThrowsAtParse()
+    [Theory]
+    [InlineData(NbtTagType.IntArray)]
+    [InlineData(NbtTagType.LongArray)]
+    public void NegativeArrayLengthThrowsAtParse(NbtTagType tag)
     {
-        Assert.Throws<NbtException>(() => NbtDocument.Parse(
-            new byte[] { 0x0B, 0xFF, 0xFF, 0xFF, 0xFF },
-            new NbtReaderOptions { RootFormat = NbtRootFormat.Unnamed }));
+        var exception = Assert.Throws<NbtException>(() => NbtDocument.Parse(
+            new byte[] { (byte)tag, 0xFF, 0xFF, 0xFF, 0xFF },
+            UnnamedOptions));
+
+        Assert.Contains("Invalid NBT array length -1", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(1, exception.BytePosition);
     }
 
-    [Fact]
-    public void ExcessiveArrayLengthThrowsAtParse()
+    [Theory]
+    [InlineData(NbtTagType.IntArray)]
+    [InlineData(NbtTagType.LongArray)]
+    public void ExcessiveArrayLengthThrowsAtParse(NbtTagType tag)
     {
-        Assert.Throws<NbtException>(() => NbtDocument.Parse(
-            BuildIntArrayDocument(3),
-            new NbtReaderOptions { MaxCollectionLength = 2 }));
+        var buffer = new ArrayBufferWriter<byte>();
+        var writer = new NbtWriter(buffer, new NbtWriterOptions { RootFormat = NbtRootFormat.Unnamed });
+        if (tag == NbtTagType.IntArray)
+        {
+            writer.WriteInt32Array("ignored", new int[3]);
+        }
+        else
+        {
+            writer.WriteInt64Array("ignored", new long[3]);
+        }
+
+        writer.Complete();
+
+        var exception = Assert.Throws<NbtException>(() => NbtDocument.Parse(
+            buffer.WrittenSpan.ToArray(),
+            new NbtReaderOptions { RootFormat = NbtRootFormat.Unnamed, MaxCollectionLength = 2 }));
+
+        Assert.Contains("Invalid NBT array length 3 (limit 2)", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(1, exception.BytePosition);
     }
 
     [Fact]
     public void ListOfEndWithNonZeroLengthThrowsAtParse()
     {
-        Assert.Throws<NbtException>(() => NbtDocument.Parse(
+        var exception = Assert.Throws<NbtException>(() => NbtDocument.Parse(
             new byte[] { 0x09, 0x00, 0x00, 0x00, 0x00, 0x01 },
-            new NbtReaderOptions { RootFormat = NbtRootFormat.Unnamed }));
+            UnnamedOptions));
+
+        Assert.Contains("A list of TAG_End must have length zero", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(1, exception.BytePosition);
     }
 
     [Fact]
     public void DeclaredListLengthBeyondAvailableDataThrowsAtParse()
     {
-        Assert.Throws<NbtException>(() => NbtDocument.Parse(
+        var exception = Assert.Throws<NbtException>(() => NbtDocument.Parse(
             new byte[] { 0x09, 0x03, 0x00, 0x00, 0x03, 0xE8, 0x00 },
-            new NbtReaderOptions { RootFormat = NbtRootFormat.Unnamed }));
-    }
+            UnnamedOptions));
 
-    [Fact]
-    public void DeclaredArrayLengthBeyondAvailableDataThrowsAtParse()
-    {
-        Assert.Throws<NbtException>(() => NbtDocument.Parse(
-            new byte[] { 0x0B, 0x00, 0x00, 0x03, 0xE8, 0x00 },
-            new NbtReaderOptions { RootFormat = NbtRootFormat.Unnamed }));
+        Assert.True(exception.IsTruncated);
+        Assert.Contains("declares 1000 elements", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(1, exception.BytePosition);
     }
 
     [Theory]
-    [InlineData(0)]
-    [InlineData(1)]
-    [InlineData(7)]
-    [InlineData(8)]
-    [InlineData(11)]
+    [InlineData(NbtTagType.IntArray)]
+    [InlineData(NbtTagType.LongArray)]
+    public void DeclaredArrayLengthBeyondAvailableDataThrowsAtParse(NbtTagType tag)
+    {
+        var exception = Assert.Throws<NbtException>(() => NbtDocument.Parse(
+            new byte[] { (byte)tag, 0x00, 0x00, 0x03, 0xE8, 0x00 },
+            UnnamedOptions));
+
+        Assert.True(exception.IsTruncated);
+        var declaredBytes = tag == NbtTagType.IntArray ? 4000 : 8000;
+        Assert.Contains($"declares {declaredBytes} bytes", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(5, exception.BytePosition);
+    }
+
+    [Theory]
+    [MemberData(nameof(TruncationLengths))]
     public void TruncationAtEveryPositionThrowsAtParse(int length)
     {
-        var data = BuildSampleDocument();
+        var exception = Assert.Throws<NbtException>(() =>
+            NbtDocument.Parse(SampleDocument.AsMemory(0, length)));
 
-        Assert.Throws<NbtException>(() =>
-            NbtDocument.Parse(data.AsMemory(0, length)));
+        Assert.True(exception.IsTruncated);
     }
 
     [Fact]
     public void UnterminatedCompoundThrowsAtParse()
     {
         // TAG_Compound "root" with no end tag.
-        Assert.Throws<NbtException>(() => NbtDocument.Parse(
+        var exception = Assert.Throws<NbtException>(() => NbtDocument.Parse(
             new byte[] { 0x0A, 0x00, 0x04, (byte)'r', (byte)'o', (byte)'o', (byte)'t' }));
+
+        Assert.True(exception.IsTruncated);
+        Assert.Contains("Unexpected end of NBT data", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(7, exception.BytePosition);
     }
 
     [Fact]
@@ -599,18 +1182,49 @@ public sealed class NbtDocumentTests
     {
         var data = BuildDeepDocument(3);
 
-        Assert.Throws<NbtException>(() => NbtDocument.Parse(data, new NbtReaderOptions { MaxDepth = 2 }));
+        var exception = Assert.Throws<NbtException>(() =>
+            NbtDocument.Parse(data, new NbtReaderOptions { MaxDepth = 2 }));
+
+        Assert.Contains("nesting depth exceeds the limit of 2", exception.Message, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void InvalidOptionsAreRejected()
+    {
+        var data = BuildSampleDocument();
+        var invalidRootFormat = new NbtReaderOptions { RootFormat = (NbtRootFormat)42 };
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => NbtDocument.Parse(data, invalidRootFormat));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            NbtDocument.Parse(new ReadOnlySequence<byte>(data), invalidRootFormat));
+        using (var stream = new MemoryStream(data))
+        {
+            Assert.Throws<ArgumentOutOfRangeException>(() => NbtDocument.Parse(stream, invalidRootFormat));
+        }
+
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            NbtDocument.Parse(data, new NbtReaderOptions { MaxDepth = -1 }));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            NbtDocument.Parse(data, new NbtReaderOptions { MaxCollectionLength = -1 }));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            NbtDocument.Parse(data, new NbtReaderOptions { MaxDocumentBytes = -1 }));
+    }
+
+    // --------------------------------------------------------------------------------------------
+    // Document limits and input strategy
+    // --------------------------------------------------------------------------------------------
 
     [Fact]
     public void MemoryOverloadEnforcesTheDocumentLimit()
     {
         var data = NbtSerializer.Serialize(42, "root");
 
-        Assert.Throws<NbtException>(() => NbtDocument.Parse(data, new NbtReaderOptions
+        var exception = Assert.Throws<NbtException>(() => NbtDocument.Parse(data, new NbtReaderOptions
         {
             MaxDocumentBytes = data.Length - 1,
         }));
+
+        Assert.Contains("exceeds the configured limit", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -625,7 +1239,7 @@ public sealed class NbtDocumentTests
             MaxDocumentBytes = data.Length,
         });
 
-        Assert.Equal(42, document.RootElement.GetInt32());
+        Assert.Equal(42, document.RootElement.Int32);
     }
 
     [Fact]
@@ -639,7 +1253,7 @@ public sealed class NbtDocumentTests
             new ReadOnlySequence<byte>(padded),
             new NbtReaderOptions { MaxDocumentBytes = data.Length });
 
-        Assert.Equal(42, document.RootElement.GetInt32());
+        Assert.Equal(42, document.RootElement.Int32);
     }
 
     [Fact]
@@ -671,7 +1285,7 @@ public sealed class NbtDocumentTests
             new ReadOnlySequence<byte>(data),
             new NbtReaderOptions { RootFormat = NbtRootFormat.Unnamed, MaxDocumentBytes = 11 }));
 
-        Assert.Contains("exceeds the configured limit of 11 bytes", exception.Message);
+        Assert.Contains("exceeds the configured limit of 11 bytes", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -685,7 +1299,7 @@ public sealed class NbtDocumentTests
             MaxDocumentBytes = data.Length,
         });
 
-        Assert.Equal(42, document.RootElement.GetInt32());
+        Assert.Equal(42, document.RootElement.Int32);
         Assert.Throws<NbtException>(() => NbtDocument.Parse(
             new ReadOnlySequence<byte>(Pad(data, data.Length + 16)),
             new NbtReaderOptions { MaxDocumentBytes = data.Length - 1 }));
@@ -703,7 +1317,7 @@ public sealed class NbtDocumentTests
             MaxDocumentBytes = data.Length,
         });
 
-        Assert.Equal(42, document.RootElement.GetInt32());
+        Assert.Equal(42, document.RootElement.Int32);
     }
 
     [Fact]
@@ -735,7 +1349,7 @@ public sealed class NbtDocumentTests
                 MaxDocumentBytes = 11,
             }));
 
-        Assert.Contains("exceeds the configured limit of 11 bytes", exception.Message);
+        Assert.Contains("exceeds the configured limit of 11 bytes", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -746,20 +1360,6 @@ public sealed class NbtDocumentTests
 
         Assert.Throws<NbtException>(() =>
             NbtDocument.Parse(stream, new NbtReaderOptions { MaxDocumentBytes = data.Length - 1 }));
-    }
-
-    [Fact]
-    public void InvalidOptionsAreRejected()
-    {
-        var data = BuildSampleDocument();
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
-            NbtDocument.Parse(data, new NbtReaderOptions { RootFormat = (NbtRootFormat)42 }));
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
-            NbtDocument.Parse(data, new NbtReaderOptions { MaxDepth = -1 }));
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
-            NbtDocument.Parse(data, new NbtReaderOptions { MaxCollectionLength = -1 }));
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
-            NbtDocument.Parse(data, new NbtReaderOptions { MaxDocumentBytes = -1 }));
     }
 
     // --------------------------------------------------------------------------------------------
@@ -774,7 +1374,8 @@ public sealed class NbtDocumentTests
         using var stream = new NonSeekableStream(data);
         using var document = NbtDocument.Parse(stream);
 
-        Assert.Equal(100_000, document.RootElement.GetMember("Data").GetByteArray().Length);
+        var root = document.RootElement.Compound;
+        Assert.Equal(100_000, root.GetMember("Data").ByteArray.Length);
     }
 
     [Fact]
@@ -785,7 +1386,7 @@ public sealed class NbtDocumentTests
 
         using var document = NbtDocument.Parse(stream, new NbtReaderOptions { MaxDocumentBytes = 10_000 });
 
-        Assert.Equal(20, document.RootElement.GetMember("Health").GetInt32());
+        Assert.Equal(20, document.RootElement.Compound.GetMember("Health").Int32);
     }
 
     [Fact]
@@ -795,7 +1396,7 @@ public sealed class NbtDocumentTests
 
         var exception = Assert.Throws<NbtException>(() => NbtDocument.Parse(stream));
         Assert.False(exception.IsTruncated);
-        Assert.Contains("Unknown NBT tag type 13", exception.Message);
+        Assert.Contains("Unknown NBT tag type 13", exception.Message, StringComparison.Ordinal);
     }
 
     // --------------------------------------------------------------------------------------------
@@ -803,18 +1404,102 @@ public sealed class NbtDocumentTests
     // --------------------------------------------------------------------------------------------
 
     [Fact]
-    public void DisposedDocumentThrowsOnEveryMember()
+    public void DisposedDocumentThrowsOnRootAccess()
     {
         var document = NbtDocument.Parse(BuildSampleDocument());
-        var root = document.RootElement;
-        var member = root.GetMember("Health");
         document.Dispose();
 
         Assert.Throws<ObjectDisposedException>(() => document.RootElement);
         Assert.Throws<ObjectDisposedException>(() => _ = document.RootName);
-        Assert.Throws<ObjectDisposedException>(() => _ = root.TagType);
-        Assert.Throws<ObjectDisposedException>(() => member.GetInt32());
-        Assert.Throws<ObjectDisposedException>(() => root.EnumerateMembers().MoveNext());
+    }
+
+    [Fact]
+    public void StringViewThrowsAfterDispose()
+    {
+        var document = NbtDocument.Parse(BuildSampleDocument());
+        var view = document.RootElement.Compound.GetMember("Name").String;
+        document.Dispose();
+
+        Assert.Throws<ObjectDisposedException>(() => _ = view.ByteLength);
+        Assert.Throws<ObjectDisposedException>(() => _ = view.IsEmpty);
+        Assert.Throws<ObjectDisposedException>(() => _ = view.RawSpan.Length);
+        Assert.Throws<ObjectDisposedException>(() => _ = view.RawMemory.Length);
+        Assert.Throws<ObjectDisposedException>(() => view.GetString());
+    }
+
+    [Fact]
+    public void ArrayViewsThrowAfterDispose()
+    {
+        var document = NbtDocument.Parse(BuildAllTagsDocument());
+        var root = document.RootElement.Compound;
+        var bytes = root.GetMember("ByteArray").ByteArray;
+        var ints = root.GetMember("IntArray").IntArray;
+        var longs = root.GetMember("LongArray").LongArray;
+        document.Dispose();
+
+        Assert.Throws<ObjectDisposedException>(() => _ = bytes.Length);
+        Assert.Throws<ObjectDisposedException>(() => _ = bytes.Span.Length);
+        Assert.Throws<ObjectDisposedException>(() => bytes.ToArray());
+        Assert.Throws<ObjectDisposedException>(() => _ = ints.Length);
+        Assert.Throws<ObjectDisposedException>(() => _ = ints.RawSpan.Length);
+        Assert.Throws<ObjectDisposedException>(() => ints.ToArray());
+        Assert.Throws<ObjectDisposedException>(() => _ = longs.Length);
+        Assert.Throws<ObjectDisposedException>(() => _ = longs.RawSpan.Length);
+        Assert.Throws<ObjectDisposedException>(() => longs.ToArray());
+    }
+
+    [Fact]
+    public void ListViewThrowsAfterDispose()
+    {
+        var document = NbtDocument.Parse(BuildSampleDocument());
+        var list = document.RootElement.Compound.GetMember("Numbers").List;
+        using var enumerator = list.GetEnumerator();
+        document.Dispose();
+
+        Assert.Throws<ObjectDisposedException>(() => _ = list.Count);
+        Assert.Throws<ObjectDisposedException>(() => _ = list.ElementType);
+        Assert.Throws<ObjectDisposedException>(() => list.GetElementAt(0));
+        Assert.Throws<ObjectDisposedException>(() => _ = list[0]);
+        Assert.Throws<ObjectDisposedException>(() => list.GetEnumerator());
+        Assert.Throws<ObjectDisposedException>(() => enumerator.MoveNext());
+    }
+
+    [Fact]
+    public void CompoundViewThrowsAfterDispose()
+    {
+        var document = NbtDocument.Parse(BuildSampleDocument());
+        var compound = document.RootElement.Compound;
+        using var enumerator = compound.GetEnumerator();
+        document.Dispose();
+
+        Assert.Throws<ObjectDisposedException>(() => _ = compound.MemberCount);
+        Assert.Throws<ObjectDisposedException>(() => compound.TryGetMember("Health", out _));
+        Assert.Throws<ObjectDisposedException>(() => compound.GetMember("Health"));
+        Assert.Throws<ObjectDisposedException>(() => compound.GetEnumerator());
+        Assert.Throws<ObjectDisposedException>(() => enumerator.MoveNext());
+        Assert.Throws<ObjectDisposedException>(() => _ = enumerator.Name);
+    }
+
+    [Fact]
+    public void NumericValuesAndTagTypeSurviveDispose()
+    {
+        var document = NbtDocument.Parse(BuildSampleDocument());
+        var root = document.RootElement;
+        var health = root.Compound.GetMember("Health");
+        document.Dispose();
+
+        // TagType is inline metadata and a numeric value is self-contained; neither touches the
+        // document after it has been indexed.
+        Assert.Equal(NbtTagType.Compound, root.TagType);
+        Assert.Equal(NbtTagType.Int, health.TagType);
+        Assert.Equal(20, health.Int32);
+
+        var numberDocument = NbtDocument.Parse(NbtSerializer.Serialize(42, "root"));
+        var number = numberDocument.RootElement;
+        numberDocument.Dispose();
+
+        Assert.Equal(NbtTagType.Int, number.TagType);
+        Assert.Equal(42, number.Int32);
     }
 
     [Fact]
@@ -824,74 +1509,8 @@ public sealed class NbtDocumentTests
 
         document.Dispose();
         document.Dispose();
-    }
 
-    [Fact]
-    public void DefaultElementThrowsOnEveryMember()
-    {
-        var element = default(NbtElement);
-
-        Assert.Throws<InvalidOperationException>(() => _ = element.TagType);
-        Assert.Throws<InvalidOperationException>(() => _ = element.Name);
-        Assert.Throws<InvalidOperationException>(() => element.GetSByte());
-        Assert.Throws<InvalidOperationException>(() => element.GetString());
-        Assert.Throws<InvalidOperationException>(() => _ = element.MemberCount);
-        Assert.Throws<InvalidOperationException>(() => element.GetElementAt(0));
-        Assert.Throws<InvalidOperationException>(() => element.GetMember("x"));
-        Assert.Throws<InvalidOperationException>(() => element.TryGetMember("x", out _));
-        Assert.Throws<InvalidOperationException>(() => element.ToNbtValue());
-        Assert.Throws<InvalidOperationException>(() => element.NameEquals("x"u8));
-    }
-
-    // --------------------------------------------------------------------------------------------
-    // Materialization
-    // --------------------------------------------------------------------------------------------
-
-    [Fact]
-    public void ToNbtValueMatchesSerializerDeserialization()
-    {
-        var data = BuildAllTagsDocument();
-        var expected = NbtSerializer.Deserialize(data).Value;
-
-        using var document = NbtDocument.Parse(data);
-
-        Assert.True(ValueEquals(expected, document.RootElement.ToNbtValue()), "materialized value differs");
-    }
-
-    [Fact]
-    public void ToNbtValueMatchesSerializerDeserializationForDuplicatesAndEmptyLists()
-    {
-        var data = BuildEmptyListDocument();
-        var expected = NbtSerializer.Deserialize(data).Value;
-
-        using var document = NbtDocument.Parse(data);
-
-        Assert.True(ValueEquals(expected, document.RootElement.ToNbtValue()), "materialized value differs");
-    }
-
-    [Fact]
-    public void ToNbtValueMaterializesBothEmptyListEncodingsDistinctly()
-    {
-        var data = BuildEmptyListDocument();
-        using var document = NbtDocument.Parse(data);
-        var root = document.RootElement;
-
-        var emptyEnd = root.GetMember("EmptyEnd").ToNbtValue();
-        var emptyInts = root.GetMember("EmptyInts").ToNbtValue();
-
-        Assert.True(emptyEnd.Value is NbtList endList && endList is NbtEndList);
-        Assert.True(emptyInts.Value is NbtList intList && intList.ElementType == NbtTagType.Int);
-    }
-
-    [Fact]
-    public void ToNbtValueMaterializesByteArraysAsSignedBytes()
-    {
-        var data = BuildAllTagsDocument();
-        using var document = NbtDocument.Parse(data);
-
-        var value = document.RootElement.GetMember("ByteArray").ToNbtValue();
-
-        Assert.True(value is sbyte[] { Length: 3 });
+        Assert.Throws<ObjectDisposedException>(() => document.RootElement);
     }
 
     // --------------------------------------------------------------------------------------------
@@ -900,8 +1519,148 @@ public sealed class NbtDocumentTests
 
     private static string ParseString(byte[] data)
     {
-        using var document = NbtDocument.Parse(data, new NbtReaderOptions { RootFormat = NbtRootFormat.Unnamed });
-        return document.RootElement.GetString();
+        using var document = NbtDocument.Parse(data, UnnamedOptions);
+        return document.RootElement.String.GetString();
+    }
+
+    private static NbtDocument ParseUnnamedRootDocument(RootWriter writeValue, out NbtElement root)
+    {
+        var buffer = new ArrayBufferWriter<byte>();
+        var writer = new NbtWriter(buffer, new NbtWriterOptions { RootFormat = NbtRootFormat.Unnamed });
+        writeValue(ref writer);
+        writer.Complete();
+        var document = NbtDocument.Parse(buffer.WrittenSpan.ToArray(), UnnamedOptions);
+        root = document.RootElement;
+        return document;
+    }
+
+    private static NbtElement RequireMember(NbtCompoundElement compound, string name)
+    {
+        Assert.True(compound.TryGetMember(name, out var value), $"The compound has no member '{name}'.");
+        return value;
+    }
+
+    private static int[] ReadIntElements(NbtListElement list)
+    {
+        var values = new int[list.Count];
+        var index = 0;
+        foreach (var element in list)
+        {
+            values[index++] = element.Int32;
+        }
+
+        return values;
+    }
+
+    private static string[] ReadMemberNames(NbtCompoundElement compound)
+    {
+        var names = new string[compound.MemberCount];
+        var index = 0;
+        using var enumerator = compound.EnumerateMembers();
+        while (enumerator.MoveNext())
+        {
+            names[index++] = enumerator.Name;
+        }
+
+        return names;
+    }
+
+    private static string[] ReadNestedMemberNames(NbtListElement list)
+    {
+        var names = new List<string>();
+        foreach (var element in list)
+        {
+            using var enumerator = element.Compound.EnumerateMembers();
+            while (enumerator.MoveNext())
+            {
+                names.Add(enumerator.Name);
+            }
+        }
+
+        return names.ToArray();
+    }
+
+    private static void AssertDefaultCaseFailure(Func<object?> read, NbtTagType expected)
+    {
+        var exception = Assert.Throws<NbtException>(read);
+        Assert.Equal(expected, exception.ExpectedTagType);
+        Assert.Null(exception.ActualTagType);
+    }
+
+    private static byte[] BuildUnnamedRoot(NbtTagType tag)
+    {
+        var buffer = new ArrayBufferWriter<byte>();
+        var writer = new NbtWriter(buffer, new NbtWriterOptions { RootFormat = NbtRootFormat.Unnamed });
+        WriteMember(ref writer, "value", tag);
+        writer.Complete();
+        return buffer.WrittenSpan.ToArray();
+    }
+
+    private static object? ReadCaseProperty(NbtElement element, NbtTagType tag) => tag switch
+    {
+        NbtTagType.Byte => element.SByte,
+        NbtTagType.Short => element.Int16,
+        NbtTagType.Int => element.Int32,
+        NbtTagType.Long => element.Int64,
+        NbtTagType.Float => element.Single,
+        NbtTagType.Double => element.Double,
+        NbtTagType.ByteArray => element.ByteArray.ToArray(),
+        NbtTagType.String => element.String.GetString(),
+        NbtTagType.List => element.List,
+        NbtTagType.Compound => element.Compound,
+        NbtTagType.IntArray => element.IntArray.ToArray(),
+        NbtTagType.LongArray => element.LongArray.ToArray(),
+        _ => throw new ArgumentOutOfRangeException(nameof(tag)),
+    };
+
+    private static void WriteMember(ref NbtWriter writer, string name, NbtTagType tag)
+    {
+        switch (tag)
+        {
+            case NbtTagType.Byte:
+                writer.WriteSByte(name, -5);
+                break;
+            case NbtTagType.Short:
+                writer.WriteInt16(name, 12345);
+                break;
+            case NbtTagType.Int:
+                writer.WriteInt32(name, -123456789);
+                break;
+            case NbtTagType.Long:
+                writer.WriteInt64(name, 1234567890123L);
+                break;
+            case NbtTagType.Float:
+                writer.WriteSingle(name, 0.5f);
+                break;
+            case NbtTagType.Double:
+                writer.WriteDouble(name, -0.25);
+                break;
+            case NbtTagType.ByteArray:
+                writer.WriteByteArray(name, [1, 2, 3]);
+                break;
+            case NbtTagType.String:
+                writer.WriteString(name, "中文 \0 x");
+                break;
+            case NbtTagType.List:
+                writer.WriteStartList(name, NbtTagType.String, 2);
+                writer.WriteString("a");
+                writer.WriteString("b");
+                writer.WriteEndList();
+                break;
+            case NbtTagType.Compound:
+                writer.WriteStartCompound(name);
+                writer.WriteInt32("Nested", 1);
+                writer.WriteEndCompound();
+                break;
+            case NbtTagType.IntArray:
+                writer.WriteInt32Array(name, [int.MinValue, -1, int.MaxValue]);
+                break;
+            case NbtTagType.LongArray:
+                writer.WriteInt64Array(name, [long.MinValue, long.MaxValue]);
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(tag));
+        }
     }
 
     private static byte[] BuildSampleDocument()
@@ -927,23 +1686,11 @@ public sealed class NbtDocumentTests
         var buffer = new ArrayBufferWriter<byte>();
         var writer = new NbtWriter(buffer);
         writer.WriteStartCompound("root");
-        writer.WriteSByte("Byte", -5);
-        writer.WriteInt16("Short", 12345);
-        writer.WriteInt32("Int", -123456789);
-        writer.WriteInt64("Long", 1234567890123L);
-        writer.WriteSingle("Float", 0.5f);
-        writer.WriteDouble("Double", -0.25);
-        writer.WriteByteArray("ByteArray", [1, 2, 3]);
-        writer.WriteString("String", "中文 \0 x");
-        writer.WriteStartList("List", NbtTagType.String, 2);
-        writer.WriteString("a");
-        writer.WriteString("b");
-        writer.WriteEndList();
-        writer.WriteStartCompound("Compound");
-        writer.WriteInt32("Nested", 1);
-        writer.WriteEndCompound();
-        writer.WriteInt32Array("IntArray", [int.MinValue, -1, int.MaxValue]);
-        writer.WriteInt64Array("LongArray", [long.MinValue, long.MaxValue]);
+        foreach (var tag in AllTags)
+        {
+            WriteMember(ref writer, tag.ToString(), tag);
+        }
+
         writer.WriteEndCompound();
         writer.Complete();
         return buffer.WrittenSpan.ToArray();
@@ -996,8 +1743,6 @@ public sealed class NbtDocumentTests
         writer.WriteEndList();
         writer.WriteStartList("EmptyInts", NbtTagType.Int, 0);
         writer.WriteEndList();
-        writer.WriteInt32("Dup", 1);
-        writer.WriteInt32("Dup", 2);
         writer.WriteEndCompound();
         writer.Complete();
         return buffer.WrittenSpan.ToArray();
@@ -1062,15 +1807,6 @@ public sealed class NbtDocumentTests
         return buffer.WrittenSpan.ToArray();
     }
 
-    private static byte[] BuildIntArrayDocument(int count)
-    {
-        var buffer = new ArrayBufferWriter<byte>();
-        var writer = new NbtWriter(buffer, new NbtWriterOptions { RootFormat = NbtRootFormat.Unnamed });
-        writer.WriteInt32Array("ignored", new int[count]);
-        writer.Complete();
-        return buffer.WrittenSpan.ToArray();
-    }
-
     private static byte[] BuildDeepDocument(int depth)
     {
         var buffer = new ArrayBufferWriter<byte>();
@@ -1129,100 +1865,6 @@ public sealed class NbtDocumentTests
         }
 
         return new ReadOnlySequence<byte>(first, 0, current!, current!.Memory.Length);
-    }
-
-    private static bool ValueEquals(object? expected, object? actual)
-    {
-        if (expected is NbtValue expectedValue)
-        {
-            expected = expectedValue.Value;
-        }
-
-        if (actual is NbtValue actualValue)
-        {
-            actual = actualValue.Value;
-        }
-
-        return (expected, actual) switch
-        {
-            (null, null) => true,
-            (NbtCompound expectedCompound, NbtCompound actualCompound) =>
-                CompoundEquals(expectedCompound, actualCompound),
-            (NbtList expectedList, NbtList actualList) => ListEquals(expectedList, actualList),
-            (sbyte[] expectedArray, sbyte[] actualArray) => expectedArray.SequenceEqual(actualArray),
-            (int[] expectedArray, int[] actualArray) => expectedArray.SequenceEqual(actualArray),
-            (long[] expectedArray, long[] actualArray) => expectedArray.SequenceEqual(actualArray),
-            (string expectedString, string actualString) => expectedString == actualString,
-            (IEnumerable expectedSequence, IEnumerable actualSequence) =>
-                SequenceEquals(expectedSequence, actualSequence),
-            _ => Equals(expected, actual),
-        };
-    }
-
-    private static bool CompoundEquals(NbtCompound expected, NbtCompound actual)
-    {
-        if (expected.Count != actual.Count)
-        {
-            return false;
-        }
-
-        foreach (var (name, value) in expected)
-        {
-            if (!actual.TryGetValue(name, out var actualValue) || !ValueEquals(value, actualValue))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    private static bool ListEquals(NbtList expected, NbtList actual)
-    {
-        if (expected.ElementType != actual.ElementType || expected.Count != actual.Count)
-        {
-            return false;
-        }
-
-        if (expected.Count == 0)
-        {
-            return true; // both empty; the NbtEndList marker is not enumerable
-        }
-
-        return SequenceEquals((IEnumerable)expected.Value, (IEnumerable)actual.Value);
-    }
-
-    private static bool SequenceEquals(IEnumerable expected, IEnumerable actual)
-    {
-        var expectedEnumerator = expected.GetEnumerator();
-        var actualEnumerator = actual.GetEnumerator();
-        try
-        {
-            while (true)
-            {
-                var expectedNext = expectedEnumerator.MoveNext();
-                var actualNext = actualEnumerator.MoveNext();
-                if (expectedNext != actualNext)
-                {
-                    return false;
-                }
-
-                if (!expectedNext)
-                {
-                    return true;
-                }
-
-                if (!ValueEquals(expectedEnumerator.Current, actualEnumerator.Current))
-                {
-                    return false;
-                }
-            }
-        }
-        finally
-        {
-            (expectedEnumerator as IDisposable)?.Dispose();
-            (actualEnumerator as IDisposable)?.Dispose();
-        }
     }
 
     private sealed class Segment : ReadOnlySequenceSegment<byte>
