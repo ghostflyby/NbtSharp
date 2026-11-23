@@ -18,6 +18,8 @@ namespace NbtSharp;
 /// <para>
 /// The policy lives in the standard <see cref="Encoding"/> entry points, so callers use
 /// <c>GetString</c>, <c>GetCharCount</c>, and <c>GetChars</c>; there is no bespoke decode method.
+/// <c>GetDecoder</c> and <c>GetEncoder</c> expose the underlying codec's stateful objects and do
+/// not apply the F0 rule.
 /// </para>
 /// </remarks>
 public sealed class NbtModifiedUtf8Encoding : Encoding

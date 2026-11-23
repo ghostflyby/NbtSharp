@@ -452,6 +452,51 @@ public sealed class NbtDocumentTests
         Assert.Equal(42, root.Int32);
     }
 
+    [Fact]
+    public void ElementValueBoxesEveryCase()
+    {
+        using var document = NbtDocument.Parse(BuildAllTagsDocument());
+        var root = document.RootElement.Compound;
+
+        Assert.IsType<sbyte>(root.GetMember("Byte").Value);
+        Assert.IsType<short>(root.GetMember("Short").Value);
+        Assert.IsType<int>(root.GetMember("Int").Value);
+        Assert.IsType<long>(root.GetMember("Long").Value);
+        Assert.IsType<float>(root.GetMember("Float").Value);
+        Assert.IsType<double>(root.GetMember("Double").Value);
+        Assert.IsType<NbtStringElement>(root.GetMember("String").Value);
+        Assert.IsType<NbtByteArrayElement>(root.GetMember("ByteArray").Value);
+        Assert.IsType<NbtIntArrayElement>(root.GetMember("IntArray").Value);
+        Assert.IsType<NbtLongArrayElement>(root.GetMember("LongArray").Value);
+        Assert.IsType<NbtListElement>(root.GetMember("List").Value);
+        Assert.IsType<NbtCompoundElement>(root.GetMember("Compound").Value);
+    }
+
+    [Fact]
+    public void ParsingBeyondTheInitialSlotCapacityPreservesEveryValue()
+    {
+        const int memberCount = 100;
+        var buffer = new ArrayBufferWriter<byte>();
+        var writer = new NbtWriter(buffer);
+        writer.WriteStartCompound("root");
+        for (var i = 0; i < memberCount; i++)
+        {
+            writer.WriteInt32($"m{i}", i);
+        }
+
+        writer.WriteEndCompound();
+        writer.Complete();
+
+        using var document = NbtDocument.Parse(buffer.WrittenSpan.ToArray());
+        var root = document.RootElement.Compound;
+
+        Assert.Equal(memberCount, root.MemberCount);
+        for (var i = 0; i < memberCount; i++)
+        {
+            Assert.Equal(i, root.GetMember($"m{i}").Int32);
+        }
+    }
+
     // --------------------------------------------------------------------------------------------
     // Strings
     // --------------------------------------------------------------------------------------------

@@ -8,7 +8,7 @@ public sealed class NbtModifiedUtf8EncodingTests
     [InlineData(new byte[] { 0xF0, 0x9F, 0x98, 0x80 })]
     [InlineData(new byte[] { 0xF0, 0x41 })]
     [InlineData(new byte[] { 0xFF })]
-    public void EveryEntryPointRejectsLeadBytesOfF0OrGreater(byte[] bytes)
+    public void StringCountAndCharsEntryPointsRejectLeadBytesOfF0OrGreater(byte[] bytes)
     {
         Assert.Throws<NbtException>(() => Codec.GetString(bytes));
         Assert.Throws<NbtException>(() => Codec.GetString(bytes, 0, bytes.Length));
