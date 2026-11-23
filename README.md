@@ -329,11 +329,6 @@ allocated. `Name` itself is decoded lazily and cached per token. The byte-name w
 overloads do not validate the name content as modified UTF-8; they can emit names the reader will
 reject, and validity is the caller's responsibility.
 
-`NbtNameByteComparer` compares modified UTF-8 name byte spans by decoded value, and
-`NbtNameCharComparer` is an `IAlternateEqualityComparer<ReadOnlySpan<char>, ReadOnlySpan<byte>>`
-that compares decoded characters with wire name bytes. Hash codes are computed from the decoded
-characters, so canonical and alternate encodings of the same name hash identically.
-
 ## Read-only DOM (NbtDocument)
 
 `NbtDocument` is for random access over a document you want to probe repeatedly without a
