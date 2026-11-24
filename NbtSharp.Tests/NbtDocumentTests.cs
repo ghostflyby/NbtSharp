@@ -320,7 +320,7 @@ public sealed class NbtDocumentTests
         Assert.Equal("b", list[1].String.GetString());
 
         var compound = RequireMember(root, "Compound").Compound;
-        Assert.Equal(1, compound.Count);
+        Assert.Single(compound);
         Assert.Equal(1, compound["Nested"].Int32);
     }
 
@@ -701,6 +701,17 @@ public sealed class NbtDocumentTests
         Assert.Equal(["Dup", "Dup", "Other"], ReadMemberNames(document.RootElement.Compound));
     }
 
+    [Fact]
+    public void CompoundImplementsPairCollection()
+    {
+        using var document = NbtDocument.Parse(BuildDuplicateMemberDocument());
+        IReadOnlyCollection<KeyValuePair<string, NbtElement>> pairs = document.RootElement.Compound;
+
+        Assert.Equal(3, pairs.Count);
+        Assert.Equal(["Dup", "Dup", "Other"], pairs.Select(static pair => pair.Key).ToArray());
+        Assert.Equal(2, document.RootElement.Compound["Dup"].Int32);
+    }
+
     [Theory]
     [InlineData(new byte[] { 0x00 }, "\0", "\0", true)] // wire raw null
     [InlineData(new byte[] { 0xC0, 0x80 }, "\0", "\0", true)] // wire two-byte null
@@ -755,8 +766,8 @@ public sealed class NbtDocumentTests
         using var enumerator = root.GetEnumerator();
         while (enumerator.MoveNext())
         {
-            names.Add(enumerator.Name);
-            types.Add(enumerator.Current.TagType);
+            names.Add(enumerator.Current.Key);
+            types.Add(enumerator.Current.Value.TagType);
         }
 
         Assert.Equal(["Health", "Temperature", "Name", "Numbers"], names.ToArray());
@@ -764,9 +775,9 @@ public sealed class NbtDocumentTests
 
         enumerator.Reset();
         Assert.True(enumerator.MoveNext());
-        Assert.Equal("Health", enumerator.Name);
-        Assert.Equal("Health", enumerator.Name);
-        Assert.Equal(NbtTagType.Int, enumerator.Current.TagType);
+        Assert.Equal("Health", enumerator.Current.Key);
+        Assert.Equal("Health", enumerator.Current.Key);
+        Assert.Equal(NbtTagType.Int, enumerator.Current.Value.TagType);
     }
 
     [Fact]
@@ -779,7 +790,7 @@ public sealed class NbtDocumentTests
         Assert.Equal(["A", "Items", "B"], ReadMemberNames(root));
 
         var nested = root["A"].Compound;
-        Assert.Equal(1, nested.Count);
+        Assert.Single(nested);
         Assert.Equal(["x"], ReadMemberNames(nested));
         Assert.Equal(1, nested["x"].Int32);
         Assert.Equal(9, root["B"].Int32);
@@ -900,7 +911,7 @@ public sealed class NbtDocumentTests
         Assert.Equal(3, items.Count);
 
         var first = items[0].Compound;
-        Assert.Equal(1, first.Count);
+        Assert.Single(first);
         Assert.Equal(10, first["x"].Int32);
         Assert.Equal(20, items[1].Compound["y"].Int32);
         Assert.Equal(30, items[2].Compound["x"].Int32);
@@ -1019,7 +1030,7 @@ public sealed class NbtDocumentTests
         while (enumerator.MoveNext())
         {
             count++;
-            nameLength += enumerator.Name.Length;
+            nameLength += enumerator.Current.Key.Length;
         }
 
         Assert.Equal(root.Count, count);
@@ -1487,7 +1498,7 @@ public sealed class NbtDocumentTests
         Assert.Throws<ObjectDisposedException>(() => compound["Health"]);
         Assert.Throws<ObjectDisposedException>(() => compound.GetEnumerator());
         Assert.Throws<ObjectDisposedException>(() => enumerator.MoveNext());
-        Assert.Throws<ObjectDisposedException>(() => _ = enumerator.Name);
+        Assert.Throws<ObjectDisposedException>(() => _ = enumerator.Current.Key);
     }
 
     [Fact]
@@ -1569,7 +1580,7 @@ public sealed class NbtDocumentTests
         using var enumerator = compound.GetEnumerator();
         while (enumerator.MoveNext())
         {
-            names[index++] = enumerator.Name;
+            names[index++] = enumerator.Current.Key;
         }
 
         return names;
@@ -1583,7 +1594,7 @@ public sealed class NbtDocumentTests
             using var enumerator = element.Compound.GetEnumerator();
             while (enumerator.MoveNext())
             {
-                names.Add(enumerator.Name);
+                names.Add(enumerator.Current.Key);
             }
         }
 

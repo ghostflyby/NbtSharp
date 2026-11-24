@@ -7,17 +7,18 @@ namespace NbtSharp;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Members are produced on demand as <see cref="NbtElement"/> values; nothing is materialized and
-/// the view allocates nothing while navigating. The view stays valid only while its document is
-/// alive and undisposed.
+/// Members are produced on demand as <see cref="NbtElement"/> values; nothing is materialized.
+/// Count, the indexer, and <see cref="TryGetValue"/> do not allocate. Enumeration yields
+/// <see cref="KeyValuePair{TKey,TValue}"/> in wire order and decodes each member name to form the
+/// pair key. The view stays valid only while its document is alive and undisposed.
 /// </para>
 /// <para>
-/// This is a wire-order view: duplicate member names are preserved by <see cref="Count"/> and
-/// enumeration, while the indexer and <see cref="TryGetValue"/> resolve the last occurrence. It
-/// therefore does not implement <see cref="IReadOnlyDictionary{TKey,TValue}"/>.
+/// Duplicate member names are preserved by <see cref="Count"/> and enumeration, while the indexer
+/// and <see cref="TryGetValue"/> resolve the last occurrence. The view is an enumerable collection
+/// of pairs, not <see cref="IReadOnlyDictionary{TKey,TValue}"/>.
 /// </para>
 /// </remarks>
-public readonly struct NbtCompoundElement
+public readonly struct NbtCompoundElement : IReadOnlyCollection<KeyValuePair<string, NbtElement>>
 {
     internal NbtCompoundElement(NbtDocument owner, int slotIndex)
     {
@@ -120,6 +121,11 @@ public readonly struct NbtCompoundElement
         return new Enumerator(Document, SlotIndex);
     }
 
+    IEnumerator<KeyValuePair<string, NbtElement>> IEnumerable<KeyValuePair<string, NbtElement>>.GetEnumerator() =>
+        GetEnumerator();
+
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
     private NbtDocument Document => Owner ?? throw new InvalidOperationException(
         "The operation is not valid for a default-initialized NbtCompoundElement.");
 
@@ -142,10 +148,10 @@ public readonly struct NbtCompoundElement
 
     /// <summary>Enumerates the members of a compound in wire order.</summary>
     /// <remarks>
-    /// <see cref="Current"/> produces the member value; <see cref="Name"/> decodes the member name
-    /// on demand, so enumerations that do not read names stay allocation-free.
+    /// <see cref="Current"/> produces a <see cref="KeyValuePair{TKey,TValue}"/> whose key is the
+    /// decoded member name.
     /// </remarks>
-    public struct Enumerator : IEnumerator<NbtElement>
+    public struct Enumerator : IEnumerator<KeyValuePair<string, NbtElement>>
     {
         private readonly NbtDocument _document;
         private readonly int _parentSlot;
@@ -166,13 +172,22 @@ public readonly struct NbtCompoundElement
             _current = default;
         }
 
-        /// <summary>Gets the current member value.</summary>
-        public NbtElement Current => _current;
+        /// <summary>Gets the current member pair.</summary>
+        public KeyValuePair<string, NbtElement> Current
+        {
+            get
+            {
+                _document.ThrowIfDisposed();
+                if (_currentSlot < 0)
+                {
+                    throw new InvalidOperationException("The enumerator is not positioned on an element.");
+                }
 
-        /// <summary>Gets the current member name.</summary>
-        public string Name => _document.NameAt(_currentSlot);
+                return new(_document.NameAt(_currentSlot), _current);
+            }
+        }
 
-        object IEnumerator.Current => _current;
+        object IEnumerator.Current => Current;
 
         /// <summary>Advances to the next member.</summary>
         /// <returns><see langword="false"/> when the enumeration is complete.</returns>
@@ -180,6 +195,9 @@ public readonly struct NbtCompoundElement
         {
             if (_index + 1 >= _count)
             {
+                _index = _count;
+                _currentSlot = -1;
+                _current = default;
                 return false;
             }
 
