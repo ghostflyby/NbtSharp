@@ -8,11 +8,12 @@ namespace NbtSharp;
 /// <remarks>
 /// <para>
 /// This is a hand-written union. Numeric cases are stored inline (no boxing). Every other case is a
-/// zero-allocation view struct over the document: <see cref="NbtStringElement"/>,
+/// view struct over the document: <see cref="NbtStringElement"/>,
 /// <see cref="NbtByteArrayElement"/>, <see cref="NbtIntArrayElement"/>,
 /// <see cref="NbtLongArrayElement"/>, <see cref="NbtListElement"/>, and
 /// <see cref="NbtCompoundElement"/>; nothing is materialized until a materializing member
-/// (<c>GetString</c>, <c>ToArray</c>, …) is called.
+/// (<c>GetString</c>, <c>ToArray</c>, …) is called. Enumerating a compound's pairs also
+/// materializes each member name as the pair key.
 /// </para>
 /// <para>
 /// Non-boxing access is through <see cref="TagType"/> plus the per-case properties

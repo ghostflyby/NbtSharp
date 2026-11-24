@@ -3,12 +3,12 @@ using System.Collections;
 namespace NbtSharp;
 
 /// <summary>
-/// A <c>TAG_Compound</c> value: a zero-allocation view over the document's slot index.
+/// A <c>TAG_Compound</c> value: a read-only view over the document's slot index.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Members are produced on demand as <see cref="NbtElement"/> values; nothing is materialized.
-/// Count, the indexer, and <see cref="TryGetValue"/> do not allocate. Enumeration yields
+/// Members are produced on demand as <see cref="NbtElement"/> values; no member tree is
+/// materialized. Count, the indexer, and <see cref="TryGetValue"/> do not allocate. Enumeration yields
 /// <see cref="KeyValuePair{TKey,TValue}"/> in wire order and decodes each member name to form the
 /// pair key. The view stays valid only while its document is alive and undisposed.
 /// </para>
@@ -173,10 +173,20 @@ public readonly struct NbtCompoundElement : IReadOnlyCollection<KeyValuePair<str
         }
 
         /// <summary>Gets the current member pair.</summary>
+        /// <exception cref="InvalidOperationException">
+        /// The enumerator is not positioned on a member, or is default-initialized.
+        /// </exception>
+        /// <exception cref="ObjectDisposedException">The owning document has been disposed.</exception>
+        /// <exception cref="NbtException">The current member name is not valid modified UTF-8.</exception>
         public KeyValuePair<string, NbtElement> Current
         {
             get
             {
+                if (_document is null)
+                {
+                    throw new InvalidOperationException("The enumerator is not positioned on an element.");
+                }
+
                 _document.ThrowIfDisposed();
                 if (_currentSlot < 0)
                 {
