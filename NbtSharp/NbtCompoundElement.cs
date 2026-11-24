@@ -33,6 +33,7 @@ public readonly struct NbtCompoundElement : IReadOnlyCollection<KeyValuePair<str
     internal int SlotIndex { get; }
 
     /// <summary>Gets the number of members.</summary>
+    /// <exception cref="InvalidOperationException">The view is default-initialized.</exception>
     /// <exception cref="NbtException">The document slot is not a compound.</exception>
     /// <exception cref="ObjectDisposedException">The owning document has been disposed.</exception>
     public int Count
@@ -49,6 +50,7 @@ public readonly struct NbtCompoundElement : IReadOnlyCollection<KeyValuePair<str
     /// <returns>The member.</returns>
     /// <remarks>When the key occurs more than once, the last occurrence wins.</remarks>
     /// <exception cref="ArgumentNullException"><paramref name="key"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">The view is default-initialized.</exception>
     /// <exception cref="KeyNotFoundException">No member has the specified key.</exception>
     /// <exception cref="NbtException">The document slot is not a compound.</exception>
     /// <exception cref="ObjectDisposedException">The owning document has been disposed.</exception>
@@ -76,6 +78,7 @@ public readonly struct NbtCompoundElement : IReadOnlyCollection<KeyValuePair<str
     /// strings are allocated. When the key occurs more than once, the last occurrence wins.
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="key"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">The view is default-initialized.</exception>
     /// <exception cref="NbtException">
     /// The document slot is not a compound, or a wire name is not valid modified UTF-8.
     /// </exception>
@@ -113,6 +116,7 @@ public readonly struct NbtCompoundElement : IReadOnlyCollection<KeyValuePair<str
 
     /// <summary>Gets an enumerator over the members in wire order.</summary>
     /// <returns>The enumerator.</returns>
+    /// <exception cref="InvalidOperationException">The view is default-initialized.</exception>
     /// <exception cref="NbtException">The document slot is not a compound.</exception>
     /// <exception cref="ObjectDisposedException">The owning document has been disposed.</exception>
     public Enumerator GetEnumerator()
@@ -201,8 +205,15 @@ public readonly struct NbtCompoundElement : IReadOnlyCollection<KeyValuePair<str
 
         /// <summary>Advances to the next member.</summary>
         /// <returns><see langword="false"/> when the enumeration is complete.</returns>
+        /// <exception cref="InvalidOperationException">The enumerator is default-initialized.</exception>
+        /// <exception cref="ObjectDisposedException">The owning document has been disposed.</exception>
         public bool MoveNext()
         {
+            if (_document is null)
+            {
+                throw new InvalidOperationException("The enumerator is not initialized.");
+            }
+
             if (_index + 1 >= _count)
             {
                 _index = _count;
@@ -219,8 +230,14 @@ public readonly struct NbtCompoundElement : IReadOnlyCollection<KeyValuePair<str
         }
 
         /// <summary>Resets the enumerator to the start of the compound.</summary>
+        /// <exception cref="InvalidOperationException">The enumerator is default-initialized.</exception>
         public void Reset()
         {
+            if (_document is null)
+            {
+                throw new InvalidOperationException("The enumerator is not initialized.");
+            }
+
             _index = -1;
             _childSlot = _parentSlot + 1;
             _currentSlot = -1;

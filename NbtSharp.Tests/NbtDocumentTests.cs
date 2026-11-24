@@ -750,10 +750,29 @@ public sealed class NbtDocumentTests
     public void DisposedCompoundCollectionThrowsOnEnumeration()
     {
         var document = NbtDocument.Parse(BuildSampleDocument());
-        IEnumerable<KeyValuePair<string, NbtElement>> pairs = document.RootElement.Compound;
+        IReadOnlyCollection<KeyValuePair<string, NbtElement>> pairs = document.RootElement.Compound;
+        using var enumerator = pairs.GetEnumerator();
+        Assert.True(enumerator.MoveNext());
         document.Dispose();
 
+        Assert.Throws<ObjectDisposedException>(() => _ = pairs.Count);
         Assert.Throws<ObjectDisposedException>(() => pairs.GetEnumerator());
+        Assert.Throws<ObjectDisposedException>(() => _ = enumerator.Current);
+        Assert.Throws<ObjectDisposedException>(() => enumerator.MoveNext());
+    }
+
+    [Fact]
+    public void EmptyCompoundReportsZeroMembers()
+    {
+        using var document = NbtDocument.Parse(BuildEmptyCompoundDocument());
+        var compound = document.RootElement.Compound;
+        IReadOnlyCollection<KeyValuePair<string, NbtElement>> pairs = compound;
+
+        Assert.True(pairs.Count == 0);
+        Assert.Empty(compound);
+        using var enumerator = compound.GetEnumerator();
+        Assert.False(enumerator.MoveNext());
+        Assert.Throws<InvalidOperationException>(() => _ = enumerator.Current);
     }
 
     [Theory]
@@ -847,6 +866,8 @@ public sealed class NbtDocumentTests
         Assert.Throws<InvalidOperationException>(() => _ = enumerator.Current);
 
         Assert.Throws<InvalidOperationException>(() => _ = default(NbtCompoundElement.Enumerator).Current);
+        Assert.Throws<InvalidOperationException>(() => default(NbtCompoundElement.Enumerator).MoveNext());
+        Assert.Throws<InvalidOperationException>(() => default(NbtCompoundElement.Enumerator).Reset());
     }
 
     [Fact]
@@ -1573,6 +1594,7 @@ public sealed class NbtDocumentTests
         var document = NbtDocument.Parse(BuildSampleDocument());
         var compound = document.RootElement.Compound;
         using var enumerator = compound.GetEnumerator();
+        Assert.True(enumerator.MoveNext());
         document.Dispose();
 
         Assert.Throws<ObjectDisposedException>(() => _ = compound.Count);
@@ -1832,6 +1854,16 @@ public sealed class NbtDocumentTests
         writer.WriteInt32("Dup", 1);
         writer.WriteInt32("Dup", 2);
         writer.WriteInt32("Other", 3);
+        writer.WriteEndCompound();
+        writer.Complete();
+        return buffer.WrittenSpan.ToArray();
+    }
+
+    private static byte[] BuildEmptyCompoundDocument()
+    {
+        var buffer = new ArrayBufferWriter<byte>();
+        var writer = new NbtWriter(buffer);
+        writer.WriteStartCompound("root");
         writer.WriteEndCompound();
         writer.Complete();
         return buffer.WrittenSpan.ToArray();
