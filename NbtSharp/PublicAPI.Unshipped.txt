@@ -5,6 +5,9 @@
 *REMOVED*NbtSharp.NbtCompoundElement.GetMember(string! name) -> NbtSharp.NbtElement
 *REMOVED*NbtSharp.NbtCompoundElement.TryGetMember(string! name, out NbtSharp.NbtElement value) -> bool
 *REMOVED*NbtSharp.NbtListElement.GetElementAt(int index) -> NbtSharp.NbtElement
+*REMOVED*NbtSharp.NbtCompoundElement.Enumerator.Current.get -> NbtSharp.NbtElement
+*REMOVED*NbtSharp.NbtCompoundElement.Enumerator.Name.get -> string!
+NbtSharp.NbtCompoundElement.Enumerator.Current.get -> System.Collections.Generic.KeyValuePair<string!, NbtSharp.NbtElement>
 NbtSharp.NbtCompoundElement.Count.get -> int
 NbtSharp.NbtCompoundElement.this[string! key].get -> NbtSharp.NbtElement
 NbtSharp.NbtCompoundElement.TryGetValue(string! key, out NbtSharp.NbtElement value) -> bool

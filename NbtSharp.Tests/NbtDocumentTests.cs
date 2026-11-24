@@ -320,7 +320,7 @@ public sealed class NbtDocumentTests
         Assert.Equal("b", list[1].String.GetString());
 
         var compound = RequireMember(root, "Compound").Compound;
-        Assert.Equal(1, compound.Count);
+        Assert.Single(compound);
         Assert.Equal(1, compound["Nested"].Int32);
     }
 
@@ -701,6 +701,80 @@ public sealed class NbtDocumentTests
         Assert.Equal(["Dup", "Dup", "Other"], ReadMemberNames(document.RootElement.Compound));
     }
 
+    [Fact]
+    public void CompoundImplementsPairCollection()
+    {
+        using var document = NbtDocument.Parse(BuildDuplicateMemberDocument());
+        IReadOnlyCollection<KeyValuePair<string, NbtElement>> pairs = document.RootElement.Compound;
+
+        Assert.Equal(3, pairs.Count);
+        Assert.Equal(["Dup", "Dup", "Other"], pairs.Select(static pair => pair.Key).ToArray());
+        Assert.Equal(2, document.RootElement.Compound["Dup"].Int32);
+    }
+
+    [Fact]
+    public void DuplicateMemberPairsPreserveWireOrderAndValues()
+    {
+        using var document = NbtDocument.Parse(BuildDuplicateMemberDocument());
+
+        var pairs = document.RootElement.Compound
+            .Select(static pair => (pair.Key, pair.Value.Int32))
+            .ToArray();
+
+        Assert.Equal([("Dup", 1), ("Dup", 2), ("Other", 3)], pairs);
+    }
+
+    [Fact]
+    public void CompoundEnumeratorDecodesOverlongWireName()
+    {
+        using var document = NbtDocument.Parse(
+            BuildDocumentWithByteMemberName(new byte[] { 0xE0, 0x81, 0x81 }));
+        using var enumerator = document.RootElement.Compound.GetEnumerator();
+
+        Assert.True(enumerator.MoveNext());
+        Assert.Equal("A", enumerator.Current.Key);
+        Assert.Equal(7, enumerator.Current.Value.SByte);
+    }
+
+    [Fact]
+    public void CompoundEnumeratorReportsInvalidWireName()
+    {
+        using var document = NbtDocument.Parse(BuildDocumentWithByteMemberName(new byte[] { 0x80 }));
+        using var enumerator = document.RootElement.Compound.GetEnumerator();
+
+        Assert.True(enumerator.MoveNext());
+        Assert.Throws<NbtException>(() => _ = enumerator.Current);
+    }
+
+    [Fact]
+    public void DisposedCompoundCollectionThrowsOnEnumeration()
+    {
+        var document = NbtDocument.Parse(BuildSampleDocument());
+        IReadOnlyCollection<KeyValuePair<string, NbtElement>> pairs = document.RootElement.Compound;
+        using var enumerator = pairs.GetEnumerator();
+        Assert.True(enumerator.MoveNext());
+        document.Dispose();
+
+        Assert.Throws<ObjectDisposedException>(() => _ = pairs.Count);
+        Assert.Throws<ObjectDisposedException>(() => pairs.GetEnumerator());
+        Assert.Throws<ObjectDisposedException>(() => _ = enumerator.Current);
+        Assert.Throws<ObjectDisposedException>(() => enumerator.MoveNext());
+    }
+
+    [Fact]
+    public void EmptyCompoundReportsZeroMembers()
+    {
+        using var document = NbtDocument.Parse(BuildEmptyCompoundDocument());
+        var compound = document.RootElement.Compound;
+        IReadOnlyCollection<KeyValuePair<string, NbtElement>> pairs = compound;
+
+        Assert.True(pairs.Count == 0);
+        Assert.Empty(compound);
+        using var enumerator = compound.GetEnumerator();
+        Assert.False(enumerator.MoveNext());
+        Assert.Throws<InvalidOperationException>(() => _ = enumerator.Current);
+    }
+
     [Theory]
     [InlineData(new byte[] { 0x00 }, "\0", "\0", true)] // wire raw null
     [InlineData(new byte[] { 0xC0, 0x80 }, "\0", "\0", true)] // wire two-byte null
@@ -755,8 +829,8 @@ public sealed class NbtDocumentTests
         using var enumerator = root.GetEnumerator();
         while (enumerator.MoveNext())
         {
-            names.Add(enumerator.Name);
-            types.Add(enumerator.Current.TagType);
+            names.Add(enumerator.Current.Key);
+            types.Add(enumerator.Current.Value.TagType);
         }
 
         Assert.Equal(["Health", "Temperature", "Name", "Numbers"], names.ToArray());
@@ -764,9 +838,49 @@ public sealed class NbtDocumentTests
 
         enumerator.Reset();
         Assert.True(enumerator.MoveNext());
-        Assert.Equal("Health", enumerator.Name);
-        Assert.Equal("Health", enumerator.Name);
-        Assert.Equal(NbtTagType.Int, enumerator.Current.TagType);
+        Assert.Equal("Health", enumerator.Current.Key);
+        Assert.Equal("Health", enumerator.Current.Key);
+        Assert.Equal(NbtTagType.Int, enumerator.Current.Value.TagType);
+    }
+
+    [Fact]
+    public void CompoundEnumeratorCurrentRequiresPosition()
+    {
+        using var document = NbtDocument.Parse(BuildSampleDocument());
+        using var enumerator = document.RootElement.Compound.GetEnumerator();
+
+        Assert.Throws<InvalidOperationException>(() => _ = enumerator.Current);
+
+        Assert.True(enumerator.MoveNext());
+        Assert.Equal("Health", enumerator.Current.Key);
+
+        for (var i = 0; i < 3; i++)
+        {
+            Assert.True(enumerator.MoveNext());
+        }
+
+        Assert.False(enumerator.MoveNext());
+        Assert.Throws<InvalidOperationException>(() => _ = enumerator.Current);
+
+        enumerator.Reset();
+        Assert.Throws<InvalidOperationException>(() => _ = enumerator.Current);
+
+        Assert.Throws<InvalidOperationException>(() => _ = default(NbtCompoundElement.Enumerator).Current);
+        Assert.Throws<InvalidOperationException>(() => default(NbtCompoundElement.Enumerator).MoveNext());
+        Assert.Throws<InvalidOperationException>(() => default(NbtCompoundElement.Enumerator).Reset());
+    }
+
+    [Fact]
+    public void CompoundEnumeratorSupportsNonGenericCurrent()
+    {
+        using var document = NbtDocument.Parse(BuildSampleDocument());
+        using var enumerator = document.RootElement.Compound.GetEnumerator();
+        IEnumerator boxed = enumerator;
+
+        Assert.True(boxed.MoveNext());
+        var pair = Assert.IsType<KeyValuePair<string, NbtElement>>(boxed.Current);
+        Assert.Equal("Health", pair.Key);
+        Assert.Equal(20, pair.Value.Int32);
     }
 
     [Fact]
@@ -779,7 +893,7 @@ public sealed class NbtDocumentTests
         Assert.Equal(["A", "Items", "B"], ReadMemberNames(root));
 
         var nested = root["A"].Compound;
-        Assert.Equal(1, nested.Count);
+        Assert.Single(nested);
         Assert.Equal(["x"], ReadMemberNames(nested));
         Assert.Equal(1, nested["x"].Int32);
         Assert.Equal(9, root["B"].Int32);
@@ -900,7 +1014,7 @@ public sealed class NbtDocumentTests
         Assert.Equal(3, items.Count);
 
         var first = items[0].Compound;
-        Assert.Equal(1, first.Count);
+        Assert.Single(first);
         Assert.Equal(10, first["x"].Int32);
         Assert.Equal(20, items[1].Compound["y"].Int32);
         Assert.Equal(30, items[2].Compound["x"].Int32);
@@ -1019,7 +1133,7 @@ public sealed class NbtDocumentTests
         while (enumerator.MoveNext())
         {
             count++;
-            nameLength += enumerator.Name.Length;
+            nameLength += enumerator.Current.Key.Length;
         }
 
         Assert.Equal(root.Count, count);
@@ -1480,6 +1594,7 @@ public sealed class NbtDocumentTests
         var document = NbtDocument.Parse(BuildSampleDocument());
         var compound = document.RootElement.Compound;
         using var enumerator = compound.GetEnumerator();
+        Assert.True(enumerator.MoveNext());
         document.Dispose();
 
         Assert.Throws<ObjectDisposedException>(() => _ = compound.Count);
@@ -1487,7 +1602,7 @@ public sealed class NbtDocumentTests
         Assert.Throws<ObjectDisposedException>(() => compound["Health"]);
         Assert.Throws<ObjectDisposedException>(() => compound.GetEnumerator());
         Assert.Throws<ObjectDisposedException>(() => enumerator.MoveNext());
-        Assert.Throws<ObjectDisposedException>(() => _ = enumerator.Name);
+        Assert.Throws<ObjectDisposedException>(() => _ = enumerator.Current.Key);
     }
 
     [Fact]
@@ -1569,7 +1684,7 @@ public sealed class NbtDocumentTests
         using var enumerator = compound.GetEnumerator();
         while (enumerator.MoveNext())
         {
-            names[index++] = enumerator.Name;
+            names[index++] = enumerator.Current.Key;
         }
 
         return names;
@@ -1583,7 +1698,7 @@ public sealed class NbtDocumentTests
             using var enumerator = element.Compound.GetEnumerator();
             while (enumerator.MoveNext())
             {
-                names.Add(enumerator.Name);
+                names.Add(enumerator.Current.Key);
             }
         }
 
@@ -1739,6 +1854,16 @@ public sealed class NbtDocumentTests
         writer.WriteInt32("Dup", 1);
         writer.WriteInt32("Dup", 2);
         writer.WriteInt32("Other", 3);
+        writer.WriteEndCompound();
+        writer.Complete();
+        return buffer.WrittenSpan.ToArray();
+    }
+
+    private static byte[] BuildEmptyCompoundDocument()
+    {
+        var buffer = new ArrayBufferWriter<byte>();
+        var writer = new NbtWriter(buffer);
+        writer.WriteStartCompound("root");
         writer.WriteEndCompound();
         writer.Complete();
         return buffer.WrittenSpan.ToArray();

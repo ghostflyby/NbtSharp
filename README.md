@@ -369,14 +369,16 @@ of compounds or nested lists; the compound indexer and `TryGetValue` walk the me
 duplicated names resolving to the last occurrence. Typed getters can be called repeatedly — unlike
 the reader, they do not consume anything. Compound lookup compares names by decoded value, decoding
 wire names into stack buffers or pooled buffers for long names; `NbtStringElement.GetString` decodes
-the payload on every access, and invalid bytes throw at that point rather than at parse time. Lists,
-compounds, strings, and arrays are zero-allocation views over the slot index; `ToArray` and
-`GetString` materialize only when called.
+the payload on every access, and invalid bytes throw at that point rather than at parse time. Lists and
+compounds are views over the slot index; strings and arrays are views over their payload bytes.
+`ToArray` and `GetString` materialize only when called, and compound pair enumeration decodes each
+member name.
 
 `NbtListElement` implements `IReadOnlyList<NbtElement>`; interface enumeration boxes the struct
-enumerator, while direct `foreach` over the view stays allocation-free. `NbtCompoundElement` is a
-wire-order view: duplicate names are preserved by `Count` and enumeration, while the indexer and
-`TryGetValue` resolve the last occurrence, so it does not implement `IReadOnlyDictionary`.
+enumerator, while direct `foreach` over the view stays allocation-free. `NbtCompoundElement`
+implements `IReadOnlyCollection<KeyValuePair<string, NbtElement>>`: enumeration is wire-order and
+preserves duplicate names, materializing each name as the pair key. Its indexer and `TryGetValue`
+resolve the last occurrence; it is not `IReadOnlyDictionary`.
 
 ## Converters
 

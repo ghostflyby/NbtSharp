@@ -3,21 +3,22 @@ using System.Collections;
 namespace NbtSharp;
 
 /// <summary>
-/// A <c>TAG_Compound</c> value: a zero-allocation view over the document's slot index.
+/// A <c>TAG_Compound</c> value: a read-only view over the document's slot index.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Members are produced on demand as <see cref="NbtElement"/> values; nothing is materialized and
-/// the view allocates nothing while navigating. The view stays valid only while its document is
-/// alive and undisposed.
+/// Members are produced on demand as <see cref="NbtElement"/> values; no member tree is
+/// materialized. Count, the indexer, and <see cref="TryGetValue"/> do not allocate. Enumeration yields
+/// <see cref="KeyValuePair{TKey,TValue}"/> in wire order and decodes each member name to form the
+/// pair key. The view stays valid only while its document is alive and undisposed.
 /// </para>
 /// <para>
-/// This is a wire-order view: duplicate member names are preserved by <see cref="Count"/> and
-/// enumeration, while the indexer and <see cref="TryGetValue"/> resolve the last occurrence. It
-/// therefore does not implement <see cref="IReadOnlyDictionary{TKey,TValue}"/>.
+/// Duplicate member names are preserved by <see cref="Count"/> and enumeration, while the indexer
+/// and <see cref="TryGetValue"/> resolve the last occurrence. The view is an enumerable collection
+/// of pairs, not <see cref="IReadOnlyDictionary{TKey,TValue}"/>.
 /// </para>
 /// </remarks>
-public readonly struct NbtCompoundElement
+public readonly struct NbtCompoundElement : IReadOnlyCollection<KeyValuePair<string, NbtElement>>
 {
     internal NbtCompoundElement(NbtDocument owner, int slotIndex)
     {
@@ -32,6 +33,7 @@ public readonly struct NbtCompoundElement
     internal int SlotIndex { get; }
 
     /// <summary>Gets the number of members.</summary>
+    /// <exception cref="InvalidOperationException">The view is default-initialized.</exception>
     /// <exception cref="NbtException">The document slot is not a compound.</exception>
     /// <exception cref="ObjectDisposedException">The owning document has been disposed.</exception>
     public int Count
@@ -48,6 +50,7 @@ public readonly struct NbtCompoundElement
     /// <returns>The member.</returns>
     /// <remarks>When the key occurs more than once, the last occurrence wins.</remarks>
     /// <exception cref="ArgumentNullException"><paramref name="key"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">The view is default-initialized.</exception>
     /// <exception cref="KeyNotFoundException">No member has the specified key.</exception>
     /// <exception cref="NbtException">The document slot is not a compound.</exception>
     /// <exception cref="ObjectDisposedException">The owning document has been disposed.</exception>
@@ -75,6 +78,7 @@ public readonly struct NbtCompoundElement
     /// strings are allocated. When the key occurs more than once, the last occurrence wins.
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="key"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">The view is default-initialized.</exception>
     /// <exception cref="NbtException">
     /// The document slot is not a compound, or a wire name is not valid modified UTF-8.
     /// </exception>
@@ -112,6 +116,7 @@ public readonly struct NbtCompoundElement
 
     /// <summary>Gets an enumerator over the members in wire order.</summary>
     /// <returns>The enumerator.</returns>
+    /// <exception cref="InvalidOperationException">The view is default-initialized.</exception>
     /// <exception cref="NbtException">The document slot is not a compound.</exception>
     /// <exception cref="ObjectDisposedException">The owning document has been disposed.</exception>
     public Enumerator GetEnumerator()
@@ -119,6 +124,11 @@ public readonly struct NbtCompoundElement
         _ = ExpectSlot();
         return new Enumerator(Document, SlotIndex);
     }
+
+    IEnumerator<KeyValuePair<string, NbtElement>> IEnumerable<KeyValuePair<string, NbtElement>>.GetEnumerator() =>
+        GetEnumerator();
+
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
     private NbtDocument Document => Owner ?? throw new InvalidOperationException(
         "The operation is not valid for a default-initialized NbtCompoundElement.");
@@ -142,10 +152,10 @@ public readonly struct NbtCompoundElement
 
     /// <summary>Enumerates the members of a compound in wire order.</summary>
     /// <remarks>
-    /// <see cref="Current"/> produces the member value; <see cref="Name"/> decodes the member name
-    /// on demand, so enumerations that do not read names stay allocation-free.
+    /// <see cref="Current"/> produces a <see cref="KeyValuePair{TKey,TValue}"/> whose key is the
+    /// decoded member name.
     /// </remarks>
-    public struct Enumerator : IEnumerator<NbtElement>
+    public struct Enumerator : IEnumerator<KeyValuePair<string, NbtElement>>
     {
         private readonly NbtDocument _document;
         private readonly int _parentSlot;
@@ -166,20 +176,49 @@ public readonly struct NbtCompoundElement
             _current = default;
         }
 
-        /// <summary>Gets the current member value.</summary>
-        public NbtElement Current => _current;
+        /// <summary>Gets the current member pair.</summary>
+        /// <exception cref="InvalidOperationException">
+        /// The enumerator is not positioned on a member, or is default-initialized.
+        /// </exception>
+        /// <exception cref="ObjectDisposedException">The owning document has been disposed.</exception>
+        /// <exception cref="NbtException">The current member name is not valid modified UTF-8.</exception>
+        public KeyValuePair<string, NbtElement> Current
+        {
+            get
+            {
+                if (_document is null)
+                {
+                    throw new InvalidOperationException("The enumerator is not positioned on an element.");
+                }
 
-        /// <summary>Gets the current member name.</summary>
-        public string Name => _document.NameAt(_currentSlot);
+                _document.ThrowIfDisposed();
+                if (_currentSlot < 0)
+                {
+                    throw new InvalidOperationException("The enumerator is not positioned on an element.");
+                }
 
-        object IEnumerator.Current => _current;
+                return new(_document.NameAt(_currentSlot), _current);
+            }
+        }
+
+        object IEnumerator.Current => Current;
 
         /// <summary>Advances to the next member.</summary>
         /// <returns><see langword="false"/> when the enumeration is complete.</returns>
+        /// <exception cref="InvalidOperationException">The enumerator is default-initialized.</exception>
+        /// <exception cref="ObjectDisposedException">The owning document has been disposed.</exception>
         public bool MoveNext()
         {
+            if (_document is null)
+            {
+                throw new InvalidOperationException("The enumerator is not initialized.");
+            }
+
             if (_index + 1 >= _count)
             {
+                _index = _count;
+                _currentSlot = -1;
+                _current = default;
                 return false;
             }
 
@@ -191,8 +230,14 @@ public readonly struct NbtCompoundElement
         }
 
         /// <summary>Resets the enumerator to the start of the compound.</summary>
+        /// <exception cref="InvalidOperationException">The enumerator is default-initialized.</exception>
         public void Reset()
         {
+            if (_document is null)
+            {
+                throw new InvalidOperationException("The enumerator is not initialized.");
+            }
+
             _index = -1;
             _childSlot = _parentSlot + 1;
             _currentSlot = -1;

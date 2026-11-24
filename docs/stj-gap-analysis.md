@@ -192,8 +192,9 @@ of large files and decode-free re-emit in converters.
 **Status (2026-11-22): implemented on feat/stj-gap-p1.** `NbtDocument`/`NbtElement` provide the
 pooled read-only DOM: a single-pass indexer that validates the whole document at parse time, with
 `Parse` over memory (zero-copy), sequences, and streams, lazy name decoding, name matching by
-decoded value with stack or pooled char buffers, O(1) counts, and zero-allocation list, compound,
-string, and array views. The raw pass-through half is still open for converters; the `GetRawBytes`
+decoded value with stack or pooled char buffers, O(1) counts, zero-allocation list, string, and
+array views, and a compound view whose lookup is allocation-free while pair enumeration decodes
+each member name. The raw pass-through half is still open for converters; the `GetRawBytes`
 hook is in place as an internal API, ready to expose when converter capture lands.
 
 **G-DOM-2 — reference preservation and cycle handling.** Priority: P3.
